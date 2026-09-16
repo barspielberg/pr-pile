@@ -9,6 +9,7 @@ import (
 	"github.com/barspielberg/prs-mng/internal/board"
 	"github.com/barspielberg/prs-mng/internal/config"
 	"github.com/barspielberg/prs-mng/internal/github"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 )
@@ -483,5 +484,85 @@ func TestFilterMatchesAuthor(t *testing.T) {
 		if i >= len([]rune(rows[0].PR.Title)) {
 			t.Errorf("highlight index %d is outside the title", i)
 		}
+	}
+}
+
+// A row should move only when a value changes, never because a request
+// finished. An empty section that collapsed from placeholder to a single "—"
+// on load shifted every section below it.
+func TestEmptySectionKeepsItsHeightOnLoad(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 40
+
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Now()},
+	}})
+	loading := strings.Count(m.View(), "\n")
+
+	// Section 2 resolves with nothing in it.
+	m.board.Apply(board.Result{Index: 1})
+	if got := strings.Count(m.View(), "\n"); got != loading {
+		t.Errorf("board height changed when an empty section landed: %d -> %d", loading, got)
+	}
+}
+
+// The same must hold for every section resolving in turn, empty or not.
+func TestSectionsLandingDoNotShiftTheBoard(t *testing.T) {
+	cfg := testCfg()
+	cfg.Rules = append(cfg.Rules, config.Rule{Name: "Third", Query: "x"})
+	m := New(cfg, nil)
+	m.width, m.height = 120, 50
+
+	heights := []int{strings.Count(m.View(), "\n")}
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Now()},
+	}})
+	heights = append(heights, strings.Count(m.View(), "\n"))
+	m.board.Apply(board.Result{Index: 1})
+	heights = append(heights, strings.Count(m.View(), "\n"))
+	m.board.Apply(board.Result{Index: 2})
+	heights = append(heights, strings.Count(m.View(), "\n"))
+
+	for i := 1; i < len(heights); i++ {
+		if heights[i] != heights[0] {
+			t.Errorf("height changed at step %d: %v", i, heights)
+			break
+		}
+	}
+}
+
+// esc and q close the help overlay rather than quitting: opening help must
+// never cost the user their session by reflex.
+func TestHelpOverlayClosesWithoutQuitting(t *testing.T) {
+	for _, key := range []string{"esc", "q", "?", "j"} {
+		m := New(testCfg(), nil)
+		m.width, m.height = 100, 30
+		m.showHelp = true
+
+		got, cmd := m.handleKey(keyOf(key))
+		if cmd != nil {
+			t.Errorf("%q from help should not issue a command (quit?)", key)
+		}
+		if got.(Model).showHelp {
+			t.Errorf("%q should close the help overlay", key)
+		}
+	}
+
+	// ctrl+c still quits from anywhere.
+	m := New(testCfg(), nil)
+	m.showHelp = true
+	if _, cmd := m.handleKey(keyOf("ctrl+c")); cmd == nil {
+		t.Error("ctrl+c should still quit from the help overlay")
+	}
+}
+
+func keyOf(s string) tea.KeyMsg {
+	switch s {
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "ctrl+c":
+		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	default:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
 }

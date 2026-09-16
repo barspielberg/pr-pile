@@ -53,7 +53,7 @@ func Default() Config {
 		Refresh: 3 * time.Minute,
 		Rules: []Rule{
 			{Name: "Mine", Query: "author:@me", Limit: 50, Tree: true},
-			{Name: "Review requested", Query: "review-requested:@me", Limit: 50, Author: true},
+			{Name: "Needs my review", Query: "review-requested:@me -review:approved", Limit: 50, Author: true},
 			{Name: "Involved", Query: "involves:@me -author:@me", Limit: 20, Author: true},
 			{Name: "All open", Query: "draft:false", Limit: 20, Author: true},
 		},
@@ -77,8 +77,10 @@ rules:
     tree: true          # group stacked PRs into a chain
     limit: 50
 
-  - name: Review requested
-    query: review-requested:@me
+  # -review:approved drops PRs somebody else has already approved. Note that
+  # GitHub removes a PR from review-requested:@me once *you* approve it.
+  - name: Needs my review
+    query: review-requested:@me -review:approved
     author: true        # show the author's initials; pointless where it is you
     limit: 50
 
