@@ -374,3 +374,41 @@ func TestRefreshDoesNotChangeLayout(t *testing.T) {
 		t.Error("board did not return to the same frame after an identical refetch")
 	}
 }
+
+// A short board must not let the footer float up the screen: the prompt and
+// footer belong on the bottom edge whether there are two rows or fifty.
+func TestFooterStaysPinnedToTheBottom(t *testing.T) {
+	for _, n := range []int{1, 3, 40} {
+		m := New(testCfg(), nil)
+		m.width, m.height = 120, 24
+
+		var prs []github.PR
+		for i := 0; i < n; i++ {
+			prs = append(prs, github.PR{
+				Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
+				CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+			})
+		}
+		m.board.Apply(board.Result{Index: 0, PRs: prs})
+		m.board.Apply(board.Result{Index: 1})
+
+		lines := strings.Split(m.View(), "\n")
+		if len(lines) != m.height {
+			t.Errorf("%d rows: view is %d lines, want exactly %d", n, len(lines), m.height)
+		}
+		if last := stripANSI(lines[len(lines)-1]); !strings.Contains(last, "quit") {
+			t.Errorf("%d rows: last line is not the footer: %q", n, last)
+		}
+
+		// And the same while filtering, where the prompt is a second chrome row.
+		m.filtering = true
+		m.filter = "pr"
+		flines := strings.Split(m.View(), "\n")
+		if len(flines) != m.height {
+			t.Errorf("%d rows filtered: view is %d lines, want %d", n, len(flines), m.height)
+		}
+		if got := stripANSI(flines[len(flines)-2]); !strings.Contains(got, "/") {
+			t.Errorf("%d rows filtered: prompt not directly above the footer: %q", n, got)
+		}
+	}
+}
