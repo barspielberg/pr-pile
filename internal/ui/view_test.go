@@ -775,3 +775,53 @@ func TestSelectedRowDetailLineStaysVisible(t *testing.T) {
 		t.Errorf("the selected row's detail line is below the fold:\n%s", out)
 	}
 }
+
+// Rows are one or two lines tall and sections add blank lines, so a viewport
+// offset measured in lines made every keypress scroll a different distance and
+// could leave an orphaned detail line at the top. The viewport must always
+// start on a whole unit.
+func TestScrollAlwaysStartsOnAWholeRow(t *testing.T) {
+	for _, height := range []int{8, 10, 16, 24, 40} {
+		for _, failEvery := range []int{0, 2, 3} {
+			m := New(testCfg(), nil)
+			m.width, m.height = 120, height
+
+			mk := func(base, n int) []github.PR {
+				var out []github.PR
+				for i := 0; i < n; i++ {
+					pr := github.PR{
+						Number: base + i, Title: fmt.Sprintf("pr %d", base+i),
+						CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+					}
+					if failEvery > 0 && i%failEvery == 0 {
+						pr.CIState, pr.FailedGates = "FAILURE", []string{"a-failing-gate"}
+					}
+					out = append(out, pr)
+				}
+				return out
+			}
+			m.board.Apply(board.Result{Index: 0, PRs: mk(100, 12)})
+			m.board.Apply(board.Result{Index: 1, PRs: mk(200, 12)})
+
+			for cursor := 0; cursor < 24; cursor++ {
+				m.cursor = cursor
+				view := m.View()
+
+				var top string
+				for _, l := range strings.Split(view, "\n") {
+					if s := strings.TrimSpace(stripANSI(l)); s != "" {
+						top = s
+						break
+					}
+				}
+				if strings.HasPrefix(top, "└") {
+					t.Errorf("h=%d fail=%d cursor=%d: viewport starts on an orphaned detail line: %q",
+						height, failEvery, cursor, top)
+				}
+				if !strings.Contains(view, "▌") {
+					t.Errorf("h=%d fail=%d cursor=%d: cursor is off screen", height, failEvery, cursor)
+				}
+			}
+		}
+	}
+}
