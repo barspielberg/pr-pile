@@ -22,6 +22,9 @@ type Section struct {
 	State State
 	Err   error
 	Rows  []Row
+	// Stale marks rows carried over from the previous fetch. They stay on
+	// screen so the board does not collapse and re-expand while refreshing.
+	Stale bool
 }
 
 // Row is a PR plus its place in a stack. Depth and tree glyphs are display
@@ -53,6 +56,20 @@ func New(cfg config.Config) *Board {
 		b.sections[i] = Section{Rule: r, State: Pending}
 	}
 	return b
+}
+
+// Refetch clears the results but keeps the rendered rows in place, marked
+// stale. Rebuilding from empty would collapse the board and then re-expand it
+// section by section, jumping every row below each one that resolves.
+func (b *Board) Refetch() {
+	for i := range b.results {
+		b.results[i] = nil
+	}
+	for i := range b.sections {
+		s := &b.sections[i]
+		s.State, s.Err = Pending, nil
+		s.Stale = len(s.Rows) > 0
+	}
 }
 
 func (b *Board) Apply(res Result) {
@@ -90,14 +107,17 @@ func (b *Board) rebuild() {
 	for i := range b.sections {
 		s := &b.sections[i]
 		if i >= frontier {
-			s.State, s.Rows, s.Err = Pending, nil, nil
+			// Keep whatever is already drawn: blanking here is what makes the
+			// board jump as later sections resolve.
+			s.State, s.Err = Pending, nil
+			s.Stale = len(s.Rows) > 0
 			continue
 		}
 		res := b.results[i]
 		if res.Err != nil {
 			// A failed rule cannot claim anything, so later rules may show PRs
 			// this one would have taken. Better than stalling the whole board.
-			s.State, s.Err, s.Rows = Failed, res.Err, nil
+			s.State, s.Err, s.Rows, s.Stale = Failed, res.Err, nil, false
 			continue
 		}
 		var own []github.PR
@@ -108,7 +128,7 @@ func (b *Board) rebuild() {
 			claimed[pr.Number] = true
 			own = append(own, pr)
 		}
-		s.State, s.Err = Ready, nil
+		s.State, s.Err, s.Stale = Ready, nil, false
 		s.Rows = layout(own, s.Rule.Tree)
 	}
 }
