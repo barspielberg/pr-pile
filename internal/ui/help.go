@@ -18,6 +18,7 @@ func (m Model) helpOverlay() string {
 	b.WriteString(headerStyle.Render("  KEYS") + "\n")
 	for _, k := range [][2]string{
 		{"j / k", "move"},
+		{"l / h", "next / previous section"},
 		{"g / G", "top / bottom"},
 		{"enter", "open in browser"},
 		{"/", "filter"},

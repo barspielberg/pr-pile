@@ -600,3 +600,82 @@ func keyOf(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
 }
+
+func TestSectionJumpNavigation(t *testing.T) {
+	cfg := testCfg()
+	cfg.Rules = append(cfg.Rules, config.Rule{Name: "Third", Query: "x"})
+	m := New(cfg, nil)
+	m.width, m.height = 120, 40
+
+	mk := func(base, n int) []github.PR {
+		var out []github.PR
+		for i := 0; i < n; i++ {
+			out = append(out, github.PR{Number: base + i, Title: "t", UpdatedAt: time.Unix(int64(9000-i), 0)})
+		}
+		return out
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: mk(100, 3)})
+	m.board.Apply(board.Result{Index: 1, PRs: mk(200, 4)})
+	m.board.Apply(board.Result{Index: 2, PRs: mk(300, 2)})
+
+	// Section boundaries in cursor space: 0, 3, 7.
+	if got := m.sectionStarts(); len(got) != 3 || got[0] != 0 || got[1] != 3 || got[2] != 7 {
+		t.Fatalf("section starts = %v, want [0 3 7]", got)
+	}
+
+	press := func(key string) {
+		mm, _ := m.handleKey(keyOf(key))
+		m = mm.(Model)
+	}
+
+	press("l")
+	if m.cursor != 3 {
+		t.Errorf("l from 0 should land on 3, got %d", m.cursor)
+	}
+	press("l")
+	if m.cursor != 7 {
+		t.Errorf("l should land on 7, got %d", m.cursor)
+	}
+	// Past the last section, l stops at the final row rather than wrapping.
+	press("l")
+	if want := len(m.visibleRows()) - 1; m.cursor != want {
+		t.Errorf("l at the end should stop at %d, got %d", want, m.cursor)
+	}
+
+	// h returns to the start of the current section, then steps back.
+	m.cursor = 9
+	press("h")
+	if m.cursor != 7 {
+		t.Errorf("h should land on the current section start 7, got %d", m.cursor)
+	}
+	press("h")
+	if m.cursor != 3 {
+		t.Errorf("h should step back to 3, got %d", m.cursor)
+	}
+	press("h")
+	press("h")
+	if m.cursor != 0 {
+		t.Errorf("h at the top should stay at 0, got %d", m.cursor)
+	}
+}
+
+// An empty section has no row to land on, so it must be skipped rather than
+// leaving the cursor somewhere that renders nothing.
+func TestSectionJumpSkipsEmptySections(t *testing.T) {
+	cfg := testCfg()
+	cfg.Rules = append(cfg.Rules, config.Rule{Name: "Third", Query: "x"})
+	m := New(cfg, nil)
+	m.width, m.height = 120, 40
+
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 1, UpdatedAt: time.Now()}}})
+	m.board.Apply(board.Result{Index: 1})
+	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{{Number: 2, UpdatedAt: time.Now()}}})
+
+	if got := m.sectionStarts(); len(got) != 2 {
+		t.Fatalf("empty section should not be a jump target: %v", got)
+	}
+	mm, _ := m.handleKey(keyOf("l"))
+	if got := mm.(Model).cursor; got != 1 {
+		t.Errorf("l should skip the empty section and land on 1, got %d", got)
+	}
+}
