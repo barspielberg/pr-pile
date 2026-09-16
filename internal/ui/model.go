@@ -27,6 +27,9 @@ type Model struct {
 	spinner       int
 	status        string
 	fetching      bool
+
+	filtering bool
+	filter    string
 }
 
 type resultMsg board.Result
@@ -120,10 +123,81 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(append(m.fetchAll(), spinTick())...)
 }
 
+// In filter mode every printable key belongs to the query, so navigation has to
+// move to chords. ctrl+n/p is what the user asked for; ctrl+j/k and the arrows
+// are the same motions under the other two conventions.
+func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		return m.exitFilter(), nil
+	case "ctrl+n", "ctrl+j", "down":
+		m.cursor++
+		m.clampCursor()
+		return m, nil
+	case "ctrl+p", "ctrl+k", "up":
+		m.cursor--
+		m.clampCursor()
+		return m, nil
+	case "enter":
+		cmd := m.openSelected()
+		return m.exitFilter(), cmd
+	case "ctrl+u":
+		m.filter = ""
+	case "backspace":
+		if r := []rune(m.filter); len(r) > 0 {
+			m.filter = string(r[:len(r)-1])
+		}
+	default:
+		// Space arrives as its own key type with no runes attached, so it has
+		// to be spelled out or multi-word queries would silently drop it.
+		switch {
+		case msg.Type == tea.KeySpace:
+			m.filter += " "
+		case msg.Type == tea.KeyRunes && len(msg.Runes) > 0:
+			m.filter += string(msg.Runes)
+		default:
+			return m, nil
+		}
+	}
+	// The match set shrinks as the query grows, so the cursor can fall off the
+	// end between keystrokes.
+	m.clampCursor()
+	return m, nil
+}
+
+func (m Model) exitFilter() Model {
+	m.filtering = false
+	m.filter = ""
+	m.clampCursor()
+	return m
+}
+
+func (m Model) openSelected() tea.Cmd {
+	pr, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	url := pr.URL
+	return func() tea.Msg {
+		if err := browser.Open(url); err != nil {
+			return statusMsg("open failed: " + err.Error())
+		}
+		return statusMsg("")
+	}
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filtering {
+		return m.handleFilterKey(msg)
+	}
 	switch msg.String() {
 	case "q", "ctrl+c", "esc":
 		return m, tea.Quit
+	case "/":
+		m.filtering = true
+		return m, nil
 	case "j", "down":
 		m.cursor++
 		m.clampCursor()
@@ -138,14 +212,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return m.refresh()
 	case "enter", "o":
-		if pr, ok := m.selected(); ok {
-			url := pr.URL
-			return m, func() tea.Msg {
-				if err := browser.Open(url); err != nil {
-					return statusMsg("open failed: " + err.Error())
-				}
-				return statusMsg("")
-			}
+		if cmd := m.openSelected(); cmd != nil {
+			return m, cmd
 		}
 	default:
 		// User-configured actions are matched last so they cannot shadow
@@ -206,11 +274,39 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	return b.String(), err
 }
 
+// query is the active filter, empty when not filtering. Reading it in one place
+// keeps visibleRows and body from ever disagreeing about what is on screen.
+func (m Model) query() string {
+	if !m.filtering {
+		return ""
+	}
+	return m.filter
+}
+
+// sections applies the filter to the board's own sections. A section whose rows
+// all fail the query is dropped entirely, header included: while filtering the
+// point is to narrow, and an empty header is noise.
+func (m Model) sections() []board.Section {
+	q := m.query()
+	if q == "" {
+		return m.board.Sections()
+	}
+	var out []board.Section
+	for _, s := range m.board.Sections() {
+		s.Rows = filterSection(s.Rows, q)
+		if len(s.Rows) == 0 {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 // visibleRows flattens the drawable sections so the cursor can move across
 // section boundaries without knowing about them.
 func (m Model) visibleRows() []board.Row {
 	var rows []board.Row
-	for _, s := range m.board.Sections() {
+	for _, s := range m.sections() {
 		// Stale rows are drawn, so they must be navigable too.
 		rows = append(rows, s.Rows...)
 	}
@@ -247,7 +343,8 @@ func (m *Model) clampCursor() {
 func (m Model) body(spin string) (lines []string, cursorLine int) {
 	cursorLine = -1
 	idx := 0
-	for _, s := range m.board.Sections() {
+	filtering := m.query() != ""
+	for _, s := range m.sections() {
 		switch s.State {
 		case board.Pending:
 			// A section that already has rows keeps them, so only the count in
@@ -262,8 +359,9 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 			}
 			// On a cold start there is nothing to keep, so hold a placeholder
 			// block instead: without it each section that lands pushes every
-			// header below it down the screen.
-			if len(s.Rows) == 0 {
+			// header below it down the screen. While filtering the board is
+			// deliberately narrowing, so reserving space fights the point.
+			if len(s.Rows) == 0 && !filtering {
 				for range make([]struct{}, m.placeholderRows(s.Rule)) {
 					lines = append(lines, "")
 				}
@@ -343,8 +441,38 @@ func window(lines []string, cursorLine, height int) []string {
 
 // The footer carries the repo and the spinner, so no global header row is
 // needed: in a 20-row pane every chrome row costs a PR.
+// promptLine is the filter's own row, drawn directly above the footer. The
+// match count sits on the right where the footer already puts its right-hand
+// field, so the two chrome rows share one alignment.
+func (m Model) promptLine() string {
+	n := len(m.visibleRows())
+	right := fmt.Sprintf("%d matches", n)
+	if n == 1 {
+		right = "1 match"
+	}
+
+	const prefix = "  / "
+	// The query keeps the tail rather than the head: while typing, the end of
+	// what you just entered is the part you are looking at.
+	field := m.filter + "▏"
+	budget := m.width - lipgloss.Width(prefix) - lipgloss.Width(right) - 2
+	if budget < 1 {
+		// No honest room for the count at this width, so drop it.
+		return accentStyle.Render(prefix) +
+			fgStyle.Render(clipLeft(field, max(0, m.width-lipgloss.Width(prefix))))
+	}
+	field = clipLeft(field, budget)
+
+	gap := budget - lipgloss.Width(field)
+	return accentStyle.Render(prefix) + fgStyle.Render(field) +
+		strings.Repeat(" ", gap) + mutedStyle.Render(right+"  ")
+}
+
 func (m Model) footer(spin string) string {
-	left := "  j/k move · enter open · r reload · q quit"
+	left := "  j/k move · enter open · / filter · r reload · q quit"
+	if m.filtering {
+		left = "  ctrl+n/p move · enter open · esc clear"
+	}
 	if m.status != "" {
 		left = "  " + m.status
 	}
@@ -370,9 +498,16 @@ func (m Model) View() string {
 	}
 
 	foot := m.footer(spin)
+	chrome := 1
+	if m.filtering {
+		// The prompt is a second chrome row, so the body has one line less.
+		foot = m.promptLine() + "\n" + foot
+		chrome = 2
+	}
+
 	lines, cursorLine := m.body(spin)
 	if m.height > 0 {
-		lines = window(lines, cursorLine, m.height-1)
+		lines = window(lines, cursorLine, m.height-chrome)
 	}
 	return strings.Join(lines, "\n") + "\n" + foot
 }

@@ -131,7 +131,9 @@ func blockerCell(pr github.PR) (string, lipgloss.Style) {
 	}
 }
 
-// age renders the largest single unit, right-aligned so digits line up.
+// age renders the largest single unit, right-aligned so digits line up. The
+// column is budgeted at 3 cells, so a week count that needs more than two
+// digits saturates rather than widening the row and pushing it past the frame.
 func age(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -145,7 +147,10 @@ func age(t time.Time) string {
 	case d < 7*24*time.Hour:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	default:
-		return fmt.Sprintf("%dw", int(d.Hours()/(24*7)))
+		if w := int(d.Hours() / (24 * 7)); w < 100 {
+			return fmt.Sprintf("%dw", w)
+		}
+		return "99+"
 	}
 }
 
@@ -167,6 +172,24 @@ func clip(s string, w int) string {
 		b.WriteRune(r)
 	}
 	return b.String() + "…"
+}
+
+// clipLeft drops from the front, keeping the tail visible. The filter query
+// grows at its end, so that is the end worth keeping on screen.
+func clipLeft(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	r := []rune(s)
+	for i := range r {
+		if lipgloss.Width(string(r[i:])) <= w {
+			return string(r[i:])
+		}
+	}
+	return ""
 }
 
 func pad(s string, w int) string {
@@ -231,10 +254,10 @@ func (m Model) renderRow(r board.Row, selected bool) string {
 	}
 	b.WriteString(paint(blockerStyle).Render(blocker))
 	b.WriteString(paint(fgStyle).Render(" "))
-	b.WriteString(paint(titleStyle).Render(pad(clip(r.PR.Title, tw), tw)))
+	b.WriteString(m.renderTitle(r, titleStyle, paint, tw))
 	if t == tierFull {
 		b.WriteString(paint(fgStyle).Render(" "))
-		b.WriteString(paint(mutedStyle).Render(padLeft(age(r.PR.UpdatedAt), 3)))
+		b.WriteString(paint(mutedStyle).Render(padLeft(clip(age(r.PR.UpdatedAt), 3), 3)))
 	}
 
 	line := b.String()
@@ -256,6 +279,48 @@ func (m Model) renderRow(r board.Row, selected bool) string {
 		line += "\n  " + mutedStyle.Render(cont) + "       " + mutedStyle.Render("└ "+gates)
 	}
 	return line
+}
+
+// renderTitle draws the title, underlining the characters the active filter
+// matched. Underline rather than a colour: the title column already encodes
+// draft as muted and the row may sit on the selection fill, so the one free
+// channel left is weight, not hue.
+//
+// The clipped-and-padded string is built first and styled per-rune after, so
+// the column is exactly tw cells wide whether or not anything matched.
+func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.Style) lipgloss.Style, tw int) string {
+	text := pad(clip(r.PR.Title, tw), tw)
+	hits := matchedTitleIndexes(r, m.query())
+	if len(hits) == 0 {
+		return paint(st).Render(text)
+	}
+
+	hl := paint(st.Underline(true))
+	plain := paint(st)
+	var b strings.Builder
+	// Runs are coalesced so a matched span emits one SGR pair, not one per rune.
+	var run strings.Builder
+	runHit := false
+	flush := func() {
+		if run.Len() == 0 {
+			return
+		}
+		if runHit {
+			b.WriteString(hl.Render(run.String()))
+		} else {
+			b.WriteString(plain.Render(run.String()))
+		}
+		run.Reset()
+	}
+	for i, ch := range []rune(text) {
+		if h := hits[i]; h != runHit {
+			flush()
+			runHit = h
+		}
+		run.WriteRune(ch)
+	}
+	flush()
+	return b.String()
 }
 
 // stripSGR measures a styled string's display width by removing SGR sequences.

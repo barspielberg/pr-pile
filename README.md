@@ -6,7 +6,7 @@ Run it as `prs`. See [REQUIREMENTS.md](REQUIREMENTS.md) for the design and the l
 
 ## Status
 
-Scaffolding. The board fetches, buckets, renders and opens PRs. Not yet: review progress, filtering, detail pane.
+Scaffolding. The board fetches, buckets, renders, filters and opens PRs. Not yet: review progress, detail pane.
 
 ## Build
 
@@ -67,5 +67,26 @@ Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`,
 | `j` / `k` | move |
 | `g` / `G` | top / bottom |
 | `enter` / `o` | open in browser (reuses an existing Arc tab) |
+| `/` | filter |
 | `r` | reload |
 | `q` | quit |
+
+### Filtering
+
+`/` opens a fuzzy filter over the board. The query matches the PR title and the
+PR number together, so `3248` finds `#3248` and `apisvc` finds
+`feat(api-service): …`. Matches are ranked best-first and the matched characters
+are underlined; sections with no matches are hidden entirely.
+
+While filtering, every printable key is query text, so navigation moves to chords:
+
+| key | action |
+|---|---|
+| `ctrl+n` / `ctrl+p` | move down / up |
+| `ctrl+j` / `ctrl+k` | same, other convention |
+| `↓` / `↑` | same |
+| `enter` | open the selected PR and leave the filter |
+| `backspace` | edit the query |
+| `ctrl+u` | clear the query |
+| `esc` | leave the filter, restoring the full board |
+| `ctrl+c` | quit |
