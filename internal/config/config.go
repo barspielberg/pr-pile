@@ -20,6 +20,10 @@ type Rule struct {
 	Query string `yaml:"query"`
 	Limit int    `yaml:"limit"`
 	Tree  bool   `yaml:"tree"`
+	// Author shows the PR author's initials. Off by default and set per rule:
+	// a rule like author:@me is all one person, so the column would be dead
+	// weight there.
+	Author bool `yaml:"author"`
 }
 
 // Action is a shell command bound to a key. The tool knows nothing about
@@ -49,9 +53,9 @@ func Default() Config {
 		Refresh: 3 * time.Minute,
 		Rules: []Rule{
 			{Name: "Mine", Query: "author:@me", Limit: 50, Tree: true},
-			{Name: "Review requested", Query: "review-requested:@me", Limit: 50},
-			{Name: "Involved", Query: "involves:@me -author:@me", Limit: 20},
-			{Name: "All open", Query: "draft:false", Limit: 20},
+			{Name: "Review requested", Query: "review-requested:@me", Limit: 50, Author: true},
+			{Name: "Involved", Query: "involves:@me -author:@me", Limit: 20, Author: true},
+			{Name: "All open", Query: "draft:false", Limit: 20, Author: true},
 		},
 	}
 }
@@ -75,6 +79,7 @@ rules:
 
   - name: Review requested
     query: review-requested:@me
+    author: true        # show the author's initials; pointless where it is you
     limit: 50
 
   # Review requested from a team you belong to rather than from you personally.
@@ -84,10 +89,12 @@ rules:
 
   - name: Involved
     query: involves:@me -author:@me
+    author: true
     limit: 20
 
   - name: All open
     query: draft:false
+    author: true
     limit: 20
 
 # Actions run a shell command for the selected PR. Available template fields:
