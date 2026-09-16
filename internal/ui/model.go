@@ -399,7 +399,7 @@ func (m *Model) clampCursor() {
 // body renders every section and reports which line the cursor landed on, so
 // the viewport can scroll to it. A row can occupy two lines (failing gates),
 // so the cursor line is not derivable from the row index.
-func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int) {
+func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, anchors []int) {
 	cursorLine, cursorHeight = -1, 1
 	idx := 0
 	filtering := m.query() != ""
@@ -408,12 +408,14 @@ func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int) 
 		case board.Pending:
 			// A section that already has rows keeps them, so only the count in
 			// the header changes while the refetch is in flight.
+			anchors = append(anchors, len(lines))
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, spin))
 			for _, row := range s.Rows {
 				rendered := strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")
 				if idx == m.cursor {
 					cursorLine, cursorHeight = len(lines), len(rendered)
 				}
+				anchors = append(anchors, len(lines))
 				lines = append(lines, rendered...)
 				idx++
 			}
@@ -425,9 +427,11 @@ func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int) 
 				lines = append(lines, blanks(m.placeholderRows(s.Rule))...)
 			}
 		case board.Failed:
+			anchors = append(anchors, len(lines))
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, "!"),
 				errorStyle.Render("    "+s.Err.Error()))
 		case board.Ready:
+			anchors = append(anchors, len(lines))
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, fmt.Sprint(len(s.Rows))))
 			if len(s.Rows) == 0 {
 				// A resolved empty section collapses to one line: it knows it
@@ -441,19 +445,26 @@ func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int) 
 				if idx == m.cursor {
 					cursorLine, cursorHeight = len(lines), len(rendered)
 				}
+				anchors = append(anchors, len(lines))
 				lines = append(lines, rendered...)
 				idx++
 			}
 		}
 	}
 	// The leading blank before the first section is chrome in a short pane.
+	// Everything indexing into lines shifts with it.
 	if len(lines) > 0 && lines[0] == "" {
 		lines = lines[1:]
 		if cursorLine > 0 {
 			cursorLine--
 		}
+		for i := range anchors {
+			if anchors[i] > 0 {
+				anchors[i]--
+			}
+		}
 	}
-	return lines, cursorLine, cursorHeight
+	return lines, cursorLine, cursorHeight, anchors
 }
 
 func blanks(n int) []string {
@@ -507,38 +518,69 @@ const scrollOff = 2
 // two lines, and anchoring to only its first line would leave the detail below
 // the fold. The scrollOff margin happens to cover a 2-line row on its own, so
 // this is belt and braces -- it is what keeps the two independent.
-func window(lines []string, cursorLine, cursorHeight, height int) []string {
+// window scrolls the body to keep the cursor visible with a margin of context
+// around it. It is stateless -- start is derived from the cursor each frame --
+// so a resize or a refetch needs no separate handling.
+//
+// The viewport always starts on an anchor (a section header or a row's first
+// line). Scrolling by whole units is what keeps movement even: a row is one or
+// two lines tall, so a line-based offset made each keypress scroll a different
+// distance and could leave an orphaned detail line at the top.
+func window(lines []string, cursorLine, cursorHeight, height int, anchors []int) []string {
 	if height <= 0 || len(lines) <= height {
 		return lines
 	}
 	if cursorHeight < 1 {
 		cursorHeight = 1
 	}
-	start := 0
-	if cursorLine >= 0 {
-		// Clamped to half the viewport: in a short pane a fixed margin would
-		// otherwise consume most of the screen. Every tool surveyed does this.
-		off := scrollOff
-		if half := height / 2; off > half {
-			off = half
+	if cursorLine < 0 {
+		return lines[:height]
+	}
+
+	off := scrollOff
+	if half := height / 2; off > half {
+		off = half
+	}
+	cursorEnd := cursorLine + cursorHeight - 1
+
+	// Candidate starts are anchors at or before the cursor that keep the whole
+	// selected row on screen. maxStart is deliberately not a cap here: near the
+	// end of the list the only anchor that shows the row can sit past it, and
+	// showing a short final page beats starting mid-row.
+	var best = -1
+	for _, a := range anchors {
+		if a > cursorLine {
+			break
 		}
-		bottom := cursorLine + cursorHeight - 1 + off
-		if bottom >= height {
-			start = bottom - height + 1
+		if cursorEnd-a >= height {
+			continue
 		}
-		if top := cursorLine - off; start > top {
-			start = top
-		}
-		// The end clamps come last so the margin collapses at both ends of the
-		// list, letting the cursor reach the first and last rows.
-		if max := len(lines) - height; start > max {
-			start = max
-		}
-		if start < 0 {
-			start = 0
+		// Prefer the earliest anchor that still honours the margin, so the
+		// view scrolls as little as possible.
+		if best < 0 || a <= cursorLine-off {
+			best = a
 		}
 	}
-	return lines[start : start+height]
+	if best < 0 {
+		best = snapToAnchor(cursorLine, anchors)
+	}
+	if end := best + height; end > len(lines) {
+		return lines[best:]
+	}
+	return lines[best : best+height]
+}
+
+// snapToAnchor rounds a line offset down to the nearest line that can legally
+// be the top of the viewport: a section header or a row's first line.
+func snapToAnchor(start int, anchors []int) int {
+	best := 0
+	for _, a := range anchors {
+		if a > start {
+			break
+		}
+		best = a
+	}
+	return best
 }
 
 // The footer carries the repo and the spinner, so no global header row is
@@ -611,10 +653,10 @@ func (m Model) View() string {
 		chrome = 2
 	}
 
-	lines, cursorLine, cursorHeight := m.body(spin)
+	lines, cursorLine, cursorHeight, anchors := m.body(spin)
 	if m.height > 0 {
 		avail := m.height - chrome
-		lines = window(lines, cursorLine, cursorHeight, avail)
+		lines = window(lines, cursorLine, cursorHeight, avail, anchors)
 		// Pad to the full height so the prompt and footer stay pinned to the
 		// bottom edge instead of floating under a short result set.
 		for len(lines) < avail {
