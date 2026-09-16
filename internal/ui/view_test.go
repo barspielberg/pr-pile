@@ -487,48 +487,82 @@ func TestFilterMatchesAuthor(t *testing.T) {
 	}
 }
 
-// A row should move only when a value changes, never because a request
-// finished. An empty section that collapsed from placeholder to a single "—"
-// on load shifted every section below it.
-func TestEmptySectionKeepsItsHeightOnLoad(t *testing.T) {
-	m := New(testCfg(), nil)
-	m.width, m.height = 120, 40
-
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Now()},
-	}})
-	loading := strings.Count(m.View(), "\n")
-
-	// Section 2 resolves with nothing in it.
-	m.board.Apply(board.Result{Index: 1})
-	if got := strings.Count(m.View(), "\n"); got != loading {
-		t.Errorf("board height changed when an empty section landed: %d -> %d", loading, got)
-	}
-}
-
-// The same must hold for every section resolving in turn, empty or not.
-func TestSectionsLandingDoNotShiftTheBoard(t *testing.T) {
+// Sections above a resolving one must not move. A section that resolves empty
+// collapses (that is its value changing), but everything already drawn above
+// it stays put -- the jump the user sees is rows shifting under the cursor.
+func TestResolvingASectionDoesNotMoveTheOnesAboveIt(t *testing.T) {
 	cfg := testCfg()
 	cfg.Rules = append(cfg.Rules, config.Rule{Name: "Third", Query: "x"})
 	m := New(cfg, nil)
-	m.width, m.height = 120, 50
+	m.width, m.height = 120, 40
 
-	heights := []int{strings.Count(m.View(), "\n")}
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "first section row", CIState: "SUCCESS", UpdatedAt: time.Now()},
+	}})
+
+	lineOf := func(needle string) int {
+		for i, l := range strings.Split(m.View(), "\n") {
+			if strings.Contains(stripANSI(l), needle) {
+				return i
+			}
+		}
+		return -1
+	}
+	before := lineOf("first section row")
+	if before < 0 {
+		t.Fatal("row not rendered")
+	}
+
+	// Sections 2 and 3 resolve, one empty, one with rows.
+	m.board.Apply(board.Result{Index: 1})
+	if got := lineOf("first section row"); got != before {
+		t.Errorf("an empty section landing below moved the row above it: %d -> %d", before, got)
+	}
+	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{
+		{Number: 2, Title: "third section row", CIState: "SUCCESS", UpdatedAt: time.Now()},
+	}})
+	if got := lineOf("first section row"); got != before {
+		t.Errorf("a later section landing moved the row above it: %d -> %d", before, got)
+	}
+}
+
+// An empty section is one line once resolved, not a reserved block: six blank
+// rows for a section with nothing in it wastes most of a short pane.
+func TestResolvedEmptySectionIsOneLine(t *testing.T) {
+	cfg := testCfg()
+	// A third rule below, so the blanks measured are the empty section's own
+	// reservation rather than the padding that pins the footer.
+	cfg.Rules = append(cfg.Rules, config.Rule{Name: "Third", Query: "x"})
+	m := New(cfg, nil)
+	m.width, m.height = 120, 40
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
 		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Now()},
 	}})
-	heights = append(heights, strings.Count(m.View(), "\n"))
 	m.board.Apply(board.Result{Index: 1})
-	heights = append(heights, strings.Count(m.View(), "\n"))
-	m.board.Apply(board.Result{Index: 2})
-	heights = append(heights, strings.Count(m.View(), "\n"))
+	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{
+		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Now()},
+	}})
 
-	for i := 1; i < len(heights); i++ {
-		if heights[i] != heights[0] {
-			t.Errorf("height changed at step %d: %v", i, heights)
-			break
+	lines := strings.Split(m.View(), "\n")
+	for i, l := range lines {
+		if !strings.Contains(stripANSI(l), "REVIEW REQUESTED") {
+			continue
 		}
+		if got := strings.TrimSpace(stripANSI(lines[i+1])); got != "—" {
+			t.Fatalf("expected the dash directly under the header, got %q", got)
+		}
+		// The next line must be the following section or the padding, not
+		// more reserved blanks for this one.
+		blank := 0
+		for j := i + 2; j < len(lines) && strings.TrimSpace(stripANSI(lines[j])) == ""; j++ {
+			blank++
+		}
+		if blank > 1 {
+			t.Errorf("empty section holds %d blank rows after its dash", blank)
+		}
+		return
 	}
+	t.Fatal("section header not found")
 }
 
 // esc and q close the help overlay rather than quitting: opening help must
