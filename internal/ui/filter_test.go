@@ -447,3 +447,46 @@ func TestFilterDoesNotMutateTheBoard(t *testing.T) {
 		}
 	}
 }
+
+// A bare number is a lookup, not a fuzzy search: "3248" must not also match a
+// title that happens to contain 3...2...4...8 in order.
+func TestNumericQueryMatchesNumbersOnly(t *testing.T) {
+	rows := []board.Row{
+		{PR: github.PR{Number: 3248, Title: "fix(webapp): reach the dependency popup"}},
+		{PR: github.PR{Number: 3134, Title: "feat: 3 of 2 with 4 and 8 scattered"}},
+		{PR: github.PR{Number: 3249, Title: "another one"}},
+	}
+
+	got := filterSection(rows, "3248")
+	if len(got) != 1 || got[0].PR.Number != 3248 {
+		t.Errorf("want only #3248, got %v", numbersOf(got))
+	}
+
+	// A partial number narrows by prefix as it is typed.
+	if got := filterSection(rows, "324"); len(got) != 2 {
+		t.Errorf("want #3248 and #3249, got %v", numbersOf(got))
+	}
+
+	// A leading # is accepted.
+	if got := filterSection(rows, "#3248"); len(got) != 1 || got[0].PR.Number != 3248 {
+		t.Errorf("want only #3248 for \"#3248\", got %v", numbersOf(got))
+	}
+
+	// Mixed queries stay fuzzy.
+	if got := filterSection(rows, "reach"); len(got) != 1 || got[0].PR.Number != 3248 {
+		t.Errorf("text query should still be fuzzy, got %v", numbersOf(got))
+	}
+
+	// Nothing to underline when the query is numeric.
+	if hits := matchedTitleIndexes(rows[0], "3248"); len(hits) != 0 {
+		t.Errorf("numeric query should not highlight the title, got %v", hits)
+	}
+}
+
+func numbersOf(rows []board.Row) []int {
+	out := []int{}
+	for _, r := range rows {
+		out = append(out, r.PR.Number)
+	}
+	return out
+}

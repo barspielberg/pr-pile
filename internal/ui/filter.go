@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/barspielberg/prs-mng/internal/board"
 	"github.com/sahilm/fuzzy"
@@ -36,6 +38,9 @@ func filterSection(rows []board.Row, query string) []board.Row {
 	if query == "" {
 		return rows
 	}
+	if digits, ok := numericQuery(query); ok {
+		return matchNumber(rows, digits)
+	}
 	matches := fuzzy.FindFrom(query, rowSource(rows))
 	out := make([]board.Row, 0, len(matches))
 	for _, match := range matches {
@@ -46,12 +51,47 @@ func filterSection(rows []board.Row, query string) []board.Row {
 	return out
 }
 
+// numericQuery reports whether the query is a bare PR number. Fuzzy matching
+// treats digits as a subsequence, so "3248" also hits a title containing
+// 3...2...4...8 scattered across it -- noise when the user is clearly after one
+// PR. A leading "#" is accepted and ignored.
+func numericQuery(query string) (string, bool) {
+	digits := strings.TrimPrefix(strings.TrimSpace(query), "#")
+	if digits == "" {
+		return "", false
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return "", false
+		}
+	}
+	return digits, true
+}
+
+// matchNumber keeps PRs whose number starts with the digits typed, so a partial
+// number narrows as it is typed and a complete one lands on a single row.
+func matchNumber(rows []board.Row, digits string) []board.Row {
+	var out []board.Row
+	for _, r := range rows {
+		if strings.HasPrefix(strconv.Itoa(r.PR.Number), digits) {
+			r.Prefix, r.Last = "", false
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // matchedTitleIndexes returns the positions inside the PR title that the query
 // hit, so the renderer can highlight them. Positions that landed on the number
 // are dropped: the number column is styled as a unit and splitting it would
 // break the fixed-width cluster.
 func matchedTitleIndexes(r board.Row, query string) map[int]bool {
 	if query == "" {
+		return nil
+	}
+	// A numeric query matches the number column, which is styled as a unit, so
+	// there is nothing in the title to mark.
+	if _, ok := numericQuery(query); ok {
 		return nil
 	}
 	matches := fuzzy.FindFrom(query, rowSource([]board.Row{r}))

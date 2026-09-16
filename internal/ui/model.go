@@ -507,7 +507,13 @@ func (m Model) View() string {
 
 	lines, cursorLine := m.body(spin)
 	if m.height > 0 {
-		lines = window(lines, cursorLine, m.height-chrome)
+		avail := m.height - chrome
+		lines = window(lines, cursorLine, avail)
+		// Pad to the full height so the prompt and footer stay pinned to the
+		// bottom edge instead of floating under a short result set.
+		for len(lines) < avail {
+			lines = append(lines, "")
+		}
 	}
 	return strings.Join(lines, "\n") + "\n" + foot
 }
