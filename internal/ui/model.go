@@ -399,8 +399,8 @@ func (m *Model) clampCursor() {
 // body renders every section and reports which line the cursor landed on, so
 // the viewport can scroll to it. A row can occupy two lines (failing gates),
 // so the cursor line is not derivable from the row index.
-func (m Model) body(spin string) (lines []string, cursorLine int) {
-	cursorLine = -1
+func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int) {
+	cursorLine, cursorHeight = -1, 1
 	idx := 0
 	filtering := m.query() != ""
 	for _, s := range m.sections() {
@@ -410,10 +410,11 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 			// the header changes while the refetch is in flight.
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, spin))
 			for _, row := range s.Rows {
+				rendered := strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")
 				if idx == m.cursor {
-					cursorLine = len(lines)
+					cursorLine, cursorHeight = len(lines), len(rendered)
 				}
-				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")...)
+				lines = append(lines, rendered...)
 				idx++
 			}
 			// On a cold start there is nothing to keep, so hold a placeholder
@@ -436,10 +437,11 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 				lines = append(lines, mutedStyle.Render("    —"))
 			}
 			for _, row := range s.Rows {
+				rendered := strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")
 				if idx == m.cursor {
-					cursorLine = len(lines)
+					cursorLine, cursorHeight = len(lines), len(rendered)
 				}
-				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")...)
+				lines = append(lines, rendered...)
 				idx++
 			}
 		}
@@ -451,7 +453,7 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 			cursorLine--
 		}
 	}
-	return lines, cursorLine
+	return lines, cursorLine, cursorHeight
 }
 
 func blanks(n int) []string {
@@ -491,17 +493,49 @@ func max(a, b int) int {
 // window scrolls the body just far enough to keep the cursor visible, rather
 // than paging: the board is mostly read by scanning, so keeping neighbouring
 // rows stable matters more than centring the selection.
-func window(lines []string, cursorLine, height int) []string {
+// scrollOff is how many lines of context are kept beyond the cursor, so moving
+// down shows what is coming rather than pinning the cursor to the bottom edge.
+// lazygit ships 2 and fzf 3; 2 is enough here to always reveal the first line
+// of the next PR while costing little of a 20-row pane.
+const scrollOff = 2
+
+// window scrolls the body to keep the cursor visible with a margin of context
+// around it. It is stateless -- start is derived from the cursor each frame --
+// so a resize or a refetch needs no separate handling.
+//
+// cursorHeight is the selected row's line count: a PR with failing checks is
+// two lines, and anchoring to only its first line would leave the detail below
+// the fold. The scrollOff margin happens to cover a 2-line row on its own, so
+// this is belt and braces -- it is what keeps the two independent.
+func window(lines []string, cursorLine, cursorHeight, height int) []string {
 	if height <= 0 || len(lines) <= height {
 		return lines
 	}
+	if cursorHeight < 1 {
+		cursorHeight = 1
+	}
 	start := 0
 	if cursorLine >= 0 {
-		if cursorLine >= height {
-			start = cursorLine - height + 1
+		// Clamped to half the viewport: in a short pane a fixed margin would
+		// otherwise consume most of the screen. Every tool surveyed does this.
+		off := scrollOff
+		if half := height / 2; off > half {
+			off = half
 		}
+		bottom := cursorLine + cursorHeight - 1 + off
+		if bottom >= height {
+			start = bottom - height + 1
+		}
+		if top := cursorLine - off; start > top {
+			start = top
+		}
+		// The end clamps come last so the margin collapses at both ends of the
+		// list, letting the cursor reach the first and last rows.
 		if max := len(lines) - height; start > max {
 			start = max
+		}
+		if start < 0 {
+			start = 0
 		}
 	}
 	return lines[start : start+height]
@@ -577,10 +611,10 @@ func (m Model) View() string {
 		chrome = 2
 	}
 
-	lines, cursorLine := m.body(spin)
+	lines, cursorLine, cursorHeight := m.body(spin)
 	if m.height > 0 {
 		avail := m.height - chrome
-		lines = window(lines, cursorLine, avail)
+		lines = window(lines, cursorLine, cursorHeight, avail)
 		// Pad to the full height so the prompt and footer stay pinned to the
 		// bottom edge instead of floating under a short result set.
 		for len(lines) < avail {

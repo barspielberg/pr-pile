@@ -679,3 +679,99 @@ func TestSectionJumpSkipsEmptySections(t *testing.T) {
 		t.Errorf("l should skip the empty section and land on 1, got %d", got)
 	}
 }
+
+// Moving down should reveal what is coming, not pin the cursor to the bottom
+// edge. lazygit treated the edge-pinned version as a defect (PR #2915) and
+// fzf migrated from 0 to 3 in 2024; nobody migrated the other way.
+func TestCursorKeepsContextBelowIt(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 14
+
+	var prs []github.PR
+	for i := 1; i <= 40; i++ {
+		prs = append(prs, github.PR{
+			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+		})
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: prs})
+	m.board.Apply(board.Result{Index: 1})
+
+	// Somewhere in the middle, away from either end of the list.
+	m.cursor = 20
+	lines := strings.Split(m.View(), "\n")
+
+	cursorAt := -1
+	for i, l := range lines {
+		if strings.Contains(l, "▌") {
+			cursorAt = i
+		}
+	}
+	if cursorAt < 0 {
+		t.Fatal("cursor not visible")
+	}
+	// Rows below the cursor, excluding the footer.
+	below := len(lines) - 1 - cursorAt - 1
+	if below < scrollOff {
+		t.Errorf("only %d rows below the cursor, want at least %d", below, scrollOff)
+	}
+}
+
+// The margin must collapse at the ends, or the last row could never be
+// selected.
+func TestCursorReachesBothEndsOfTheList(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 12
+	var prs []github.PR
+	for i := 1; i <= 30; i++ {
+		prs = append(prs, github.PR{
+			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+		})
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: prs})
+	m.board.Apply(board.Result{Index: 1})
+
+	for _, cursor := range []int{0, 29} {
+		m.cursor = cursor
+		out := m.View()
+		if !strings.Contains(out, "▌") {
+			t.Errorf("cursor %d is not visible:\n%s", cursor, out)
+		}
+		want := fmt.Sprintf("pr %d", cursor+1)
+		if !strings.Contains(stripANSI(out), want) {
+			t.Errorf("cursor %d: %q not on screen", cursor, want)
+		}
+	}
+}
+
+// A PR with failing checks is two lines. Scrolling to only its first line
+// leaves the detail line below the fold.
+func TestSelectedRowDetailLineStaysVisible(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 10
+
+	var prs []github.PR
+	for i := 1; i <= 20; i++ {
+		pr := github.PR{
+			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+		}
+		if i == 15 {
+			pr.CIState = "FAILURE"
+			pr.FailedGates = []string{"the-failing-gate"}
+		}
+		prs = append(prs, pr)
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: prs})
+	m.board.Apply(board.Result{Index: 1})
+	m.cursor = 14
+
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "pr 15") {
+		t.Fatalf("selected row missing:\n%s", out)
+	}
+	if !strings.Contains(out, "the-failing-gate") {
+		t.Errorf("the selected row's detail line is below the fold:\n%s", out)
+	}
+}
