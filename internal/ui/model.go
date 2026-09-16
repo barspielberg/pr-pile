@@ -112,7 +112,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) refresh() (tea.Model, tea.Cmd) {
-	m.board = board.New(m.cfg)
+	// Keep the current rows on screen while refetching, so the board does not
+	// collapse and re-expand under the cursor.
+	m.board.Refetch()
 	m.fetching = true
 	m.status = ""
 	return m, tea.Batch(append(m.fetchAll(), spinTick())...)
@@ -209,9 +211,8 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 func (m Model) visibleRows() []board.Row {
 	var rows []board.Row
 	for _, s := range m.board.Sections() {
-		if s.State == board.Ready {
-			rows = append(rows, s.Rows...)
-		}
+		// Stale rows are drawn, so they must be navigable too.
+		rows = append(rows, s.Rows...)
 	}
 	return rows
 }
@@ -249,7 +250,24 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 	for _, s := range m.board.Sections() {
 		switch s.State {
 		case board.Pending:
+			// A section that already has rows keeps them, so only the count in
+			// the header changes while the refetch is in flight.
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, spin))
+			for _, row := range s.Rows {
+				if idx == m.cursor {
+					cursorLine = len(lines)
+				}
+				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor), "\n")...)
+				idx++
+			}
+			// On a cold start there is nothing to keep, so hold a placeholder
+			// block instead: without it each section that lands pushes every
+			// header below it down the screen.
+			if len(s.Rows) == 0 {
+				for range make([]struct{}, m.placeholderRows(s.Rule)) {
+					lines = append(lines, "")
+				}
+			}
 		case board.Failed:
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, "!"),
 				errorStyle.Render("    "+s.Err.Error()))
@@ -275,6 +293,33 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 		}
 	}
 	return lines, cursorLine
+}
+
+// placeholderRows reserves roughly the space a pending section will occupy, so
+// the skeleton is close to its final height from the first frame. Capped well
+// below the rule's limit: overshooting would scroll real rows off the bottom.
+func (m Model) placeholderRows(r config.Rule) int {
+	const cap = 6
+	n := r.PageSize()
+	if n > cap {
+		n = cap
+	}
+	if m.height > 0 {
+		if budget := (m.height - 2) / max(1, len(m.cfg.Rules)); n > budget {
+			n = budget
+		}
+	}
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // window scrolls the body just far enough to keep the cursor visible, rather

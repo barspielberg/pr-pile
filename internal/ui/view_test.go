@@ -311,3 +311,47 @@ func TestSelectedRowIsFilledEdgeToEdge(t *testing.T) {
 		t.Error("selected+failing lost its CI glyph")
 	}
 }
+
+// A refresh must not collapse the board and re-expand it: that shoves every
+// row below each resolving section down the screen.
+func TestRefreshDoesNotChangeLayout(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 60
+
+	mk := func(n, base int) []github.PR {
+		var out []github.PR
+		for i := 0; i < n; i++ {
+			out = append(out, github.PR{
+				Number: base + i, Title: fmt.Sprintf("pr %d", base+i),
+				CIState: "SUCCESS", UpdatedAt: time.Unix(int64(1000-i), 0),
+			})
+		}
+		return out
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: mk(5, 100)})
+	m.board.Apply(board.Result{Index: 1, PRs: mk(12, 200)})
+
+	settled := m.View()
+	height := strings.Count(settled, "\n")
+
+	m.board.Refetch()
+	if got := strings.Count(m.View(), "\n"); got != height {
+		t.Errorf("board changed height on refetch: %d -> %d", height, got)
+	}
+	if !strings.Contains(m.View(), "#100") {
+		t.Error("rows vanished during refetch")
+	}
+
+	// Sections landing one at a time must not move anything either.
+	m.board.Apply(board.Result{Index: 0, PRs: mk(5, 100)})
+	if got := strings.Count(m.View(), "\n"); got != height {
+		t.Errorf("height changed when section 1 landed: %d -> %d", height, got)
+	}
+	m.board.Apply(board.Result{Index: 1, PRs: mk(12, 200)})
+	if got := strings.Count(m.View(), "\n"); got != height {
+		t.Errorf("height changed when section 2 landed: %d -> %d", height, got)
+	}
+	if m.View() != settled {
+		t.Error("board did not return to the same frame after an identical refetch")
+	}
+}
