@@ -383,13 +383,11 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 		case board.Ready:
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, fmt.Sprint(len(s.Rows))))
 			if len(s.Rows) == 0 {
-				// Hold the same height the section had while loading: a row
-				// should only move when a value changes, never because a
-				// request finished.
+				// A resolved empty section collapses to one line: it knows it
+				// has nothing, so holding six blank rows for it would waste
+				// most of a short pane. The shrink is the value changing,
+				// which is the one reason a row is allowed to move.
 				lines = append(lines, mutedStyle.Render("    —"))
-				if !filtering {
-					lines = append(lines, blanks(m.placeholderRows(s.Rule)-1)...)
-				}
 			}
 			for _, row := range s.Rows {
 				if idx == m.cursor {
