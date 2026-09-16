@@ -248,11 +248,14 @@ func TestBelowMinimumWidthSaysSo(t *testing.T) {
 	}
 }
 
-// No row may overflow the terminal at any supported width.
+// No row may overflow the terminal at any supported width. Stepped by 1, and
+// with a cursor that is not on the row: a selected row is filled to the right
+// edge, which hides an over-wide row behind the fill.
 func TestNoRowOverflowsAtAnyWidth(t *testing.T) {
-	for w := minWidth; w <= 200; w += 7 {
+	for w := minWidth; w <= 200; w++ {
 		m := New(testCfg(), nil)
 		m.width = w
+		m.cursor = -1
 		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
 			Number: 3248, Title: strings.Repeat("long title ", 30),
 			CIState: "FAILURE", FailedGates: []string{"a", "b"},
@@ -263,6 +266,22 @@ func TestNoRowOverflowsAtAnyWidth(t *testing.T) {
 			if got := lipgloss.Width(stripANSI(l)); got > w {
 				t.Errorf("width %d: line is %d cells: %q", w, got, stripANSI(l))
 			}
+		}
+	}
+}
+
+// The age column is budgeted at 3 cells. A very old PR (or a skewed clock) must
+// saturate rather than widen the row and push it past the frame.
+func TestAgeColumnNeverExceedsItsBudget(t *testing.T) {
+	for _, ts := range []time.Time{
+		time.Now().Add(-30 * time.Minute),
+		time.Now().Add(-5 * time.Hour),
+		time.Now().Add(-3 * 24 * time.Hour),
+		time.Now().Add(-40 * 7 * 24 * time.Hour),
+		time.Unix(1, 0), // epoch: ~2900 weeks
+	} {
+		if got := lipgloss.Width(age(ts)); got > 3 {
+			t.Errorf("age(%v) is %d cells, want <= 3: %q", ts, got, age(ts))
 		}
 	}
 }
