@@ -190,6 +190,15 @@ func (m Model) openSelected() tea.Cmd {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showHelp {
+		// Only ctrl+c quits from here: esc and q mean "back to the board", so
+		// opening help can never cost the user their session by reflex.
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		m.showHelp = false
+		return m, nil
+	}
 	if m.filtering {
 		return m.handleFilterKey(msg)
 	}
@@ -366,9 +375,7 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 			// header below it down the screen. While filtering the board is
 			// deliberately narrowing, so reserving space fights the point.
 			if len(s.Rows) == 0 && !filtering {
-				for range make([]struct{}, m.placeholderRows(s.Rule)) {
-					lines = append(lines, "")
-				}
+				lines = append(lines, blanks(m.placeholderRows(s.Rule))...)
 			}
 		case board.Failed:
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, "!"),
@@ -376,7 +383,13 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 		case board.Ready:
 			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, fmt.Sprint(len(s.Rows))))
 			if len(s.Rows) == 0 {
+				// Hold the same height the section had while loading: a row
+				// should only move when a value changes, never because a
+				// request finished.
 				lines = append(lines, mutedStyle.Render("    —"))
+				if !filtering {
+					lines = append(lines, blanks(m.placeholderRows(s.Rule)-1)...)
+				}
 			}
 			for _, row := range s.Rows {
 				if idx == m.cursor {
@@ -395,6 +408,13 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 		}
 	}
 	return lines, cursorLine
+}
+
+func blanks(n int) []string {
+	if n < 1 {
+		return nil
+	}
+	return make([]string, n)
 }
 
 // placeholderRows reserves roughly the space a pending section will occupy, so
