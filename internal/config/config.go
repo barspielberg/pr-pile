@@ -86,7 +86,7 @@ rules:
 
   # Review requested from a team you belong to rather than from you personally.
   # This also covers CODEOWNERS, which GitHub turns into team review requests.
-  # - name: My team's review
+  # - name: My team's
   #   query: team-review-requested:ORG/TEAM
 
   - name: Involved

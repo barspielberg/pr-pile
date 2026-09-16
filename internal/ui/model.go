@@ -217,6 +217,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		m.cursor--
 		m.clampCursor()
+	case "l", "right":
+		m.cursor = m.nextSection()
+		m.clampCursor()
+	case "h", "left":
+		m.cursor = m.prevSection()
+		m.clampCursor()
 	case "g", "home":
 		m.cursor = 0
 	case "G", "end":
@@ -313,6 +319,46 @@ func (m Model) sections() []board.Section {
 		out = append(out, s)
 	}
 	return out
+}
+
+// sectionStarts gives the cursor index of each non-empty section's first row,
+// so l/h can jump between them without the cursor knowing about sections.
+func (m Model) sectionStarts() []int {
+	var starts []int
+	idx := 0
+	for _, s := range m.sections() {
+		if len(s.Rows) > 0 {
+			starts = append(starts, idx)
+			idx += len(s.Rows)
+		}
+	}
+	return starts
+}
+
+// nextSection moves to the first row of the following section, or the last row
+// when there is none -- the same end-stop behaviour as j.
+func (m Model) nextSection() int {
+	for _, start := range m.sectionStarts() {
+		if start > m.cursor {
+			return start
+		}
+	}
+	if n := len(m.visibleRows()); n > 0 {
+		return n - 1
+	}
+	return 0
+}
+
+// prevSection moves to the start of the current section, or to the previous
+// one when already there, which is how a "back" key is expected to feel.
+func (m Model) prevSection() int {
+	starts := m.sectionStarts()
+	for i := len(starts) - 1; i >= 0; i-- {
+		if starts[i] < m.cursor {
+			return starts[i]
+		}
+	}
+	return 0
 }
 
 // visibleRows flattens the drawable sections so the cursor can move across
@@ -491,7 +537,7 @@ func (m Model) promptLine() string {
 }
 
 func (m Model) footer(spin string) string {
-	left := "  j/k move · enter open · / filter · ? help · q quit"
+	left := "  j/k move · l/h section · enter open · / filter · ? help · q quit"
 	if m.filtering {
 		left = "  ctrl+n/p move · enter open · esc clear"
 	}

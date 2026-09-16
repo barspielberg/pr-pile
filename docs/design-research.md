@@ -1569,3 +1569,651 @@ to check whether their font is substituting anything (§4.5, gh-dash #520).
   [Flexibility and Efficiency of Use](https://www.nngroup.com/articles/flexibility-efficiency-heuristic/)
 - prs-mng source read for feasibility: `internal/ui/filter.go` (`haystack`,
   `titleOffset`, `matchedTitleIndexes`), `internal/github/github.go:178`
+
+---
+
+## 9. Round three — scroll and cursor behavior
+
+Researched: 2026-09-17. Triggered by the complaint: *"nav stack at the bottom,
+when we move all the way down it stay down until we get to the top"* — i.e. the
+cursor pins to the last viewport row on the way down and stays pinned all the
+way back up.
+
+That description is accurate. `window()` in `internal/ui/model.go:450` scrolls
+the minimum distance needed to keep the cursor visible, which is a scroll-off
+margin of **zero**. The complaint is not a matter of taste: it is the specific
+behaviour that four of the six tools surveyed with a margin were explicitly
+changed *away from*, and lazygit's fix PR describes the problem in almost the
+same words the user used.
+
+### 9.1 Findings by tool
+
+#### lazygit — the closest match to the complaint, and it is a solved problem there
+
+lazygit has a first-class scroll-off feature with a dedicated controller,
+config, docs section and unit tests.
+
+- `gui.scrollOffMargin`, **default `2`** — `pkg/config/user_config.go:86` (decl)
+  and `:859` (default).
+- `gui.scrollOffBehavior`, **default `"margin"`**, other value `"jump"` —
+  `pkg/config/user_config.go:88`, `:860`.
+- Implementation: `pkg/gui/controllers/scroll_off_margin.go`, tests in
+  `scroll_off_margin_test.go`.
+- Docs: [Config.md §Scroll-off Margin](https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md#scroll-off-margin).
+
+The feature was added by
+[PR #2915](https://github.com/jesseduffield/lazygit/pull/2915) (merged), whose
+description states the prior behaviour and why it was wrong:
+
+> "when the selection leaves the visible area of the view, we would previously
+> only scroll just as much as necessary to make it visible again; which means
+> that when the selection is at the bottom and you press down-arrow, we would
+> scroll by just one line. I find this less than ideal because it doesn't show
+> me much of what's ahead in the direction that I'm moving"
+
+That is a verbatim description of `prs-mng`'s current `window()`, identified as
+a defect by the maintainer of the tool §2.2 already treats as a reference.
+
+Three further details from lazygit matter to us:
+
+1. **The margin is capped at half the view height**, so a large configured
+   value degrades into a centered cursor rather than breaking:
+   `scrollOffMargin = min(scrollOffMargin, int((float64(viewPortHeight)+.5)/2))`
+   (and `-.5` for the bottom, so on even heights the top margin is one line
+   higher). The tests pin `scrollOffMargin: 999` producing exactly 1 line of
+   scroll per keypress — i.e. centering.
+2. **Scrolling is skipped when the "before" position was not visible**, so a
+   mouse-wheel scroll that pushed the selection off-screen does not cause a
+   snap-back.
+3. **lazygit documents the paging alternative as worse.** On
+   `scrollOffBehavior: jump` (added by
+   [PR #2939](https://github.com/jesseduffield/lazygit/pull/2939)) the docs say:
+   *"This may feel a little jarring because the cursor jumps around when
+   continuously moving down, but it has the advantage that the view doesn't
+   scroll as often."* It is offered as an opt-out, not the default.
+
+#### gh-dash — implements our exact current behaviour, and has had bugs because of it
+
+gh-dash does **not** use `bubbles/list`. It wraps `bubbles/viewport` in its own
+`internal/tui/components/listviewport/listviewport.go`, driven from
+`internal/tui/components/table/table.go` (field `rowsViewport`).
+
+`NextItem()` / `PrevItem()` are scroll-off-zero, edge-pinned, one item at a
+time:
+
+```go
+func (m *Model) NextItem() int {
+    atBottomOfViewport := m.currId >= m.bottomBoundId
+    if atBottomOfViewport {
+        m.topBoundId += 1
+        m.bottomBoundId += 1
+        m.viewport.ScrollDown(m.ListItemHeight)
+    }
+    ...
+}
+```
+
+So the closest analogue tool behaves exactly as `prs-mng` does today. Two
+qualifiers on using that as support for the status quo:
+
+- **It is a source of recurring off-by-one bugs.** Both
+  [PR #838](https://github.com/dlvhdr/gh-dash/pull/838) ("PrevItem does not
+  scroll viewport at top boundary") and
+  [PR #878](https://github.com/dlvhdr/gh-dash/pull/878) ("selected item is
+  hidden when going up viewport") fix asymmetries between the top and bottom
+  boundary checks in this same 20-line function. Hand-rolled bound tracking
+  with mutable `topBoundId`/`bottomBoundId` state is demonstrably easy to get
+  wrong.
+- **It assumes uniform row height.** `getNumPrsPerPage()` is
+  `viewport.Height() / ListItemHeight` and scrolling is always by exactly
+  `ListItemHeight`. gh-dash rows are a fixed height; ours are not. We cannot
+  copy this design even if we wanted the behaviour.
+
+I found **no gh-dash issue requesting a scroll margin**, so there is no evidence
+of user demand against it there. Treat that as weak negative evidence, not as
+endorsement.
+
+#### bubbles/list and bubbles/viewport — the stack's own convention is *paging*, not scrolling
+
+This is the de-facto Bubble Tea convention and it is worth stating precisely,
+because it is not a scroll model at all.
+
+- **`bubbles/list` is strictly paginated.** It holds `Paginator paginator.Model`
+  and a `cursor` that is an index *within the current page*
+  (`list/list.go:182`, `:494`: `m.Paginator.Page*m.Paginator.PerPage + m.cursor`).
+  `CursorDown()` (`list/list.go:542`) increments the cursor; on passing
+  `maxCursorIndex()` it calls `m.Paginator.NextPage()` and sets
+  **`m.cursor = 0`** — the selection jumps to the *top* of a wholly new page.
+  `CursorUp()` is the mirror image, landing on `maxCursorIndex()`. There is no
+  viewport offset and no partial scrolling: content moves a full page at a time
+  and the cursor teleports to the opposite edge.
+- **`bubbles/viewport` has no cursor at all.** It is a pure content scroller:
+  `SetYOffset`, `ScrollUp/Down(n)`, `PageUp/Down` (by `Height()`),
+  `HalfPageUp/Down` (by `Height()/2`), `GotoTop`, `GotoBottom`. The only
+  cursor-aware method is `EnsureVisible(line, colstart, colend)`
+  (`viewport/viewport.go:472`), and it is **scroll-off zero** — and blunter than
+  ours:
+
+  ```go
+  if line < m.YOffset() || line >= m.YOffset()+m.maxHeight() {
+      m.SetYOffset(line)
+  }
+  ```
+
+  It puts the target line at the *top* of the viewport whenever it goes out of
+  view in either direction.
+
+I searched the `charmbracelet/bubbles` tracker for scrolloff / scroll-off /
+scroll-margin requests and found **none**. So the Bubble Tea ecosystem has no
+scroll-off convention to conform to. It offers paging (`list`) or raw offsets
+(`viewport`); a margin has to be written by hand either way. **This removes
+"match the stack's convention" as an argument in any direction.**
+
+#### fzf — has `--scroll-off`, default 3, and it was *changed from 0 to 3* deliberately
+
+- `--scroll-off=LINES`, **default `3`** — `src/options.go:769` (`ScrollOff: 3`),
+  parsed at `:2982`, documented at `:113`. Man page
+  (`man/man1/fzf.1:722`): *"Number of screen lines to keep above or below when
+  scrolling to the top or to the bottom (default: 3)."*
+- Added in commit
+  [`02cee223`](https://github.com/junegunn/fzf/commit/02cee2234dc85af7198f707072fd60a156fc4035)
+  (2021-11-02) for
+  [#2533](https://github.com/junegunn/fzf/issues/2533), **originally defaulting
+  to 0**.
+- **The default was changed to 3** in commit
+  [`7e9a0fcd`](https://github.com/junegunn/fzf/commit/7e9a0fcdbd1c9399a2ebb891360c9ee9436b2752)
+  (2024-05-24, [PR #3807](https://github.com/junegunn/fzf/pull/3807), v0.53).
+  CHANGELOG rationale, in full: *"Changed the default `--scroll-off` to 3, as we
+  think it's a better default."*
+
+This is the single most useful data point in the survey: a heavily used,
+conservatively maintained tool shipped edge-pinning for ~2.5 years, then
+switched its default to a margin of 3. The migration runs in the direction the
+user is asking for, and nobody migrates a default like that quietly unless the
+old one was a persistent low-grade annoyance.
+
+fzf's implementation (`src/terminal.go:8682`) also solves our hardest problem —
+see §9.5.
+
+#### vim / neovim — default 0, but effectively nobody runs 0
+
+- **vim `'scrolloff'` default is `0`**, *"set to 5 in |defaults.vim|"* —
+  `runtime/doc/options.txt:7614`. So a stock modern vim run without
+  `-u NONE` gets **5**.
+- The docs state the ends-of-file exception that every implementation needs:
+  *"If you set it to a very large value (999) the cursor line will always be in
+  the middle of the window (**except at the start or end of the file**...)"*
+  (`options.txt:7618-7620`).
+- **neovim**: `src/nvim/options.lua:7569` declares `scrolloff` with no explicit
+  default listed in that table, i.e. it inherits `0`. *I did not manage to
+  verify neovim's effective default independently — treat "neovim ships 0" as
+  unconfirmed.*
+- **What people actually set** — the distributions reflect considered opinion:
+  - **LazyVim: `opt.scrolloff = 4`** with the comment `-- Lines of context`
+    (`lua/lazyvim/config/options.lua:90`).
+  - **kickstart.nvim: `vim.o.scrolloff = 10`** with the comment *"Minimal number
+    of screen lines to keep above and below the cursor"* (`init.lua:168`).
+
+Both of the most-copied starter configs turn it on. The raw `0` default is
+vi-compatibility baggage, not a design position.
+
+#### helix — default 5, and its maintainer rejected *proportional* margins
+
+- **`scrolloff`, default `5`** — `helix-view/src/editor.rs:1178`, documented in
+  `book/src/editor.md:32` ("Number of lines of padding around the edge of the
+  screen when scrolling", default `5`).
+- Same half-height cap as lazygit, derived independently
+  (`helix-view/src/view.rs:266-267`):
+
+  ```rust
+  scrolloff.min(viewport.height.saturating_sub(1) as usize / 2),  // top
+  scrolloff.min(viewport.height as usize / 2),                    // bottom
+  ```
+
+  The `- 1` on the top side leaves "at least one gap in the middle" — the same
+  asymmetry trick lazygit uses.
+- **[Issue #8403 "Dynamic/fractional scrolloff"](https://github.com/helix-editor/helix/issues/8403)
+  is the direct answer to our proportional-vs-fixed question, and it was closed
+  as rejected.** The requester's motivation is precisely our short-pane worry —
+  that a fixed margin becomes proportionally huge when the pane shrinks.
+  Maintainer `pascalkuthe`'s reply:
+
+  > "no other editor I am aware of has this feature (checked kakoune, nvim, vim)
+  > and it seems a bit niche. The idea behind scrolloff is generally to show a
+  > couple of lines of context (which is of course capped to half the window).
+  > If you think about it as N lines of context then having those context lines
+  > depend on the view size doesn't make much sense. This also doesn't really
+  > scale well to large or smaller views (small fraction would quickly round
+  > down to 0 and large fractions would leave huge amounts of free space...)"
+
+  Note the framing: the half-window cap is *already* the proportional safety
+  valve, which is why a proportional margin is redundant.
+
+#### yazi — `scrolloff`, default 5, half-height cap
+
+- `[mgr] scrolloff`, **default `5`** — `yazi-config/preset/yazi-default.toml:17`;
+  type at `yazi-config/src/mgr/mgr.rs:27`.
+- Half-height cap, twice, independently of the above projects:
+  `(limit / 2).min(YAZI.mgr.scrolloff.get() as usize)` —
+  `yazi-core/src/tab/folder.rs:184` and `:222`.
+- End-of-list collapse falls out of clamping the *offset*, not the cursor:
+  `len.saturating_sub(limit).min(...)` and `.min(self.cursor)`
+  (`folder.rs:186-191`).
+
+#### ranger — `scroll_offset`, default 8, degrades to true centering
+
+- **`set scroll_offset 8`** — `ranger/config/rc.conf:225`, comment: *"Try to
+  keep so much space between the top/bottom border when scrolling"*. Documented
+  in `doc/ranger.pod`. (`ranger/container/settings.py` declares only the *type*;
+  the value lives in `rc.conf`.)
+- `_get_scroll_begin()`, `ranger/gui/widgets/browsercolumn.py:553-587`, is the
+  most explicit statement of all the edge cases we need:
+  - `if dirsize < winsize: return 0` — **list shorter than the viewport: no
+    scrolling at all.** This is our filtered-list case, handled in one line.
+  - `if halfwinsize < offset: return min(dirsize - winsize, max(0, index - halfwinsize))`
+    — **when the margin exceeds half the window it switches to literal
+    centering**, which is also how `scroll_offset 999` yields a typewriter
+    cursor.
+  - `if lower_limit < projected < upper_limit: return original` — inside the
+    band the view does not move at all.
+  - Ends clamped by `min(dirsize - winsize, ...)` / `max(0, ...)`.
+
+#### nnn — hardcoded `SCROLLOFF 3`, and a useful "ignore" escape hatch
+
+- `#define SCROLLOFF 3 /* Leave top 2 lines */` — `src/nnn.c:218`. **Not
+  configurable** without recompiling.
+- Same half-height cap: `int scrolloff = MIN(SCROLLOFF, ONSCREEN >> 1);`
+  (`src/nnn.c:7658`).
+- `move_cursor(int target, int ignore_scrolloff)` (`src/nnn.c:7649`) takes the
+  margin as a **parameter**, and the paging keys pass `1` to bypass it. That is
+  the cleanest answer to the `g`/`G` question found anywhere: absolute jumps opt
+  out of the margin, relative steps opt in.
+- The in-source comment describes a *ratchet*, not a wall: the cursor may sit
+  inside the margin (after a jump or at a list end), and the view only scrolls
+  if the cursor is in the margin **and still moving outward**:
+
+  > "act like a boa constrictor and squeeze the cursor towards the middle region
+  > of the screen by allowing it to move inward and disallowing it to move
+  > outward (deeper into the scrolloff margin area)"
+
+  This one-way rule is what makes a margin safe after `G`.
+- Ends clamped at `:7671-7672`.
+
+#### k9s — no scroll margin; minimal-scroll, edge-pinned
+
+k9s tables are `rivo/tview` `Table` widgets. The offset logic is
+`tview/table.go:915-951`. Under `clampToSelection` it does the minimum-scroll
+adjustment and nothing else:
+
+```go
+if t.selectedRow+1-t.rowOffset >= height {
+    t.rowOffset = t.selectedRow + 1 - height
+    t.trackEnd = false
+}
+```
+
+**The `height/2` terms in that same block are not centering** — they are the
+`t.borders` branch, correcting for bordered rows occupying two cells each. I
+checked this specifically because it is easy to misread as a centering mode.
+
+I found **no scrolloff option in k9s and no scroll-margin request in either the
+k9s or tview trackers.** So k9s is a genuine vote for the status quo — but note
+k9s tables are usually run full-screen, not in a 20-row pane, and its rows are
+uniform height.
+
+#### htop and btop — no margin, cursor pinned to the edge
+
+Both confirmed negative (via subagent; I did not read these files myself).
+
+- **htop**, `Panel.c:295-299`: the view scrolls by one line only once the
+  selection has already reached the first or last visible row — margin of zero.
+  `scrollH`/`scrollHAmount` is horizontal panning of long command lines, a
+  different feature.
+- **btop**, `src/btop_draw.cpp:1656-1668`: scrolling begins only at
+  `selected == 1` or `selected == select_max`. Page up/down shift by a full
+  `select_max`; the mouse wheel moves the view 3 lines independently of the
+  selection.
+
+Both are monitors where the list is *self-updating* — content moves on its own
+regardless of the cursor — which weakens them as precedent for a static board.
+
+#### micro — `scrollmargin`, default 3
+
+`internal/config/settings.go:91`: `"scrollmargin": float64(3)`. Included only as
+another independent data point in the 2-5 cluster.
+
+#### Where the defaults land
+
+| Tool | Setting | Default | Cap | Ends |
+|---|---|---|---|---|
+| lazygit | `gui.scrollOffMargin` | **2** | `height/2` | offset clamp |
+| fzf | `--scroll-off` | **3** (was 0 until v0.53) | `maxLines/2` | offset clamp |
+| nnn | `SCROLLOFF` (compile-time) | **3** | `ONSCREEN/2` | offset clamp |
+| micro | `scrollmargin` | **3** | not verified | not verified |
+| LazyVim | `scrolloff` | **4** | `height/2` (vim) | vim's end rule |
+| vim `defaults.vim` | `scrolloff` | **5** | `height/2` | *"except at the start or end of the file"* |
+| helix | `scrolloff` | **5** | `height/2` | — |
+| yazi | `[mgr] scrolloff` | **5** | `limit/2` | offset clamp |
+| ranger | `scroll_offset` | **8** | degrades to centering | offset clamp |
+| kickstart.nvim | `scrolloff` | **10** | `height/2` (vim) | vim's end rule |
+| vim / neovim raw | `scrolloff` | **0** | — | — |
+| gh-dash, k9s, htop, btop, `bubbles/viewport` | none | **0** | — | — |
+
+**The most common default among tools that have the setting at all is 2-5, with
+3 the modal value** (fzf, nnn, micro). Every single implementation caps the
+margin at half the viewport height. Not one implements a proportional margin,
+and the one project that was asked to rejected it on the record.
+
+### 9.2 Options analysed
+
+Assume the common case: `m.height == 20`, so `avail` is **19** (one footer row)
+or **18** while filtering (prompt + footer) — see `model.go:525-540`. Rows are
+1 or 2 lines, so 19 lines is roughly 10-19 PRs plus section headers.
+
+#### Option 1 — scroll-off margin (N lines of context)
+
+**For.**
+- Directly fixes the reported complaint: the cursor stops N rows short of the
+  bottom and the *content* scrolls beneath it, so you always see what is coming.
+- Overwhelmingly the majority behaviour among tools that took a position:
+  lazygit, fzf, vim-as-shipped, helix, yazi, ranger, nnn, micro.
+- It is the *migration direction*: fzf 0→3, lazygit added it in #2915, vim's
+  `defaults.vim` overrides its own 0 with 5. Nothing found migrated the other
+  way.
+- Cheapest possible change here. `window()` is **stateless** — it recomputes
+  `start` from `cursorLine` and `height` every frame. A margin is two extra
+  terms in the same arithmetic. No scroll state, no `topBoundId`/`bottomBoundId`
+  to keep in sync, hence none of the class of bug that produced gh-dash #838 and
+  #878.
+- It also fixes the *up* half of the complaint for free. The asymmetry the user
+  noticed — pinned at the bottom all the way back to the top — exists because
+  the current code only ever pushes `start` upward from below. A symmetric
+  margin makes `k` scroll the view N rows before the cursor reaches the top
+  edge, exactly mirroring `j`.
+
+**Against.**
+- Costs N rows of "reachable" screen: the cursor only freely traverses
+  `avail - 2N` lines before the view starts moving.
+- With N too large in a short pane it silently becomes Option 2.
+
+**In a 19-line pane.** N=2 → 15 of 19 lines freely traversable (79%); N=3 → 13
+(68%); N=5 → 9 (47%). The concern in the brief — "scrolloff of 5 in a 20-row
+pane is 25% of the screen" — is real at 5 but not at 2-3. Note lazygit, whose
+side panels are *routinely* about this tall (a third-width panel in a shared
+layout, often far shorter than 19 lines), chose **2**. fzf, which is frequently
+run at `--height 40%` (≈16 lines on a 40-row terminal), chose **3**. The two
+tools whose panes most resemble ours picked the two smallest values in the
+table. The larger values (helix 5, ranger 8, kickstart 10) come from
+full-screen editors and file managers.
+
+#### Option 2 — centered cursor (typewriter / `scrolloff=999`)
+
+**For.**
+- Perfectly stable cursor position; the eye never tracks it.
+- Maximum context in both directions at all times.
+- Universally *supported* — every implementation surveyed reaches it by setting
+  the margin past half the height, which is exactly why they all clamp there.
+
+**Against.**
+- **Not the default anywhere in the survey.** It is universally the opt-in
+  extreme, never the shipped behaviour.
+- Every keypress moves the entire screen. For a *glance* tool this is the worst
+  property: §0.6 makes "understand state in 2 seconds" the tiebreaker, and
+  content that reflows on every `j` destroys the spatial memory that makes a
+  board glanceable. §4.10 already lists layout instability as an anti-pattern.
+- In a 19-line pane it wastes up to ~9 lines below the cursor on a short board,
+  and it means a list of 12 PRs — which *fits entirely* — still scrolls.
+- The user's complaint is about the cursor being *stuck*. Centering makes it
+  maximally stuck; it just moves where. There is a real risk this reads as the
+  same bug relocated.
+
+#### Option 3 — paging (cursor jumps to the opposite edge)
+
+**For.**
+- The view scrolls rarely, so content is stable between jumps.
+- It is `bubbles/list`'s model, so it is at least idiomatic for the stack.
+
+**Against.**
+- **lazygit ships this as a non-default opt-out and documents it as feeling
+  "jarring"** ("the cursor jumps around when continuously moving down").
+- Zero context: you arrive at a new page with nothing carried over, so you
+  cannot tell what was adjacent to the row you were on.
+- The cursor teleports the full height of the screen on one keypress. In a
+  glance tool that is a total loss of position.
+- It does not actually fix the complaint — the cursor still spends its time at
+  an edge, it just alternates edges.
+
+#### Option 4 — half-paging
+
+**For.**
+- lazygit's `scrollOffBehavior: "jump"` is exactly this (half a page, landing
+  the cursor mid-view), so it has a real implementation behind it.
+- Retains half a screen of context, unlike full paging.
+- Scrolls a quarter as often as a margin does.
+
+**Against.**
+- Same documented "jarring" verdict from lazygit, and it is the *non-default*
+  branch in the one tool that implements both side by side. When a maintainer
+  writes both behaviours and picks one as default, that choice is evidence.
+- In a 19-line pane a half-page jump is ~9 lines — a large, abrupt movement.
+- Motion is irregular: eight keypresses do nothing to the view, the ninth moves
+  it 9 lines. A margin's motion is uniform (one line per keypress once engaged),
+  which is easier to track visually.
+
+#### Option 5 — current behaviour (margin 0)
+
+**For.**
+- The view moves as little as possible; maximum content stability.
+- Real precedent: gh-dash, k9s, htop, btop, `bubbles/viewport`.
+- Zero work.
+
+**Against.**
+- It is what the user is complaining about. That is the decisive fact, and it
+  outweighs the precedent list.
+- The precedent is weaker than it looks: htop/btop are auto-refreshing monitors
+  (content moves anyway), k9s runs full-screen with uniform rows, and gh-dash's
+  version of this code has produced at least two boundary bugs.
+- fzf's own history is the counter-example: it shipped exactly this, then
+  changed it.
+- You cannot see what is coming. In a PR board, where scanning downward for the
+  next thing that needs attention *is* the primary action, that is the wrong
+  trade.
+
+### 9.3 Recommendation
+
+**Adopt a scroll-off margin of 2 lines, clamped to half the available height,
+with the clamp and the list-end collapse both falling out of the existing offset
+arithmetic.**
+
+Concretely, replace the body of `window()` with margin-aware arithmetic:
+
+```
+off = min(2, avail / 2)                  // half-height clamp
+start = clamp(start,
+              cursorLine + cursorRowHeight + off - avail,   // bottom margin
+              cursorLine - off)                             // top margin
+start = clamp(start, 0, len(lines) - avail)                 // list ends win
+```
+
+The parameters, stated exactly so there is nothing left to decide:
+
+- **N = 2 lines.** lazygit's value, and lazygit's list panels are the closest
+  match to our pane geometry (short, shared-layout, one item per row). It is the
+  smallest value in the cluster, which matters because our rows are up to 2
+  lines tall: **a 2-line margin guarantees at least the first line of the next
+  PR is always visible** below the selection, which is the actual user need
+  ("see what's coming"), while costing only 4 of 19 lines. N=3 (fzf/nnn/micro)
+  is defensible and would guarantee a full 2-line row of lookahead; N=5+ is not,
+  at this pane height.
+- **Clamp: `off = min(N, avail/2)`.** Unanimous across lazygit, helix, yazi,
+  nnn and fzf. At `avail >= 4` this is a no-op for N=2, so it only ever matters
+  in pathological panes — but it is what stops the margin from oscillating when
+  the top and bottom margins would overlap.
+- **Do not make it proportional.** Rejected on the record by helix
+  ([#8403](https://github.com/helix-editor/helix/issues/8403)); implemented by
+  none of the ten tools surveyed. The half-height clamp already *is* the
+  proportional safety valve, and N=2 is small enough that the 20-row case never
+  reaches it.
+- **Collapse at the list ends automatically.** Do not special-case the cursor;
+  apply the final `clamp(start, 0, len(lines)-avail)` *last*, so it overrides
+  the margin. This is how yazi, ranger, nnn and fzf all do it, and it makes the
+  last row reachable by construction: at the bottom of the list `start` pins to
+  `len(lines)-avail` and the cursor simply walks into the margin band.
+- **Keep the whole thing stateless.** The current `window()` derives everything
+  from `(cursorLine, height, len(lines))` each frame. Preserve that. It is why
+  this change is ~6 lines and why we avoid gh-dash's boundary-bug class
+  entirely. It also means resize needs no handling at all.
+
+**Do not make it configurable yet.** No config key, no plumbing — nnn hardcodes
+it, and we have one user. Revisit only if the value is actually disputed.
+
+### 9.4 Edge cases the implementer must handle
+
+1. **`g` / `G` (and `ctrl+n`/`ctrl+p` wrapping).** At the true top and bottom the
+   margin must collapse. The final `clamp(start, 0, len(lines)-avail)` handles
+   this automatically *provided it is applied last* — after `G`, `start` pins to
+   the maximum and the cursor legitimately sits in the bottom margin band. Two
+   related points:
+   - vim documents this exception explicitly (`options.txt:7618-7620`, "except
+     at the start or end of the file").
+   - nnn's `move_cursor(target, ignore_scrolloff)` passes `1` from its paging
+     keys. If `g`/`G` are ever made to do something other than pin the offset to
+     an extreme, adopt that shape: absolute jumps ignore the margin, relative
+     steps honour it.
+   - After a jump lands the cursor inside the margin band, do **not** then
+     scroll to "fix" it. nnn's ratchet rule: the view moves only when the cursor
+     is in the margin *and moving further outward*. With stateless arithmetic
+     this is automatic — but it is the property to test for.
+
+2. **Filtered lists shorter than the viewport.** `window()` already returns
+   early on `len(lines) <= height`, which is ranger's `if dirsize < winsize:
+   return 0`. Keep that early return **ahead of** the margin arithmetic, or a
+   4-result filter will try to reserve 2 lines of margin against a list that
+   does not have them. Note `avail` also drops by one while filtering
+   (`chrome = 2`, `model.go:528`) — the margin must be computed against the
+   filtering-time `avail`, not `m.height`.
+
+3. **Variable-height rows — the one genuinely hard case.** `body()` sets
+   `cursorLine = len(lines)` *before* appending the row
+   (`model.go:368`, `:396`), so `cursorLine` is the row's **first** line. A
+   2-line row therefore occupies `cursorLine` and `cursorLine+1`, and the
+   current `start = cursorLine - height + 1` already **under-scrolls by one
+   line for 2-line rows**: the failing-CI detail line of the selected PR can sit
+   one row below the viewport. This is a live bug independent of the margin, and
+   the margin will mask rather than fix it unless handled.
+
+   fzf is the reference implementation here. `src/terminal.go:8686-8714`
+   measures the margin in **rendered lines, not item counts**, and explicitly
+   accounts for the selected item's own height:
+
+   ```go
+   itemLines := 1 + t.gap
+   if t.canSpanMultiLines() && t.cy < numItems {
+       itemLines, _ = t.numItemLines(t.merger.Get(t.cy).item, maxLines)
+   }
+   linesBefore := t.cy - newOffset
+   linesAfter := maxLines - (linesBefore + itemLines)
+   ```
+
+   So: `body()` must also return the selected row's height (1 or 2), and the
+   bottom bound must be `cursorLine + cursorRowHeight + off - avail`, not
+   `cursorLine + 1 + off - avail`. Two further fzf lessons:
+   - **The bail-out:** `if linesBefore < scrollOff && linesAfter < scrollOff {
+     break }` — "Stuck in the middle, nothing to do". When the pane cannot honour
+     the margin on both sides, do nothing rather than oscillate.
+   - **The 2-phase loop** exists, per its own comment, "to avoid infinite loop of
+     alternating between moving up and down", and it is needed *because* item
+     heights vary. Our stateless single-expression clamp sidesteps this entirely
+     — which is a strong argument for keeping it a clamp and never an iterative
+     converge loop.
+
+4. **Resize.** No special handling required *if* the implementation stays
+   stateless: `avail` changes, `start` is recomputed from scratch next frame.
+   This is the main reason not to adopt gh-dash's stateful
+   `topBoundId`/`bottomBoundId` design, which must be re-derived on every
+   `WindowSizeMsg`. Verify only that `off = min(N, avail/2)` is recomputed per
+   frame rather than cached.
+
+5. **Section headers and placeholder blocks count as lines.** The margin is
+   measured in rendered lines, so a section header immediately below the cursor
+   consumes margin. That is correct and desirable — a header *is* useful
+   lookahead context — but it means the number of *PRs* visible below the
+   cursor is sometimes 1, not 2. Do not try to make the margin row-aware to
+   compensate; fzf, yazi and ranger all measure in lines.
+
+6. **`cursorLine == -1`.** `body()` returns `-1` when no row is selected (empty
+   board, or all sections failed). The current code guards with
+   `if cursorLine >= 0`. Preserve that guard; the margin arithmetic must not run
+   on `-1`.
+
+### 9.5 What I could not verify
+
+- **neovim's effective `scrolloff` default.** `src/nvim/options.lua:7569`
+  declares the option without an explicit default in the entry I read, implying
+  it inherits vim's `0`, and I could not find a `vim_diff.txt` entry overriding
+  it. I did **not** confirm whether neovim's `defaults.vim`-equivalent sets 5 as
+  vim's does. Treat the neovim row as unconfirmed; the LazyVim (4) and kickstart
+  (10) figures are directly verified and are the ones that matter anyway.
+- **micro's half-height cap and end-of-list handling.** I verified only the
+  default (`scrollmargin: 3`, `internal/config/settings.go:91`), not the
+  implementation.
+- **htop and btop source.** Reported by a subagent from `Panel.c:295-299` and
+  `src/btop_draw.cpp:1656-1668`; I did not read those files myself. The claim is
+  a negative ("no margin exists"), which is the harder kind to prove, though it
+  is consistent with both tools' observed behaviour.
+- **Usability literature on cursor-stability vs content-stability.** I searched
+  for this specifically and **found nothing citable** — no NN/g article, no HCI
+  paper, no considered blog treatment that addresses list-cursor stability as
+  such. The §9.2 arguments about spatial memory and glance-cost are reasoning
+  from §0.6 and §4.10 plus the observed choices of the tools, **not** a cited
+  finding. This is the weakest link in the case and should be argued on those
+  terms. The empirical evidence here is entirely revealed preference: what
+  maintainers shipped, what they changed, and which way the migrations ran.
+- **fzf's #2533 design discussion.** There was none — the issue is a one-line
+  request with zero comments. The v0.53 default change likewise carries only
+  "as we think it's a better default" as rationale. The *direction* of both
+  changes is solid evidence; the *reasoning* behind them was never written down.
+- **Whether any tool special-cases variable-height rows for the margin beyond
+  fzf.** fzf is the only implementation I found that handles it; yazi, ranger,
+  nnn, lazygit and k9s all assume uniform row heights. So on this specific point
+  we have one reference, not a consensus.
+
+### 9.6 Additional sources (round three)
+
+- lazygit: `pkg/config/user_config.go`,
+  `pkg/gui/controllers/scroll_off_margin.go`,
+  `pkg/gui/controllers/scroll_off_margin_test.go`,
+  [Config.md §Scroll-off Margin](https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md#scroll-off-margin),
+  [PR #2915](https://github.com/jesseduffield/lazygit/pull/2915),
+  [PR #2939](https://github.com/jesseduffield/lazygit/pull/2939)
+- gh-dash: `internal/tui/components/listviewport/listviewport.go`,
+  `internal/tui/components/table/table.go`,
+  [PR #838](https://github.com/dlvhdr/gh-dash/pull/838),
+  [PR #878](https://github.com/dlvhdr/gh-dash/pull/878)
+- charmbracelet/bubbles: `list/list.go` (`CursorUp`/`CursorDown`/`Paginator`),
+  `viewport/viewport.go` (`EnsureVisible`, `PageDown`, `HalfPageDown`)
+- fzf: `src/options.go`, `src/terminal.go:8682-8720`, `man/man1/fzf.1`,
+  [#2533](https://github.com/junegunn/fzf/issues/2533),
+  [commit 02cee223](https://github.com/junegunn/fzf/commit/02cee2234dc85af7198f707072fd60a156fc4035),
+  [PR #3807](https://github.com/junegunn/fzf/pull/3807),
+  [commit 7e9a0fcd](https://github.com/junegunn/fzf/commit/7e9a0fcdbd1c9399a2ebb891360c9ee9436b2752)
+- vim: `runtime/doc/options.txt` (`'scrolloff'`, `'scrolloffpad'`)
+- neovim: `src/nvim/options.lua`
+- LazyVim: `lua/lazyvim/config/options.lua:90`
+- kickstart.nvim: `init.lua:168`
+- helix: `helix-view/src/editor.rs:1178`, `helix-view/src/view.rs:249-279`,
+  `book/src/editor.md`,
+  [#8403](https://github.com/helix-editor/helix/issues/8403)
+- yazi: `yazi-config/preset/yazi-default.toml:17`,
+  `yazi-config/src/mgr/mgr.rs:27`, `yazi-core/src/tab/folder.rs:179-227`,
+  `yazi-widgets/src/scrollable.rs`
+- ranger: `ranger/config/rc.conf:225`,
+  `ranger/gui/widgets/browsercolumn.py:553-587`, `doc/ranger.pod`
+- nnn: `src/nnn.c:218` (`SCROLLOFF`), `src/nnn.c:7649-7680` (`move_cursor`)
+- k9s / tview: `k9s/internal/ui/table.go`, `tview/table.go:895-951`
+- htop: `Panel.c:295-299`; btop: `src/btop_draw.cpp:1656-1668`
+  (both via subagent, not read directly)
+- micro: `internal/config/settings.go:91`
+- prs-mng source read for feasibility: `internal/ui/model.go` — `window()`
+  (:450), `body()` (:356), `clampCursor()` (:339), `View()` height budget
+  (:525-540)
