@@ -18,7 +18,7 @@ func testCfg() config.Config {
 		Repo: "o/r",
 		Rules: []config.Rule{
 			{Name: "Mine", Query: "author:@me", Tree: true},
-			{Name: "Review requested", Query: "review-requested:@me"},
+			{Name: "Review requested", Query: "review-requested:@me", Author: true},
 		},
 	}
 }
@@ -409,6 +409,79 @@ func TestFooterStaysPinnedToTheBottom(t *testing.T) {
 		}
 		if got := stripANSI(flines[len(flines)-2]); !strings.Contains(got, "/") {
 			t.Errorf("%d rows filtered: prompt not directly above the footer: %q", n, got)
+		}
+	}
+}
+
+// The author column is per rule: a rule like author:@me is all one person, so
+// the column would be dead weight there.
+func TestAuthorColumnIsPerRule(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 30
+	pr := github.PR{Number: 1, Title: "a title", Author: "octocat",
+		CIState: "SUCCESS", UpdatedAt: time.Now()}
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{pr}})
+	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{{
+		Number: 2, Title: "another", Author: "octocat",
+		CIState: "SUCCESS", UpdatedAt: time.Now(),
+	}}})
+
+	var mine, review string
+	for _, l := range strings.Split(m.View(), "\n") {
+		if strings.Contains(l, "#1") {
+			mine = stripANSI(l)
+		}
+		if strings.Contains(l, "#2") {
+			review = stripANSI(l)
+		}
+	}
+	// Rule 1 (Mine) has author off; rule 2 has it on.
+	if strings.Contains(mine, "oct") {
+		t.Errorf("Mine should not show an author: %q", mine)
+	}
+	if !strings.Contains(review, "oct") {
+		t.Errorf("Review requested should show initials: %q", review)
+	}
+}
+
+func TestAuthorColumnDoesNotOverflow(t *testing.T) {
+	cfg := testCfg()
+	for i := range cfg.Rules {
+		cfg.Rules[i].Author = true
+	}
+	for w := minWidth; w <= 200; w++ {
+		m := New(cfg, nil)
+		m.width, m.height = w, 30
+		m.cursor = -1
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+			Number: 3248, Title: strings.Repeat("long title ", 20),
+			Author: "verylongusername", CIState: "SUCCESS", UpdatedAt: time.Now(),
+		}}})
+		m.board.Apply(board.Result{Index: 1})
+		for _, l := range strings.Split(m.View(), "\n") {
+			if got := lipgloss.Width(stripANSI(l)); got > w {
+				t.Fatalf("width %d: line is %d cells: %q", w, got, stripANSI(l))
+			}
+		}
+	}
+}
+
+// Author must be searchable, and a row surviving on an author match must not
+// render with nothing marked.
+func TestFilterMatchesAuthor(t *testing.T) {
+	rows := []board.Row{
+		{PR: github.PR{Number: 1, Title: "fix the thing", Author: "octocat"}},
+		{PR: github.PR{Number: 2, Title: "unrelated work", Author: "someoneelse"}},
+	}
+	got := filterSection(rows, "octocat")
+	if len(got) == 0 || got[0].PR.Number != 1 {
+		t.Fatalf("author query should match #1, got %v", numbersOf(got))
+	}
+	// The highlighter maps matches back into title indexes; an author-only hit
+	// must not claim positions inside the title.
+	for i := range matchedTitleIndexes(rows[0], "octocat") {
+		if i >= len([]rune(rows[0].PR.Title)) {
+			t.Errorf("highlight index %d is outside the title", i)
 		}
 	}
 }

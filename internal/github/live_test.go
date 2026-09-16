@@ -2,6 +2,7 @@ package github_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -15,9 +16,19 @@ func TestLive(t *testing.T) {
 		t.Skip("live API test")
 	}
 	cfg := config.Default()
+	cfg.Repo = os.Getenv("PRS_MNG_REPO")
+	if cfg.Repo == "" {
+		t.Skip("set PRS_MNG_REPO to the repo to test against")
+	}
 	c, err := github.New()
 	if err != nil {
 		t.Skip("no gh token:", err)
+	}
+	// Some orgs make every search return zero rather than failing (an IP allow
+	// list will do it), which would look like a passing test against an empty
+	// board.
+	if err := c.CheckRepo(context.Background(), cfg.Repo); err != nil {
+		t.Skip("repo unreachable:", err)
 	}
 	for _, r := range cfg.Rules {
 		start := time.Now()

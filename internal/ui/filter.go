@@ -9,16 +9,17 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-// haystack is what a row is matched against: the number carries the "#" so a
-// query of "#32" works, and the title follows so one query spans both fields.
+// haystack is what a row is matched against: number, author and title, so one
+// query spans all three. The author sits before the title so its characters
+// cannot be mistaken for title positions when translating match indexes back.
 func haystack(r board.Row) string {
-	return fmt.Sprintf("#%d %s", r.PR.Number, r.PR.Title)
+	return fmt.Sprintf("#%d %s %s", r.PR.Number, r.PR.Author, r.PR.Title)
 }
 
 // titleOffset is where the title starts inside haystack, used to translate
 // match positions back into title indexes for highlighting.
 func titleOffset(r board.Row) int {
-	return len(fmt.Sprintf("#%d ", r.PR.Number))
+	return len(fmt.Sprintf("#%d %s ", r.PR.Number, r.PR.Author))
 }
 
 type rowSource []board.Row

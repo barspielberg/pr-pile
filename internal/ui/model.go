@@ -30,6 +30,7 @@ type Model struct {
 
 	filtering bool
 	filter    string
+	showHelp  bool
 }
 
 type resultMsg board.Result
@@ -198,6 +199,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.filtering = true
 		return m, nil
+	case "?":
+		m.showHelp = !m.showHelp
+		return m, nil
 	case "j", "down":
 		m.cursor++
 		m.clampCursor()
@@ -354,7 +358,7 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 				if idx == m.cursor {
 					cursorLine = len(lines)
 				}
-				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor), "\n")...)
+				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")...)
 				idx++
 			}
 			// On a cold start there is nothing to keep, so hold a placeholder
@@ -378,7 +382,7 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 				if idx == m.cursor {
 					cursorLine = len(lines)
 				}
-				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor), "\n")...)
+				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")...)
 				idx++
 			}
 		}
@@ -469,7 +473,7 @@ func (m Model) promptLine() string {
 }
 
 func (m Model) footer(spin string) string {
-	left := "  j/k move · enter open · / filter · r reload · q quit"
+	left := "  j/k move · enter open · / filter · ? help · q quit"
 	if m.filtering {
 		left = "  ctrl+n/p move · enter open · esc clear"
 	}
@@ -490,6 +494,10 @@ func (m Model) footer(spin string) string {
 func (m Model) View() string {
 	if m.width > 0 && m.width < minWidth {
 		return mutedStyle.Render(fmt.Sprintf("  terminal too narrow\n  (need %d cols)", minWidth))
+	}
+
+	if m.showHelp {
+		return m.helpOverlay()
 	}
 
 	spin := ""

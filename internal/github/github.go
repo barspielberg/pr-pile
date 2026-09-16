@@ -127,6 +127,55 @@ type prNode struct {
 	} `json:"commits"`
 }
 
+// CheckRepo verifies the repo is actually reachable. The search index reports
+// issueCount 0 for a repo the caller cannot see -- an org IP allow list blocking
+// you is indistinguishable from having no PRs -- but a direct repository query
+// returns a real error, so ask for one before trusting an empty board.
+func (c *Client) CheckRepo(ctx context.Context, repo string) error {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return fmt.Errorf("repo %q must be owner/name", repo)
+	}
+	body, err := json.Marshal(map[string]any{
+		"query":     `query($o:String!,$n:String!){repository(owner:$o,name:$n){name}}`,
+		"variables": map[string]any{"o": owner, "n": name},
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var out struct {
+		Data struct {
+			Repository *struct{ Name string } `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+	if len(out.Errors) > 0 {
+		return fmt.Errorf("%s", out.Errors[0].Message)
+	}
+	if out.Data.Repository == nil {
+		return fmt.Errorf("repo %s not found, or you cannot see it", repo)
+	}
+	return nil
+}
+
 // Search runs one rule's query. The search index is noisy (the same query has
 // ranged 1.4s-4.1s), so callers should run rules concurrently.
 func (c *Client) Search(ctx context.Context, query string, limit int) ([]PR, error) {

@@ -131,6 +131,25 @@ func blockerCell(pr github.PR) (string, lipgloss.Style) {
 	}
 }
 
+// authorWidth is deliberately narrow: lazygit, tig and neomutt all collapse to
+// initials in their dense views rather than showing a name, and the point of
+// this column is to be readable without being loud.
+const authorWidth = 3
+
+// initials shortens a GitHub login to fit authorWidth. Collisions are possible
+// and tolerable -- the column answers "is this mine or someone else's", and the
+// fuzzy filter matches the full login for anything more precise.
+func initials(login string) string {
+	if login == "" {
+		return ""
+	}
+	r := []rune(strings.ToLower(login))
+	if len(r) > authorWidth {
+		r = r[:authorWidth]
+	}
+	return string(r)
+}
+
 // age renders the largest single unit, right-aligned so digits line up. The
 // column is budgeted at 3 cells, so a week count that needs more than two
 // digits saturates rather than widening the row and pushing it past the frame.
@@ -208,9 +227,12 @@ func padLeft(s string, w int) string {
 
 // renderRow draws one PR. Every sub-slot is always emitted, blank when absent,
 // so no field ever shifts as state changes.
-func (m Model) renderRow(r board.Row, selected bool) string {
+func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	t := widthTier(m.width)
 	tw := titleWidth(m.width, t)
+	if showAuthor && t == tierFull {
+		tw -= authorWidth + 1
+	}
 
 	ci, ciStyle := ciCell(r.PR)
 	rev, revStyle := reviewCell(r.PR)
@@ -256,6 +278,10 @@ func (m Model) renderRow(r board.Row, selected bool) string {
 	b.WriteString(paint(fgStyle).Render(" "))
 	b.WriteString(m.renderTitle(r, titleStyle, paint, tw))
 	if t == tierFull {
+		if showAuthor {
+			b.WriteString(paint(fgStyle).Render(" "))
+			b.WriteString(paint(mutedStyle).Render(padLeft(initials(r.PR.Author), authorWidth)))
+		}
 		b.WriteString(paint(fgStyle).Render(" "))
 		b.WriteString(paint(mutedStyle).Render(padLeft(clip(age(r.PR.UpdatedAt), 3), 3)))
 	}
