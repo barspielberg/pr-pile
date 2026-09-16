@@ -135,10 +135,17 @@ func stacks(prs []github.PR) []Row {
 	byBase := map[string][]github.PR{}
 	heads := map[string]bool{}
 	for _, pr := range prs {
-		heads[pr.HeadRefName] = true
+		// An empty ref would make every PR look stacked on every other, since
+		// an unset base would "match" an unset head.
+		if pr.HeadRefName != "" {
+			heads[pr.HeadRefName] = true
+		}
+	}
+	stacked := func(pr github.PR) bool {
+		return pr.BaseRefName != "" && heads[pr.BaseRefName]
 	}
 	for _, pr := range prs {
-		if heads[pr.BaseRefName] {
+		if stacked(pr) {
 			byBase[pr.BaseRefName] = append(byBase[pr.BaseRefName], pr)
 		}
 	}
@@ -146,7 +153,7 @@ func stacks(prs []github.PR) []Row {
 	var rows []Row
 	for _, pr := range prs {
 		// Roots only: a PR stacked on another is emitted by its parent's chain.
-		if heads[pr.BaseRefName] {
+		if stacked(pr) {
 			continue
 		}
 		chain := walk(pr, byBase, map[int]bool{})

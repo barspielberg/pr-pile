@@ -136,3 +136,19 @@ func TestCyclicStackTerminates(t *testing.T) {
 		t.Fatal("cyclic stack did not terminate")
 	}
 }
+
+// An unset base must not read as "stacked on" an unset head, which would drop
+// every PR from a tree section.
+func TestUnstackedPRsSurviveTreeLayout(t *testing.T) {
+	b := New(config.Config{Repo: "o/r", Rules: []config.Rule{{Name: "mine", Query: "x", Tree: true}}})
+	b.Apply(Result{Index: 0, PRs: []github.PR{pr(1), pr(2)}})
+
+	if got := nums(b.Sections()[0]); len(got) != 2 {
+		t.Errorf("want both PRs, got %v", got)
+	}
+	for _, r := range b.Sections()[0].Rows {
+		if r.Prefix != "" {
+			t.Errorf("#%d should have no tree glyph, got %q", r.PR.Number, r.Prefix)
+		}
+	}
+}
