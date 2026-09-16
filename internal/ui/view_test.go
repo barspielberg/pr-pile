@@ -124,3 +124,22 @@ func TestActionTemplateRenders(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// A draft PR still has a review decision; the draft marker must not hide it.
+func TestDraftAndReviewAreSeparateColumns(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width = 150
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		Number: 1, Title: "draft but approved", IsDraft: true,
+		Review: "APPROVED", CIState: "SUCCESS", UpdatedAt: time.Now(),
+	}}})
+	m.board.Apply(board.Result{Index: 1})
+
+	out := m.View()
+	if !strings.Contains(out, "draft") {
+		t.Error("expected draft marker:\n" + out)
+	}
+	if !strings.Contains(out, "approved") {
+		t.Error("draft hid the review state:\n" + out)
+	}
+}

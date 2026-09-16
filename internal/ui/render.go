@@ -19,6 +19,7 @@ var (
 	greenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	redStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	yellowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	draftStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
 
 // Glyphs need a Nerd Font, same as the script this replaces.
@@ -38,10 +39,16 @@ func ciCell(pr github.PR) (string, lipgloss.Style) {
 	}
 }
 
-func reviewCell(pr github.PR) string {
+// Draft is a lifecycle state, not a review outcome: a draft PR still has a
+// review decision underneath, so the two get their own columns.
+func draftCell(pr github.PR) string {
 	if pr.IsDraft {
 		return " draft"
 	}
+	return ""
+}
+
+func reviewCell(pr github.PR) string {
 	switch pr.Review {
 	case "APPROVED":
 		return " approved"
@@ -90,12 +97,17 @@ func pad(s string, w int) string {
 func (m Model) renderRow(r board.Row, selected bool) string {
 	ci, ciColor := ciCell(r.PR)
 	merge := mergeCell(r.PR)
+	draft := draftCell(r.PR)
 
 	// Fixed columns: cursor(2) + tree(2) + number(6) + ci(11) + review(13)
-	// + gutters, with the title taking whatever is left.
+	// + gutters, with the title taking whatever is left. The draft and
+	// conflict markers only cost width on the rows that carry them.
 	used := 2 + 2 + 6 + 11 + 13 + 4
 	if merge != "" {
 		used += 11
+	}
+	if draft != "" {
+		used += 8
 	}
 	titleWidth := m.width - used
 	if titleWidth < 12 {
@@ -119,6 +131,9 @@ func (m Model) renderRow(r board.Row, selected bool) string {
 	b.WriteString(ciColor.Render(pad(ci, 11)))
 	b.WriteString(" ")
 	b.WriteString(dimStyle.Render(pad(reviewCell(r.PR), 13)))
+	if draft != "" {
+		b.WriteString(draftStyle.Render(pad(draft, 8)))
+	}
 	if merge != "" {
 		b.WriteString(yellowStyle.Render(pad(merge, 11)))
 	}
