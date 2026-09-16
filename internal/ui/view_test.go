@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -141,5 +142,37 @@ func TestDraftAndReviewAreSeparateColumns(t *testing.T) {
 	}
 	if !strings.Contains(out, "approved") {
 		t.Error("draft hid the review state:\n" + out)
+	}
+}
+
+// The board is taller than the terminal in the normal case, so the selected
+// row must stay on screen as the cursor moves.
+func TestCursorStaysVisibleInShortTerminal(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 20
+
+	var prs []github.PR
+	for i := 1; i <= 40; i++ {
+		prs = append(prs, github.PR{
+			Number: i, Title: fmt.Sprintf("pr number %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(100-i), 0),
+		})
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: prs})
+	m.board.Apply(board.Result{Index: 1})
+
+	for _, cursor := range []int{0, 5, 20, 39} {
+		m.cursor = cursor
+		out := m.View()
+		if got := strings.Count(out, "\n") + 1; got > m.height {
+			t.Errorf("cursor %d: view is %d lines, terminal is %d", cursor, got, m.height)
+		}
+		if !strings.Contains(out, "▸") {
+			t.Errorf("cursor %d: selected row is off screen:\n%s", cursor, out)
+		}
+		want := fmt.Sprintf("pr number %d", cursor+1)
+		if !strings.Contains(out, want) {
+			t.Errorf("cursor %d: expected %q on screen:\n%s", cursor, want, out)
+		}
 	}
 }
