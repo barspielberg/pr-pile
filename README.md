@@ -24,11 +24,15 @@ Rules are fetched in parallel but revealed in order: a section can only be drawn
 
 ## Config
 
-`~/.config/prs-mng/config.yml`, or `$PRS_MNG_CONFIG`. Defaults work with no file.
+`~/.config/prs-mng/config.yml` (honors `$XDG_CONFIG_HOME`), or `$PRS_MNG_CONFIG`.
+
+On first run inside a GitHub checkout, the repo is inferred with `gh` and a
+commented starter config is written. `PRS_MNG_REPO=owner/name` overrides the
+configured repo for one invocation.
 
 ```yaml
-repo: acme/monorepo
-repoPath: ~/Repos/acme/monorepo
+repo: owner/name
+repoPath: ~/Repos/owner/name
 refresh: 3m
 
 rules:
