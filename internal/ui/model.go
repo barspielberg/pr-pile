@@ -239,45 +239,78 @@ func (m *Model) clampCursor() {
 	}
 }
 
+// body renders every section and reports which line the cursor landed on, so
+// the viewport can scroll to it. A row can occupy two lines (failing gates),
+// so the cursor line is not derivable from the row index.
+func (m Model) body(spin string) (lines []string, cursorLine int) {
+	cursorLine = -1
+	idx := 0
+	for _, s := range m.board.Sections() {
+		header := sectionStyle.Render("  " + s.Rule.Name)
+		switch s.State {
+		case board.Pending:
+			lines = append(lines, "", header+dimStyle.Render("  "+spin+" loading…"))
+		case board.Failed:
+			lines = append(lines, "", header, redStyle.Render("    "+s.Err.Error()))
+		case board.Ready:
+			lines = append(lines, "", header+dimStyle.Render(fmt.Sprintf("  %d", len(s.Rows))))
+			if len(s.Rows) == 0 {
+				lines = append(lines, dimStyle.Render("    —"))
+			}
+			for _, row := range s.Rows {
+				if idx == m.cursor {
+					cursorLine = len(lines)
+				}
+				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor), "\n")...)
+				idx++
+			}
+		}
+	}
+	return lines, cursorLine
+}
+
+// window scrolls the body just far enough to keep the cursor visible, rather
+// than paging: the board is mostly read by scanning, so keeping neighbouring
+// rows stable matters more than centring the selection.
+func window(lines []string, cursorLine, height int) []string {
+	if height <= 0 || len(lines) <= height {
+		return lines
+	}
+	start := 0
+	if cursorLine >= 0 {
+		if cursorLine >= height {
+			start = cursorLine - height + 1
+		}
+		if max := len(lines) - height; start > max {
+			start = max
+		}
+	}
+	return lines[start : start+height]
+}
+
 func (m Model) View() string {
-	var b strings.Builder
 	spin := ""
 	if m.fetching {
 		spin = string(spinFrames[m.spinner%len(spinFrames)])
 	}
 
-	b.WriteString(headerStyle.Render("  PRs"))
-	b.WriteString("  " + dimStyle.Render(m.cfg.Repo))
+	head := headerStyle.Render("  PRs") + "  " + dimStyle.Render(m.cfg.Repo)
 	if spin != "" {
-		b.WriteString("  " + yellowStyle.Render(spin))
-	}
-	b.WriteString("\n")
-
-	idx := 0
-	for _, s := range m.board.Sections() {
-		b.WriteString("\n" + sectionStyle.Render("  "+s.Rule.Name))
-		switch s.State {
-		case board.Pending:
-			b.WriteString(dimStyle.Render("  " + spin + " loading…"))
-			b.WriteString("\n")
-		case board.Failed:
-			b.WriteString("\n" + redStyle.Render("    "+s.Err.Error()) + "\n")
-		case board.Ready:
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  %d", len(s.Rows))) + "\n")
-			if len(s.Rows) == 0 {
-				b.WriteString(dimStyle.Render("    —") + "\n")
-			}
-			for _, row := range s.Rows {
-				b.WriteString(m.renderRow(row, idx == m.cursor) + "\n")
-				idx++
-			}
-		}
+		head += "  " + yellowStyle.Render(spin)
 	}
 
-	b.WriteString("\n")
+	foot := dimStyle.Render("  j/k move · enter open · r reload · q quit")
 	if m.status != "" {
-		b.WriteString(dimStyle.Render("  " + m.status + "\n"))
+		foot = dimStyle.Render("  "+m.status) + "\n" + foot
 	}
-	b.WriteString(dimStyle.Render("  j/k move · enter open · r reload · q quit"))
-	return b.String()
+
+	lines, cursorLine := m.body(spin)
+	// Reserve the header, the blank line above the footer, and the footer
+	// itself; whatever is left belongs to the list.
+	if m.height > 0 {
+		avail := m.height - 2 - strings.Count(foot, "\n") - 1
+		lines = window(lines, cursorLine, avail)
+	}
+
+	return head + "\n" + strings.Join(lines, "\n") + "\n\n" + foot
 }
