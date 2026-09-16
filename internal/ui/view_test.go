@@ -9,6 +9,8 @@ import (
 	"github.com/barspielberg/prs-mng/internal/board"
 	"github.com/barspielberg/prs-mng/internal/config"
 	"github.com/barspielberg/prs-mng/internal/github"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func testCfg() config.Config {
@@ -32,8 +34,8 @@ func TestViewShowsLoadingUntilFirstSectionResolves(t *testing.T) {
 	if out := m.View(); strings.Contains(out, "should not be visible yet") {
 		t.Error("section 2 rendered before section 1 resolved:\n" + out)
 	}
-	if !strings.Contains(m.View(), "loading") {
-		t.Error("expected a loading indicator")
+	if !strings.Contains(m.View(), "REVIEW REQUESTED") {
+		t.Error("expected the pending section header")
 	}
 
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
@@ -57,7 +59,9 @@ func TestViewRendersStatesAndGates(t *testing.T) {
 	m.board.Apply(board.Result{Index: 1})
 
 	out := m.View()
-	for _, want := range []string{"#7", "failing", "conflicts", "changes req", "webapp_e2e"} {
+	// Glyphs, per the design spec: ✗1 = one failing check, ✗ = changes
+	// requested, ! = conflicts.
+	for _, want := range []string{"#7", "✗1", "!", "webapp_e2e"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q:\n%s", want, out)
 		}
@@ -137,11 +141,11 @@ func TestDraftAndReviewAreSeparateColumns(t *testing.T) {
 	m.board.Apply(board.Result{Index: 1})
 
 	out := m.View()
-	if !strings.Contains(out, "draft") {
-		t.Error("expected draft marker:\n" + out)
+	if !strings.Contains(out, "~") {
+		t.Error("expected the draft blocker glyph:\n" + out)
 	}
-	if !strings.Contains(out, "approved") {
-		t.Error("draft hid the review state:\n" + out)
+	if !strings.Contains(out, "✓") {
+		t.Error("draft hid the approved review glyph:\n" + out)
 	}
 }
 
@@ -167,12 +171,143 @@ func TestCursorStaysVisibleInShortTerminal(t *testing.T) {
 		if got := strings.Count(out, "\n") + 1; got > m.height {
 			t.Errorf("cursor %d: view is %d lines, terminal is %d", cursor, got, m.height)
 		}
-		if !strings.Contains(out, "▸") {
+		if !strings.Contains(out, "▌") {
 			t.Errorf("cursor %d: selected row is off screen:\n%s", cursor, out)
 		}
 		want := fmt.Sprintf("pr number %d", cursor+1)
 		if !strings.Contains(out, want) {
 			t.Errorf("cursor %d: expected %q on screen:\n%s", cursor, want, out)
 		}
+	}
+}
+
+// Status must sit at the same screen offset at every width: exactly one column
+// (title) flexes, so the eye learns one position.
+func TestStatusClusterIsPinnedAcrossWidths(t *testing.T) {
+	for _, w := range []int{80, 100, 120, 200} {
+		m := New(testCfg(), nil)
+		m.width = w
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+			Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
+			CIState: "SUCCESS", Review: "REVIEW_REQUIRED", UpdatedAt: time.Now(),
+		}}})
+		m.board.Apply(board.Result{Index: 1})
+
+		row := ""
+		for _, l := range strings.Split(m.View(), "\n") {
+			if strings.Contains(l, "#3248") {
+				row = stripANSI(l)
+			}
+		}
+		// Display cells, not bytes: the ▌ mark is multi-byte.
+		if got := lipgloss.Width(row[:strings.Index(row, "✓")]); got != 11 {
+			t.Errorf("width %d: CI glyph at column %d, want 11\n%q", w, got, row)
+		}
+	}
+}
+
+func TestNarrowWidthsDropFieldsInOrder(t *testing.T) {
+	pr := github.PR{
+		Number: 3248, Title: "feat(api-service): refuse order plan writes",
+		CIState: "SUCCESS", Review: "REVIEW_REQUIRED", UpdatedAt: time.Now().Add(-2 * time.Hour),
+	}
+	rowAt := func(w int) string {
+		m := New(testCfg(), nil)
+		m.width = w
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{pr}})
+		m.board.Apply(board.Result{Index: 1})
+		for _, l := range strings.Split(m.View(), "\n") {
+			if strings.Contains(l, "#3248") {
+				return stripANSI(l)
+			}
+		}
+		return ""
+	}
+
+	if got := rowAt(100); !strings.Contains(got, "2h") || !strings.Contains(got, "○") {
+		t.Errorf("FULL tier should keep age and review glyph: %q", got)
+	}
+	if got := rowAt(70); strings.Contains(got, "2h") {
+		t.Errorf("MID tier should drop age: %q", got)
+	} else if !strings.Contains(got, "○") {
+		t.Errorf("MID tier should keep the review glyph: %q", got)
+	}
+	if got := rowAt(50); strings.Contains(got, "○") {
+		t.Errorf("NARROW tier should drop the review glyph: %q", got)
+	} else if !strings.Contains(got, "✓") {
+		t.Errorf("NARROW tier must keep CI: %q", got)
+	}
+}
+
+// Below the minimum there is no honest layout, so say so rather than misalign.
+func TestBelowMinimumWidthSaysSo(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width = 30
+	if out := m.View(); !strings.Contains(out, "too narrow") {
+		t.Errorf("want a too-narrow message, got:\n%s", out)
+	}
+}
+
+// No row may overflow the terminal at any supported width.
+func TestNoRowOverflowsAtAnyWidth(t *testing.T) {
+	for w := minWidth; w <= 200; w += 7 {
+		m := New(testCfg(), nil)
+		m.width = w
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+			Number: 3248, Title: strings.Repeat("long title ", 30),
+			CIState: "FAILURE", FailedGates: []string{"a", "b"},
+			Mergeable: "CONFLICTING", IsDraft: true, UpdatedAt: time.Now(),
+		}}})
+		m.board.Apply(board.Result{Index: 1})
+		for _, l := range strings.Split(m.View(), "\n") {
+			if got := lipgloss.Width(stripANSI(l)); got > w {
+				t.Errorf("width %d: line is %d cells: %q", w, got, stripANSI(l))
+			}
+		}
+	}
+}
+
+// The selection background is the primary selection signal; the ▌ bar is the
+// second channel. A row built from per-cell styles loses an outer background
+// to the cells' own resets, so this asserts the fill actually survives.
+func TestSelectedRowIsFilledEdgeToEdge(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	m := New(testCfg(), nil)
+	m.width = 60
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "selected", CIState: "FAILURE", FailedGates: []string{"g"}, UpdatedAt: time.Now()},
+		{Number: 2, Title: "not selected", UpdatedAt: time.Now().Add(-time.Hour)},
+	}})
+	m.board.Apply(board.Result{Index: 1})
+	m.cursor = 0
+
+	var sel, unsel string
+	for _, l := range strings.Split(m.View(), "\n") {
+		if strings.Contains(l, "#1") {
+			sel = l
+		}
+		if strings.Contains(l, "#2") {
+			unsel = l
+		}
+	}
+	// 100 is "bright black background" (ANSI 8 as bg).
+	if !strings.Contains(sel, "\x1b[100m") && !strings.Contains(sel, "48;5;8") {
+		t.Errorf("selected row has no background fill:\n%q", sel)
+	}
+	if strings.Contains(unsel, "\x1b[100m") {
+		t.Errorf("unselected row should not be filled:\n%q", unsel)
+	}
+	if !strings.Contains(sel, "▌") {
+		t.Error("selected row is missing the mark bar")
+	}
+	// The fill must reach the right edge, or the band looks ragged.
+	if got := lipgloss.Width(stripANSI(sel)); got != m.width {
+		t.Errorf("selected row is %d cells, want %d", got, m.width)
+	}
+	// Failure colour must survive on top of the selection fill.
+	if !strings.Contains(sel, "✗") {
+		t.Error("selected+failing lost its CI glyph")
 	}
 }

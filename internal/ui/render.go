@@ -3,79 +3,161 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/barspielberg/prs-mng/internal/board"
 	"github.com/barspielberg/prs-mng/internal/github"
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Semantic tokens, all ANSI 0-15 so they resolve through the user's own
+// terminal theme rather than fixed RGB.
+//
+// muted is Faint on the default foreground, not index 8: "bright black" is a
+// light grey on light themes and can approach invisibility there, while Faint
+// dims whatever the theme's foreground already is and so is correct in both
+// directions.
 var (
-	headerStyle  = lipgloss.NewStyle().Bold(true)
-	dimStyle     = lipgloss.NewStyle().Faint(true)
-	sectionStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	numStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	treeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	selStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-	greenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	redStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	yellowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	draftStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	fgStyle        = lipgloss.NewStyle()
+	mutedStyle     = lipgloss.NewStyle().Faint(true)
+	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	attentionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	okStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	headerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	accentStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 )
 
-// Glyphs need a Nerd Font, same as the script this replaces.
+// Index 8 is unsafe as a foreground but safe as a background: in mainstream
+// schemes it sits between 0 and 7 in luminance, so it contrasts with the
+// terminal's own background whichever end that sits at. No foreground is forced
+// on the selected row, so it inherits a colour guaranteed to contrast.
+var selBg = lipgloss.Color("8")
+
+// Width tiers. Exactly one column flexes (title), so the status cluster stays
+// pinned at the same screen offset at every width.
+const (
+	fixedFull   = 23 // mark+gut+tree+number+gut+status(7)+gut+gut+age
+	fixedMid    = 19 // age dropped
+	fixedNarrow = 15 // review glyph dropped, status compressed to 3
+
+	minWidth    = 40
+	narrowUntil = 48
+	midUntil    = 60
+	fullFrom    = 76
+)
+
+type tier int
+
+const (
+	tierNarrow tier = iota
+	tierMid
+	tierFull
+)
+
+func widthTier(w int) tier {
+	switch {
+	case w >= fullFrom:
+		return tierFull
+	case w >= midUntil:
+		return tierMid
+	default:
+		return tierNarrow
+	}
+}
+
+func titleWidth(w int, t tier) int {
+	var fixed int
+	switch t {
+	case tierFull:
+		fixed = fixedFull
+	case tierMid:
+		fixed = fixedMid
+	default:
+		fixed = fixedNarrow
+	}
+	if n := w - fixed; n > 0 {
+		return n
+	}
+	return 0
+}
+
+// ciCell returns the 2-cell CI glyph plus count. Four distinct silhouettes so
+// the state survives losing colour.
 func ciCell(pr github.PR) (string, lipgloss.Style) {
 	switch pr.CIState {
 	case "SUCCESS":
-		return " passing", greenStyle
+		return "✓ ", okStyle
 	case "FAILURE", "ERROR":
-		if n := len(pr.FailedGates); n > 0 {
-			return fmt.Sprintf(" %d failing", n), redStyle
+		n := len(pr.FailedGates)
+		switch {
+		case n == 0:
+			return "✗ ", errorStyle
+		case n >= 10:
+			return "✗+", errorStyle
+		default:
+			return fmt.Sprintf("✗%d", n), errorStyle
 		}
-		return " failing", redStyle
 	case "PENDING", "EXPECTED":
-		return " running", yellowStyle
+		return "◐ ", attentionStyle
 	default:
-		return " none", dimStyle
+		return "· ", mutedStyle
 	}
 }
 
-// Draft is a lifecycle state, not a review outcome: a draft PR still has a
-// review decision underneath, so the two get their own columns.
-func draftCell(pr github.PR) string {
-	if pr.IsDraft {
-		return " draft"
-	}
-	return ""
-}
-
-func reviewCell(pr github.PR) string {
+func reviewCell(pr github.PR) (string, lipgloss.Style) {
 	switch pr.Review {
 	case "APPROVED":
-		return " approved"
+		return "✓", okStyle
 	case "CHANGES_REQUESTED":
-		return " changes req"
+		return "✗", errorStyle
 	case "REVIEW_REQUIRED":
-		return " review"
+		return "○", attentionStyle
 	default:
-		return " -"
+		return "·", mutedStyle
 	}
 }
 
-func mergeCell(pr github.PR) string {
-	if pr.Mergeable == "CONFLICTING" {
-		return " conflicts"
+// One cell for both booleans: a conflicted draft is primarily conflicted, since
+// the conflict is the thing that will bite. Both glyphs are ASCII so no font can
+// break this slot.
+func blockerCell(pr github.PR) (string, lipgloss.Style) {
+	switch {
+	case pr.Mergeable == "CONFLICTING":
+		return "!", errorStyle
+	case pr.IsDraft:
+		return "~", mutedStyle
+	default:
+		return " ", fgStyle
 	}
-	return ""
 }
 
-// clip truncates on display width, not bytes, so a title with wide glyphs
-// still fits the row instead of wrapping.
+// age renders the largest single unit, right-aligned so digits line up.
+func age(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Hour:
+		return "now"
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	default:
+		return fmt.Sprintf("%dw", int(d.Hours()/(24*7)))
+	}
+}
+
 func clip(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
 	if lipgloss.Width(s) <= w {
 		return s
+	}
+	if w <= 3 {
+		return ""
 	}
 	var b strings.Builder
 	for _, r := range s {
@@ -94,61 +176,112 @@ func pad(s string, w int) string {
 	return s
 }
 
+func padLeft(s string, w int) string {
+	if d := w - lipgloss.Width(s); d > 0 {
+		return strings.Repeat(" ", d) + s
+	}
+	return s
+}
+
+// renderRow draws one PR. Every sub-slot is always emitted, blank when absent,
+// so no field ever shifts as state changes.
 func (m Model) renderRow(r board.Row, selected bool) string {
-	ci, ciColor := ciCell(r.PR)
-	merge := mergeCell(r.PR)
-	draft := draftCell(r.PR)
+	t := widthTier(m.width)
+	tw := titleWidth(m.width, t)
 
-	// Fixed columns: cursor(2) + tree(2) + number(6) + ci(11) + review(13)
-	// + gutters, with the title taking whatever is left. The draft and
-	// conflict markers only cost width on the rows that carry them.
-	used := 2 + 2 + 6 + 11 + 13 + 4
-	if merge != "" {
-		used += 11
-	}
-	if draft != "" {
-		used += 8
-	}
-	titleWidth := m.width - used
-	if titleWidth < 12 {
-		titleWidth = 12
+	ci, ciStyle := ciCell(r.PR)
+	rev, revStyle := reviewCell(r.PR)
+	blocker, blockerStyle := blockerCell(r.PR)
+
+	titleStyle := fgStyle
+	if r.PR.IsDraft {
+		// A draft is by definition not actionable, so it recedes.
+		titleStyle = mutedStyle
 	}
 
-	cursor := "  "
-	if selected {
-		cursor = selStyle.Render("▸ ")
+	// The background has to be set on every segment rather than wrapped around
+	// the finished line: each segment's own style emits a reset, which would
+	// terminate an outer background part-way along the row.
+	paint := func(st lipgloss.Style) lipgloss.Style {
+		if selected {
+			return st.Background(selBg)
+		}
+		return st
 	}
-	title := clip(r.PR.Title, titleWidth)
 	if selected {
-		title = selStyle.Render(title)
+		titleStyle = titleStyle.Bold(true)
+	}
+
+	mark := " "
+	if selected {
+		mark = "▌"
 	}
 
 	var b strings.Builder
-	b.WriteString(cursor)
-	b.WriteString(treeStyle.Render(pad(r.Prefix, 2)))
-	b.WriteString(numStyle.Render(pad("#"+fmt.Sprint(r.PR.Number), 6)))
-	b.WriteString(" ")
-	b.WriteString(ciColor.Render(pad(ci, 11)))
-	b.WriteString(" ")
-	b.WriteString(dimStyle.Render(pad(reviewCell(r.PR), 13)))
-	if draft != "" {
-		b.WriteString(draftStyle.Render(pad(draft, 8)))
+	b.WriteString(paint(accentStyle).Render(mark))
+	b.WriteString(paint(fgStyle).Render(" "))
+	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
+	b.WriteString(paint(accentStyle).Render(pad("#"+fmt.Sprint(r.PR.Number), 6)))
+	b.WriteString(paint(fgStyle).Render(" "))
+	b.WriteString(paint(ciStyle).Render(ci))
+	if t > tierNarrow {
+		b.WriteString(paint(fgStyle).Render(" "))
+		b.WriteString(paint(revStyle).Render(rev))
+		b.WriteString(paint(fgStyle).Render(" "))
 	}
-	if merge != "" {
-		b.WriteString(yellowStyle.Render(pad(merge, 11)))
+	b.WriteString(paint(blockerStyle).Render(blocker))
+	b.WriteString(paint(fgStyle).Render(" "))
+	b.WriteString(paint(titleStyle).Render(pad(clip(r.PR.Title, tw), tw)))
+	if t == tierFull {
+		b.WriteString(paint(fgStyle).Render(" "))
+		b.WriteString(paint(mutedStyle).Render(padLeft(age(r.PR.UpdatedAt), 3)))
 	}
-	b.WriteString(" ")
-	b.WriteString(title)
 
-	// Failing gate names go on their own line: too long for a column, and
-	// only present on the few rows that are actually red.
+	line := b.String()
+	if selected {
+		// Fill to the right edge so the selected row reads as one band.
+		if gap := m.width - lipgloss.Width(stripSGR(line)); gap > 0 {
+			line += paint(fgStyle).Render(strings.Repeat(" ", gap))
+		}
+	}
+
+	// Failing gate names are secondary detail: muted, indented under the row,
+	// never competing with an actionable title.
 	if len(r.PR.FailedGates) > 0 {
 		cont := "  "
 		if r.Prefix == "╭╴" || r.Prefix == "│ " {
 			cont = "│ "
 		}
-		gates := clip(strings.Join(r.PR.FailedGates, ", "), titleWidth+20)
-		b.WriteString("\n    " + treeStyle.Render(cont) + "   " + redStyle.Render("└ "+gates))
+		gates := clip(strings.Join(r.PR.FailedGates, ", "), tw)
+		line += "\n  " + mutedStyle.Render(cont) + "       " + mutedStyle.Render("└ "+gates)
+	}
+	return line
+}
+
+// stripSGR measures a styled string's display width by removing SGR sequences.
+func stripSGR(s string) string {
+	var b strings.Builder
+	inEsc := false
+	for _, r := range s {
+		switch {
+		case r == 0x1b:
+			inEsc = true
+		case inEsc && r == 'm':
+			inEsc = false
+		case !inEsc:
+			b.WriteRune(r)
+		}
 	}
 	return b.String()
+}
+
+// renderSectionHeader draws a rule as a full-width band so it can never be
+// mistaken for a PR row.
+func (m Model) renderSectionHeader(name string, count string) string {
+	label := "━━ " + strings.ToUpper(name) + " "
+	tail := m.width - lipgloss.Width(label) - lipgloss.Width(count) - 1
+	if tail < 0 {
+		tail = 0
+	}
+	return headerStyle.Render(label+strings.Repeat("━", tail)) + " " + mutedStyle.Render(count)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/barspielberg/prs-mng/internal/config"
 	"github.com/barspielberg/prs-mng/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type Model struct {
@@ -246,16 +247,16 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 	cursorLine = -1
 	idx := 0
 	for _, s := range m.board.Sections() {
-		header := sectionStyle.Render("  " + s.Rule.Name)
 		switch s.State {
 		case board.Pending:
-			lines = append(lines, "", header+dimStyle.Render("  "+spin+" loading…"))
+			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, spin))
 		case board.Failed:
-			lines = append(lines, "", header, redStyle.Render("    "+s.Err.Error()))
+			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, "!"),
+				errorStyle.Render("    "+s.Err.Error()))
 		case board.Ready:
-			lines = append(lines, "", header+dimStyle.Render(fmt.Sprintf("  %d", len(s.Rows))))
+			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, fmt.Sprint(len(s.Rows))))
 			if len(s.Rows) == 0 {
-				lines = append(lines, dimStyle.Render("    —"))
+				lines = append(lines, mutedStyle.Render("    —"))
 			}
 			for _, row := range s.Rows {
 				if idx == m.cursor {
@@ -264,6 +265,13 @@ func (m Model) body(spin string) (lines []string, cursorLine int) {
 				lines = append(lines, strings.Split(m.renderRow(row, idx == m.cursor), "\n")...)
 				idx++
 			}
+		}
+	}
+	// The leading blank before the first section is chrome in a short pane.
+	if len(lines) > 0 && lines[0] == "" {
+		lines = lines[1:]
+		if cursorLine > 0 {
+			cursorLine--
 		}
 	}
 	return lines, cursorLine
@@ -288,29 +296,38 @@ func window(lines []string, cursorLine, height int) []string {
 	return lines[start : start+height]
 }
 
+// The footer carries the repo and the spinner, so no global header row is
+// needed: in a 20-row pane every chrome row costs a PR.
+func (m Model) footer(spin string) string {
+	left := "  j/k move · enter open · r reload · q quit"
+	if m.status != "" {
+		left = "  " + m.status
+	}
+	right := m.cfg.Repo
+	if spin != "" {
+		right += " " + spin
+	}
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
+	if gap < 1 {
+		return mutedStyle.Render(clip(left, m.width))
+	}
+	return mutedStyle.Render(left + strings.Repeat(" ", gap) + right + "  ")
+}
+
 func (m Model) View() string {
+	if m.width > 0 && m.width < minWidth {
+		return mutedStyle.Render(fmt.Sprintf("  terminal too narrow\n  (need %d cols)", minWidth))
+	}
+
 	spin := ""
 	if m.fetching {
 		spin = string(spinFrames[m.spinner%len(spinFrames)])
 	}
 
-	head := headerStyle.Render("  PRs") + "  " + dimStyle.Render(m.cfg.Repo)
-	if spin != "" {
-		head += "  " + yellowStyle.Render(spin)
-	}
-
-	foot := dimStyle.Render("  j/k move · enter open · r reload · q quit")
-	if m.status != "" {
-		foot = dimStyle.Render("  "+m.status) + "\n" + foot
-	}
-
+	foot := m.footer(spin)
 	lines, cursorLine := m.body(spin)
-	// Reserve the header, the blank line above the footer, and the footer
-	// itself; whatever is left belongs to the list.
 	if m.height > 0 {
-		avail := m.height - 2 - strings.Count(foot, "\n") - 1
-		lines = window(lines, cursorLine, avail)
+		lines = window(lines, cursorLine, m.height-1)
 	}
-
-	return head + "\n" + strings.Join(lines, "\n") + "\n\n" + foot
+	return strings.Join(lines, "\n") + "\n" + foot
 }
