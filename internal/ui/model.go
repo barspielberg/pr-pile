@@ -517,6 +517,10 @@ func max(a, b int) int {
 // of the next PR while costing little of a 20-row pane.
 const scrollOff = 2
 
+// scrollOffLines is the margin in lines. Two lines is one clean row of context
+// below the cursor, or the continuation line of a failing row.
+const scrollOffLines = 2
+
 // window scrolls the body so the cursor keeps a constant number of whole rows
 // beneath it.
 //
@@ -538,14 +542,20 @@ func window(lines []string, cursorRow, height int, rowStarts []int) []string {
 		cursorRow = len(rowStarts) - 1
 	}
 
-	// The bottom edge: just past the LAST LINE of the scrollOff-th row after
-	// the cursor. Measuring to the start of the row after it instead would
-	// only half-guarantee a two-line row there, which is the residual wobble.
-	end := len(lines)
-	if last := cursorRow + scrollOff; last < len(rowStarts) {
-		if after := last + 1; after < len(rowStarts) {
-			end = rowStarts[after]
-		}
+	// The bottom edge sits a fixed number of LINES below the cursor's row.
+	//
+	// A constant row margin and a constant screen position cannot both hold
+	// when rows differ in height: keeping scrollOff whole rows below the cursor
+	// makes the bottom edge move by 1 or 2 lines depending on whether those
+	// rows carry a failing-check line, and the cursor visibly bobs up and down
+	// as a result. The screen position is what the eye tracks, so that is the
+	// one held fixed.
+	// Anchored to the cursor row's FIRST line, not its last: a failing row is
+	// two lines tall, so measuring from its end would move the anchor by two
+	// whenever the cursor stepped onto or off one -- the cursor would bob.
+	end := rowStarts[cursorRow] + 1 + scrollOffLines
+	if end > len(lines) {
+		end = len(lines)
 	}
 	start := end - height
 	if start < 0 {

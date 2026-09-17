@@ -843,72 +843,69 @@ func TestAuthorColumnDoesNotStarveTheTitle(t *testing.T) {
 	}
 }
 
-// The cursor must keep a constant number of whole rows beneath it once the
-// board is scrolling. Anchoring the viewport's TOP to a row boundary cannot
-// achieve this -- the remainder has to be absorbed somewhere, and snapping it
-// away made the gap swing between 0 and 3 rows. Anchoring the bottom and
-// clipping the top row holds it exactly.
-func TestGapBelowCursorIsConstantWhileScrolling(t *testing.T) {
+// Once the board is scrolling, the cursor must hold a steady screen line.
+//
+// A constant row margin and a constant screen position cannot both hold when
+// rows differ in height: keeping N whole rows below the cursor moves the bottom
+// edge by one or two lines depending on whether those rows carry a failing-check
+// line, which makes the cursor bob. The screen position is what the eye tracks,
+// so that is the invariant. It still steps when a section header scrolls past,
+// because a header genuinely occupies lines.
+func TestCursorHoldsASteadyScreenLineWhileScrolling(t *testing.T) {
 	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
 		{Name: "Mine", Query: "a", Tree: true},
 		{Name: "Needs my review", Query: "b", Author: true},
-		{Name: "My team's", Query: "c", Author: true},
-		{Name: "Involved", Query: "d", Author: true},
 	}}
 	m := New(cfg, nil)
 	m.width, m.height = 147, 28
 
-	mk := func(base, n, failEvery int) []github.PR {
-		var out []github.PR
-		for i := 0; i < n; i++ {
-			pr := github.PR{
-				Number: base + i, Title: fmt.Sprintf("pr %d", base+i), Author: "someone",
-				CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
-			}
-			if failEvery > 0 && i%failEvery == 0 {
-				pr.CIState, pr.FailedGates = "FAILURE", []string{"a-failing-gate"}
-			}
-			out = append(out, pr)
+	var prs []github.PR
+	for i := 0; i < 30; i++ {
+		pr := github.PR{
+			Number: 3200 + i, Title: fmt.Sprintf("pr %d", 3200+i), Author: "someone",
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 		}
-		return out
+		if i%3 == 0 {
+			pr.CIState, pr.FailedGates = "FAILURE", []string{"a-failing-gate"}
+		}
+		prs = append(prs, pr)
 	}
-	m.board.Apply(board.Result{Index: 0, PRs: mk(3100, 5, 4)})
-	m.board.Apply(board.Result{Index: 1, PRs: mk(3200, 12, 3)})
-	m.board.Apply(board.Result{Index: 2, PRs: mk(3300, 3, 0)})
-	m.board.Apply(board.Result{Index: 3, PRs: mk(3400, 14, 2)})
+	m.board.Apply(board.Result{Index: 0, PRs: prs})
+	m.board.Apply(board.Result{Index: 1})
 
-	rows := m.visibleRows()
-	scrolling := false
-	for c := 0; c < len(rows)-scrollOff-1; c++ {
-		m.cursor = c
-		lines := strings.Split(m.View(), "\n")
-		want := fmt.Sprintf("#%d ", rows[c].PR.Number)
-		at := -1
-		for i, l := range lines {
-			if strings.Contains(stripANSI(l), want) {
-				at = i
-				break
+	lineOfCursor := func() int {
+		for i, l := range strings.Split(m.View(), "\n") {
+			if strings.Contains(l, "▌") {
+				return i
 			}
 		}
+		return -1
+	}
+
+	// Walk past the point where the board starts scrolling, then require the
+	// cursor's screen line to stop moving.
+	var settled int
+	for c := 0; c < len(m.visibleRows()); c++ {
+		m.cursor = c
+		at := lineOfCursor()
 		if at < 0 {
 			t.Fatalf("cursor %d is off screen", c)
 		}
-		below := 0
-		for _, l := range lines[at+1 : len(lines)-1] {
-			if strings.Contains(stripANSI(l), "#") {
-				below++
+		if c > 0 && at == settled {
+			// Reached the steady state; from here it must not drift. The last
+			// rows are excluded: at the end of the list there is nothing left
+			// to scroll, so the margin collapses and the cursor walks down to
+			// the final row.
+			for d := c; d < len(m.visibleRows())-scrollOffLines; d++ {
+				m.cursor = d
+				if got := lineOfCursor(); got != settled {
+					t.Errorf("cursor %d: screen line %d, want a steady %d", d, got, settled)
+					return
+				}
 			}
+			return
 		}
-		// Before the board scrolls the cursor simply walks down a still page,
-		// so the gap shrinks; once it reaches the margin it must stay there.
-		if below == scrollOff {
-			scrolling = true
-		}
-		if scrolling && below != scrollOff {
-			t.Errorf("cursor %d: %d rows below the cursor, want a constant %d", c, below, scrollOff)
-		}
+		settled = at
 	}
-	if !scrolling {
-		t.Fatal("the board never started scrolling; the test proves nothing")
-	}
+	t.Fatal("the cursor never settled; the test proves nothing")
 }
