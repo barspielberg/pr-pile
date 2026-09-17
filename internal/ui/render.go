@@ -28,37 +28,46 @@ var (
 	accentStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 )
 
-// Index 8 is unsafe as a foreground but safe as a background: in mainstream
-// schemes it sits between 0 and 7 in luminance, so it contrasts with the
-// terminal's own background whichever end that sits at. No foreground is forced
-// on the selected row, so it inherits a colour guaranteed to contrast.
-var selBg = lipgloss.Color("8")
+// A dark fill rather than index 8's mid grey. Mid grey is the worst possible
+// backdrop for foreground colours -- only 39 of the 216 cube colours clear 3:1
+// against it -- and it was the real reason the author palette kept collapsing
+// to a handful of entries. 237 is dark enough that colour choice is free again.
+// No foreground is forced on the selected row, so it keeps its own.
+var selBg = lipgloss.Color("237")
 
 // authorPalette colours the author column so the same person is the same
 // colour on every row, the way lazygit colours its authors.
 //
-// These are 256-cube indices rather than the 0-15 the rest of the file sticks
-// to, and that is the point: every colour the board already uses carries a
-// meaning -- 1 is CI failing, 2 approved, 3 pending, 4 the accent, 6 the
-// header -- and an author colour means nothing at all. Landing an author on
-// red or green would read as a status. There is no room left in 0-15 for
-// eight arbitrary colours once those and their bright variants are out, so
-// the palette comes from the cube instead: pale tints in the blue-violet,
-// magenta-pink and peach-tan families, none of them in the red or green the
-// status colours own.
+// 256-cube indices rather than the 0-15 the rest of the file uses, chosen for
+// distinctness from each other: the binding constraint used to be selBg, not
+// the hues, and now that the selected row is dark every entry clears 4.6:1 on
+// it. The only rule left is to avoid the exact ANSI 1 and 2 slots, so an author
+// is never literally the failing-red or approved-green pixel; sharing a family
+// with them is fine, since the author cell is its own column and status has its
+// own glyph.
 //
-// Every entry was checked against selBg as well as the default background,
-// since the selected row keeps its foreground and only gains a background.
-// Anything that washed out on colour 8 was dropped.
+// The length is load-bearing, and only the length: buckets are FNV-1a mod len,
+// so the count alone decides who shares a colour, not which colours are in the
+// list. 30-odd authors over 15 entries means sharing regardless -- colour is a
+// grouping hint and the initials stay the identity -- but 15 spreads the real
+// set better than 16, which piles six people onto one entry. Re-run the check
+// over the live logins before changing the count.
 var authorPalette = []lipgloss.Color{
-	"117", // sky
-	"189", // pale periwinkle
-	"183", // lavender
+	"44",  // teal
+	"50",  // aqua
+	"78",  // spring green
+	"108", // sage
+	"118", // lime
+	"147", // periwinkle
+	"148", // olive
+	"153", // pale sky
+	"178", // gold
+	"186", // khaki
+	"208", // orange
 	"213", // orchid
-	"211", // pink
-	"216", // peach
-	"180", // tan
-	"152", // pale teal
+	"217", // salmon
+	"226", // yellow
+	"229", // cream
 }
 
 // authorStyle maps a login to its palette entry. FNV-1a keeps it stable across
