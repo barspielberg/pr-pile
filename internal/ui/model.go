@@ -408,8 +408,9 @@ func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, 
 		case board.Pending:
 			// A section that already has rows keeps them, so only the count in
 			// the header changes while the refetch is in flight.
+			lines = append(lines, "")
 			anchors = append(anchors, len(lines))
-			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, spin))
+			lines = append(lines, m.renderSectionHeader(s.Rule.Name, spin))
 			for _, row := range s.Rows {
 				rendered := strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")
 				if idx == m.cursor {
@@ -427,12 +428,14 @@ func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, 
 				lines = append(lines, blanks(m.placeholderRows(s.Rule))...)
 			}
 		case board.Failed:
+			lines = append(lines, "")
 			anchors = append(anchors, len(lines))
-			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, "!"),
+			lines = append(lines, m.renderSectionHeader(s.Rule.Name, "!"),
 				errorStyle.Render("    "+s.Err.Error()))
 		case board.Ready:
+			lines = append(lines, "")
 			anchors = append(anchors, len(lines))
-			lines = append(lines, "", m.renderSectionHeader(s.Rule.Name, fmt.Sprint(len(s.Rows))))
+			lines = append(lines, m.renderSectionHeader(s.Rule.Name, fmt.Sprint(len(s.Rows))))
 			if len(s.Rows) == 0 {
 				// A resolved empty section collapses to one line: it knows it
 				// has nothing, so holding six blank rows for it would waste
@@ -526,6 +529,14 @@ const scrollOff = 2
 // line). Scrolling by whole units is what keeps movement even: a row is one or
 // two lines tall, so a line-based offset made each keypress scroll a different
 // distance and could leave an orphaned detail line at the top.
+// window scrolls the body to keep the cursor visible with a margin of context
+// around it. It is stateless -- start is derived from the cursor each frame --
+// so a resize or a refetch needs no separate handling.
+//
+// The viewport always starts on an anchor (a section header or a row's first
+// line). Scrolling by whole units is what keeps movement even: a row is one or
+// two lines tall, so a line-based offset made each keypress scroll a different
+// distance and could leave an orphaned detail line at the top.
 func window(lines []string, cursorLine, cursorHeight, height int, anchors []int) []string {
 	if height <= 0 || len(lines) <= height {
 		return lines
@@ -543,31 +554,45 @@ func window(lines []string, cursorLine, cursorHeight, height int, anchors []int)
 	}
 	cursorEnd := cursorLine + cursorHeight - 1
 
-	// Candidate starts are anchors at or before the cursor that keep the whole
-	// selected row on screen. maxStart is deliberately not a cap here: near the
-	// end of the list the only anchor that shows the row can sit past it, and
-	// showing a short final page beats starting mid-row.
-	var best = -1
+	// Sit as high as possible: the board should hold still while the cursor
+	// walks down it, and only scroll once the cursor would reach the bottom
+	// margin. Anchors are ascending, so the first one that fits is the answer
+	// and it keeps the cursor a stable distance from the bottom thereafter.
 	for _, a := range anchors {
 		if a > cursorLine {
 			break
 		}
-		if cursorEnd-a >= height {
-			continue
+		if cursorEnd+off-a < height {
+			return page(lines, a, height)
 		}
-		// Prefer the earliest anchor that still honours the margin, so the
-		// view scrolls as little as possible.
-		if best < 0 || a <= cursorLine-off {
+	}
+	// Near the end of the list nothing satisfies the margin; fall back to the
+	// last anchor that at least shows the whole selected row.
+	best := -1
+	for _, a := range anchors {
+		if a > cursorLine {
+			break
+		}
+		if cursorEnd-a < height {
 			best = a
 		}
 	}
 	if best < 0 {
 		best = snapToAnchor(cursorLine, anchors)
 	}
-	if end := best + height; end > len(lines) {
-		return lines[best:]
+	return page(lines, best, height)
+}
+
+// page returns height lines from start, or everything remaining when start
+// sits close enough to the end that a full page is not available.
+func page(lines []string, start, height int) []string {
+	if start < 0 {
+		start = 0
 	}
-	return lines[best : best+height]
+	if start+height > len(lines) {
+		return lines[start:]
+	}
+	return lines[start : start+height]
 }
 
 // snapToAnchor rounds a line offset down to the nearest line that can legally

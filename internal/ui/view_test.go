@@ -818,6 +818,10 @@ func TestScrollAlwaysStartsOnAWholeRow(t *testing.T) {
 					t.Errorf("h=%d fail=%d cursor=%d: viewport starts on an orphaned detail line: %q",
 						height, failEvery, cursor, top)
 				}
+				if first := strings.Split(view, "\n")[0]; strings.TrimSpace(stripANSI(first)) == "" {
+					t.Errorf("h=%d fail=%d cursor=%d: viewport starts on a blank line",
+						height, failEvery, cursor)
+				}
 				if !strings.Contains(view, "▌") {
 					t.Errorf("h=%d fail=%d cursor=%d: cursor is off screen", height, failEvery, cursor)
 				}
