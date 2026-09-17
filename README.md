@@ -69,7 +69,7 @@ Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`,
 | `j` / `k` | move |
 | `g` / `G` | top / bottom |
 | `enter` / `o` | open in browser (reuses an existing Arc tab) |
-| `c` | failing check names for the selected PR |
+| `c` | checks for the selected PR: failing and running named, passing counted |
 | `/` | filter |
 | `r` | reload |
 | `q` | quit |

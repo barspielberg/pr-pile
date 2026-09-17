@@ -1002,3 +1002,137 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 		t.Errorf("esc should not move: cursor %d, want 1", m.cursor)
 	}
 }
+
+// The overlay names what is wrong and what is running, and collapses what
+// passed. Listing passing checks would bury the signal: on the live board 45%
+// of contexts pass and 47% are skipped, against 4% failing.
+// See docs/checks-page.md.
+func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 24
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		Number: 7, Title: "t", CIState: "FAILURE", UpdatedAt: time.Now(),
+		FailedGates:  []string{"build-push-image webapp"},
+		PendingGates: []string{"webapp_e2e"},
+		PassedCount:  22, SkippedCount: 10,
+	}}})
+	m.board.Apply(board.Result{Index: 1})
+	m.showChecks = true
+
+	out := stripANSI(m.View())
+	for _, want := range []string{
+		"✗ build-push-image webapp", // failing, named
+		"◐ webapp_e2e",              // pending, named
+		"22 passing, 10 skipped",    // the rest, counted
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("checks overlay missing %q:\n%s", want, out)
+		}
+	}
+	// A passing check's NAME must never appear: the count is the whole point.
+	if strings.Contains(out, "lint-typecheck-test") {
+		t.Errorf("passing check names must not be listed:\n%s", out)
+	}
+}
+
+// Nearly half the live board sits in PENDING rollup state, where there is
+// nothing failing at all. Before pending gates were carried, `c` answered
+// "no failing checks" on all of them, which is a dead end.
+func TestChecksOverlayOnPendingPRNamesWhatIsRunning(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 24
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		Number: 8, Title: "t", CIState: "PENDING", UpdatedAt: time.Now(),
+		PendingGates: []string{"run platform e2e"},
+		PassedCount:  9, SkippedCount: 12,
+	}}})
+	m.board.Apply(board.Result{Index: 1})
+	m.showChecks = true
+
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "run platform e2e") {
+		t.Errorf("pending gate not named:\n%s", out)
+	}
+	if strings.Contains(out, "no failing checks") {
+		t.Errorf("a pending PR should say what is running, not report a dead end:\n%s", out)
+	}
+}
+
+// An all-green PR gets the count as the whole answer, not an empty list with a
+// footnote under it.
+func TestChecksOverlayOnGreenPRIsOneLine(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 24
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		Number: 9, Title: "t", CIState: "SUCCESS", UpdatedAt: time.Now(),
+		PassedCount: 22, SkippedCount: 10,
+	}}})
+	m.board.Apply(board.Result{Index: 1})
+	m.showChecks = true
+
+	if out := stripANSI(m.View()); !strings.Contains(out, "all 22 checks passing") {
+		t.Errorf("green PR should report its count:\n%s", out)
+	}
+}
+
+// The overlay grew a list that can outgrow the pane, so it must clip rather
+// than push its own footer off screen -- and say how much it hid.
+func TestChecksOverlayFitsThePane(t *testing.T) {
+	var gates []string
+	for i := range 40 {
+		gates = append(gates, fmt.Sprintf("failing-gate-%02d", i))
+	}
+	for _, height := range []int{8, 12, 20, 24, 50} {
+		m := New(testCfg(), nil)
+		m.width, m.height = 120, height
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+			Number: 1, Title: "t", CIState: "FAILURE", FailedGates: gates, UpdatedAt: time.Now(),
+		}}})
+		m.board.Apply(board.Result{Index: 1})
+		m.showChecks = true
+
+		out := stripANSI(m.View())
+		if n := len(strings.Split(strings.TrimRight(out, "\n"), "\n")); n > height {
+			t.Errorf("height %d: overlay is %d lines:\n%s", height, n, out)
+		}
+		// 40 gates genuinely fit a 50-row pane, so the notice is only owed
+		// when something was actually dropped.
+		clipped := !strings.Contains(out, "failing-gate-39")
+		if clipped != strings.Contains(out, "not shown") {
+			t.Errorf("height %d: clipped=%v but the notice disagrees:\n%s", height, clipped, out)
+		}
+		// The footer has to survive the clip, or the overlay stops telling the
+		// user how to leave it.
+		if !strings.Contains(out, "any key closes") {
+			t.Errorf("height %d: clip ate the footer:\n%s", height, out)
+		}
+	}
+}
+
+// The tally is what makes the overlay's numbers reconcile against GitHub, so
+// it has to survive a clip rather than be dropped as ordinary list content.
+func TestChecksOverlayTallySurvivesClipping(t *testing.T) {
+	var gates []string
+	for i := range 40 {
+		gates = append(gates, fmt.Sprintf("failing-gate-%02d", i))
+	}
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 12
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		Number: 1, Title: "t", CIState: "FAILURE", FailedGates: gates,
+		PassedCount: 9, SkippedCount: 12, UpdatedAt: time.Now(),
+	}}})
+	m.board.Apply(board.Result{Index: 1})
+	m.showChecks = true
+
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "9 passing, 12 skipped") {
+		t.Errorf("the tally was clipped away:\n%s", out)
+	}
+	if !strings.Contains(out, "not shown") {
+		t.Errorf("clipped without saying so:\n%s", out)
+	}
+	if n := len(strings.Split(strings.TrimRight(out, "\n"), "\n")); n > m.height {
+		t.Errorf("overlay is %d lines in a %d-row pane:\n%s", n, m.height, out)
+	}
+}

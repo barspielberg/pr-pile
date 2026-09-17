@@ -62,6 +62,7 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | `-review:approved` on "Needs my review" | Drops PRs somebody else already signed off, which is what makes it an action queue rather than a status list. Changes-requested PRs stay — those still want you. Note GitHub already drops a PR from `review-requested:@me` once *you* approve it. |
 | Numeric filter queries are exact, not fuzzy | Fuzzy treated `3248` as a subsequence, so it also hit titles containing 3…2…4…8 scattered across them. Bare numbers now match PR numbers by prefix. |
 | `sahilm/fuzzy`, not fzf's matcher | fzf ranks better but drags in tcell, go-colorful and a shellwords parser for one function. `bubbles/textinput` was also rejected: it pulls an OS clipboard shell-out for a paste binding this prompt does not need. |
+| The checks overlay names failures and pending, counts passes | 47% of check contexts on the live board are skipped and 45% pass, against 4% failing — listing passes buries 7 signal lines under 24 on the worst PR. Pending checks are named instead of counted because they are 1–3 per PR and say *what* you are waiting on. The overlay also stopped dead-ending: 47% of PRs are in PENDING rollup with nothing failing, where it used to say "no failing checks". `checks-page.md` has the measurements. |
 | Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `c` overlay and section names to a left gutter, so every line on the board is a row and one keypress scrolls at most one line — unconditionally, not by argument. `uniform-rows.md` has the measurements; `view-restructure.md` is the earlier study this overturned. |
 | Scroll margin of 2 rows | lazygit ships 2, fzf migrated 0 → 3 in 2024, nnn/micro use 3; no tool surveyed migrated the other way. 2 is the smallest in the cluster and still guarantees the first line of the next PR is visible. Every implementation caps at half the viewport; none is proportional (helix rejected that on the record, #8403). |
 | Sections keep their rows while refetching | Rebuilding from empty collapsed the board and re-expanded it section by section, shoving every row below each one that resolved. A row should move when a value changes, not because a request finished. |
@@ -221,34 +222,64 @@ on failure. While loading, a section with no rows yet reserves a placeholder
 block (capped at 6 rows, and at `(height-2)/len(rules)`) so the skeleton starts
 near its final height.
 
-### 3.6 Failing gate names (`c` overlay)
+### 3.6 The checks overlay (`c`)
 
-Gate names are **not** in the list. The row carries the count (`✗6`), which
-answers "is this broken" and "how broken"; the names answer "why", which is what
-you want after deciding a PR is worth investigating, not while scanning.
+Check names are **not** in the list. The row carries the count (`✗6`), which
+answers "is this broken" and "how broken"; the overlay answers "why", which is
+what you want after deciding a PR is worth investigating, not while scanning.
 
-Pressing `c` opens an overlay listing them in full, one per line, unclipped:
+The overlay **names what you can act on and counts what you cannot**:
+
+| bucket | treatment | glyph |
+|---|---|---|
+| failing | named, one per line, unclipped | `✗` `error` |
+| in progress | named, one per line | `◐` `attention`, name `muted` |
+| passing | counted | `✓` `ok`, text `muted` |
+| skipped | counted, in the same tally | — |
 
 ```
-  #3231 chore: bump @types/serve-static from 1.15.7 to 2.2.0
+  #3230 chore: bump @types/send from 0.17.4 to 1.2.1
 
   ✗ build-push-image customer-portal
   ✗ build-push-image billing-service
   ✗ build-push-image web-client
   ✗ build-push-image webapp
+  ◐ webapp_e2e
+  ◐ web_client_e2e
+  ✓ 9 passing, 12 skipped
 
   any key closes
 ```
 
-This is strictly more information than the old in-list continuation line, which
-joined the names with `, ` and clipped the result to one line — on a 4-to-6 gate
-dependabot PR it lost most of the list.
+Glyphs are the same `ciCell` vocabulary the rows use (§3.2), so nothing new has
+to be learned to read this page.
 
-Any key closes it; a **movement key closes it and moves in the same keypress**,
-so inspecting a PR does not interrupt scanning.
+Passing checks are counted rather than listed because on the live board **47% of
+check contexts are skipped and 45% pass, against 4% failing** — a full list puts
+7 signal lines under 24 on the worst PR and overflows the 20-row design target.
+Pending checks *are* named because they are few (1–3 per PR, never more) and
+specific: knowing it is `webapp_e2e` rather than `lint` is the difference
+between ten minutes and thirty seconds. `checks-page.md` has the measurements
+and the industry comparison.
 
-Gate names are deduped and stripped of shard suffixes
-(`apps_ci / webapp_e2e / Run E2E Tests (1, 5)`), ported from `pr-status.jq`.
+The tally reconciles: named lines plus counted ones account for every check
+considered, the way `gh pr checks` closes with its own tally. Without the
+skipped count the numbers would not add up against GitHub's UI.
+
+When nothing is failing and nothing is running, the count **is** the answer and
+the overlay is one line — `✓ all 20 checks passing`.
+
+**Overflow clips from the bottom** with an honest `… N more lines not shown`,
+rather than scrolling. Scrolling would need keys meaning "move within the
+overlay", which contradicts the one property that makes this a look rather than
+a mode: any key closes it, and a movement key **closes it and moves in the same
+keypress**. The `any key closes` footer always survives the clip.
+
+Names are deduped per bucket and stripped of shard suffixes
+(`apps_ci / webapp_e2e / Run E2E Tests (1, 5)`), ported from
+`pr-status.jq`. Umbrella gates (`CI Gate`, `E2E Status`) are dropped from every
+bucket because they only restate their children — which means the tally counts
+the contexts *we consider*, typically one or two below GitHub's raw total.
 
 ### 3.7 Stacked-PR tree glyphs
 
@@ -379,7 +410,7 @@ Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 | `enter` `o` | open in browser (reuses an existing Arc tab) |
 | `r` | reload |
 | `/` | filter |
-| `c` | failing check names for the selected PR (any key closes; a movement key closes *and* moves) |
+| `c` | checks for the selected PR: failing and running named, passing counted (any key closes; a movement key closes *and* moves) |
 | `?` | help + glyph legend |
 | `q` `esc` `ctrl+c` | quit |
 
