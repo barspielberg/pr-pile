@@ -364,6 +364,17 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 		titleStyle = titleStyle.Bold(true)
 	}
 
+	// ANSI 4 measures 1.21 against selBg, so on the selected row the cursor bar
+	// and the PR number would be the least readable things on it. 75 rather
+	// than bright-blue 12 because 4 and 12 are themeable slots with no fixed
+	// relationship -- Catppuccin, Tokyo Night and Dracula all define 12 as 4,
+	// so brightening to it would change nothing there. 75 is a fixed cube
+	// colour: 4.91 on selBg, and outside the author palette.
+	accent := accentStyle
+	if selected {
+		accent = accent.Foreground(lipgloss.Color("75"))
+	}
+
 	mark := " "
 	if selected {
 		mark = "▌"
@@ -375,10 +386,10 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	// part of the selected PR.
 	b.WriteString(headerStyle.Render(sectionGutter(section, gs)))
 	b.WriteString(mutedStyle.Render(sectionRule(gs)))
-	b.WriteString(paint(accentStyle).Render(mark))
+	b.WriteString(paint(accent).Render(mark))
 	b.WriteString(paint(fgStyle).Render(" "))
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
-	b.WriteString(paint(accentStyle).Render(pad("#"+fmt.Sprint(r.PR.Number), 6)))
+	b.WriteString(paint(accent).Render(pad("#"+fmt.Sprint(r.PR.Number), 6)))
 	b.WriteString(paint(fgStyle).Render(" "))
 	b.WriteString(paint(ciStyle).Render(ci))
 	if t > tierNarrow {
