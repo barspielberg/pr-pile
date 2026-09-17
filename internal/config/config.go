@@ -72,6 +72,9 @@ repo: %s
 refresh: 3m
 
 rules:
+  # A chain is worked out from the PRs in this section only, and limit truncates
+  # before that happens -- keep a tree rule's limit above the number of PRs it
+  # matches, or a stack can lose its base and regroup into a shorter chain.
   - name: Mine
     query: author:@me
     tree: true          # group stacked PRs into a chain
@@ -86,6 +89,9 @@ rules:
 
   # Review requested from a team you belong to rather than from you personally.
   # This also covers CODEOWNERS, which GitHub turns into team review requests.
+  # Note this is not the same as "PRs written by that team" -- GitHub has no
+  # qualifier for that; enumerate the members as author:a author:b instead,
+  # which ORs. docs/config-example.md works a team-based board through.
   # - name: My team's
   #   query: team-review-requested:ORG/TEAM
 
