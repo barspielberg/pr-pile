@@ -276,7 +276,7 @@ on failure. While loading, a section with no rows yet reserves a placeholder
 block (capped at 6 rows, and at `(height-2)/len(rules)`) so the skeleton starts
 near its final height.
 
-### 3.6 The checks overlay (`c`)
+### 3.6 The PR detail overlay (`c`)
 
 Check names are **not** in the list. The row carries the count (`✗6`), which
 answers "is this broken" and "how broken"; the overlay answers "why", which is
@@ -307,6 +307,77 @@ The overlay **names what you can act on and counts what you cannot**:
 
 Glyphs are the same `ciCell` vocabulary the rows use (§3.2), so nothing new has
 to be learned to read this page.
+
+Below the checks sits a **state block**: what is true about the PR itself rather
+than about its CI. It is what makes this the detail page rather than the checks
+page, and the key stayed `c` because the checks are still the top of it.
+
+```
+  #3186 fix(api-service): PROJ-1951 free unit numbers when a plan is abandoned
+
+  ✓ all 18 checks passing
+
+  ! conflicted · 26 commits behind master
+  ● 9 unresolved comments
+  author    Carol Diaz (cdiaz88)
+  review    ✓ Alice Chen (alicechen)
+  size      +596 −45 · 7 files
+  base       fix-PROJ-1839-reject-legacy-option
+  branch   PROJ-1951-unit-number-integrity
+  opened    6d ago · idle 1d
+
+  any key closes
+```
+
+**A line with nothing to say is not drawn.** An all-green PR opened this morning
+renders three lines, not eleven: the `base` line appears only when the base is
+not the repo default (which is read from the repo, never assumed to be
+`master`), the age line only once the PR has been open a day, and the conflict,
+comment and review lines only when they have something to report. A green PR
+does not earn a full page just because a full page exists.
+
+`●` (`attention`) is the one glyph added to §3.2's vocabulary, for unresolved
+review comments. It is filled where `○` "review required" is hollow: something
+is *here*, rather than something has not happened yet. That line is the highest
+-value addition on the page — measured on the live board, 6 of 50 PRs have
+unresolved comments and on **5 of those 6 the row's review glyph does not say
+`✗`**; two are drawn `✓ approved` with conversations still open.
+
+There is no conflicting-file list, and there will not be one. GitHub exposes no
+per-file conflict data in either API, and the only computable proxy (files both
+branches touched) over-reports by 3× in the median case and 8× at worst against
+a real `git merge-tree`. `N commits behind` is the honest answer to the question
+underneath "which files conflict" — *how much work is this to fix?*
+`pr-detail.md` §4 has the ground-truth measurements.
+
+**Two of these lines arrive late.** `behindBy`, unresolved threads, the reviewer
+names and the default branch come from a second request made on `c` press,
+measured at 1.2–1.9 s. The overlay is drawn immediately from data the board
+already holds and those lines appear when they land, so `c` is instant and
+`c`-then-any-key works even if the request never returns. Fetching them upfront
+would mean ~100 requests on a cold start, roughly doubling the 2–4 s the tool
+commits to in §2.
+
+Most late lines are simply **absent** until they arrive — a line that appears
+disturbs less than one that changes under the eye. The **reviewer line is the
+exception** and holds its place with a `…`: it is the one field requested
+by name, and a reviewer that materialises a second later reads as the page
+having been wrong rather than merely incomplete. The placeholder is static, not
+the board's spinner — the overlay is a still page, and the only moving thing on
+it would pull the eye to the least important line.
+
+Responses are keyed by PR number, so one that lands after the cursor has moved
+on files itself under the PR it describes. Nothing is cancelled: holding `j`
+with `c` at each row leaves requests answering questions nobody is asking, which
+is harmless and cheaper than threading cancellation through the command model.
+A PR already answered is never re-asked within a session.
+
+The state block is clipped **before** the checks block and never interleaved
+with it. Drop order, first dropped first: head branch, age, base (when it was
+going to say the default anyway), size, author, review, unresolved comments,
+then the conflict line last. Only once the state block is entirely gone does the
+existing clip eat the check list from the bottom. A PR with 8 failing checks
+must not drop a failure to make room for its branch name.
 
 Passing checks are counted rather than listed because on the live board **47% of
 check contexts are skipped and 45% pass, against 4% failing** — a full list puts

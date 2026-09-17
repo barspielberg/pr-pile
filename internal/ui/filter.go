@@ -6,20 +6,34 @@ import (
 	"strings"
 
 	"github.com/barspielberg/prs-mng/internal/board"
+	"github.com/barspielberg/prs-mng/internal/github"
 	"github.com/sahilm/fuzzy"
 )
 
 // haystack is what a row is matched against: number, author and title, so one
 // query spans all three. The author sits before the title so its characters
 // cannot be mistaken for title positions when translating match indexes back.
+//
+// The author is login and display name together, so "Carol" finds a PR
+// authored by `cdiaz88`. The name is how you think of a person, the login
+// is what GitHub calls them, and the row shows only three initials of either.
 func haystack(r board.Row) string {
-	return fmt.Sprintf("#%d %s %s", r.PR.Number, r.PR.Author, r.PR.Title)
+	return fmt.Sprintf("#%d %s %s", r.PR.Number, searchableAuthor(r.PR), r.PR.Title)
 }
 
 // titleOffset is where the title starts inside haystack, used to translate
 // match positions back into title indexes for highlighting.
 func titleOffset(r board.Row) int {
-	return len(fmt.Sprintf("#%d %s ", r.PR.Number, r.PR.Author))
+	return len(fmt.Sprintf("#%d %s ", r.PR.Number, searchableAuthor(r.PR)))
+}
+
+// searchableAuthor is a person in both the forms you might type. Null for 36%
+// of this board's authors, which is why the login is never dropped.
+func searchableAuthor(pr github.PR) string {
+	if pr.AuthorName == "" {
+		return pr.Author
+	}
+	return pr.Author + " " + pr.AuthorName
 }
 
 type rowSource []board.Row

@@ -32,9 +32,22 @@ type Model struct {
 	filter     string
 	showHelp   bool
 	showChecks bool
+
+	// detail holds what the on-demand request returned, keyed by PR number.
+	// The key is what makes stale responses harmless: one that lands after the
+	// cursor has moved on files itself under the PR it describes rather than
+	// overwriting whatever is selected now, so nothing has to be cancelled.
+	detail map[int]github.Detail
+	// inflight is the set of PRs already asked about, so holding `j` cannot
+	// fire the same request twice while the first is still out.
+	inflight map[int]bool
 }
 
 type resultMsg board.Result
+type detailMsg struct {
+	detail github.Detail
+	err    error
+}
 type tickMsg time.Time
 type spinMsg time.Time
 type refreshMsg struct{}
@@ -43,7 +56,8 @@ type statusMsg string
 var spinFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
 func New(cfg config.Config, client *github.Client) Model {
-	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true}
+	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
+		detail: map[int]github.Detail{}, inflight: map[int]bool{}}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -66,6 +80,38 @@ func (m Model) fetchRule(i int, r config.Rule) tea.Cmd {
 		defer cancel()
 		prs, err := m.client.Search(ctx, m.cfg.SearchQuery(r), r.PageSize())
 		return resultMsg{Index: i, PRs: prs, Err: err}
+	}
+}
+
+// fetchDetail asks for the on-demand half of the overlay: how far behind its
+// base the PR is, its unresolved conversations, who reviewed it, and what the
+// repo's default branch is. Measured at 1.2-1.9s, so the overlay draws without
+// it and these lines arrive late.
+//
+// Nothing is cancelled. Responses carry their PR number and file themselves
+// under it, so holding `j` with `c` at each row leaves requests that answer a
+// question nobody is asking any more -- harmless, and cheaper than threading
+// cancellation through Bubble Tea's command model. What is guarded is asking
+// twice: a PR already answered or already out is not requested again.
+func (m Model) fetchDetail(pr github.PR) tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	// It does not go stale within a session: behindBy and unresolved threads
+	// move on the scale of a working day, and `r` refetches the board anyway.
+	if _, done := m.detail[pr.Number]; done || m.inflight[pr.Number] {
+		return nil
+	}
+	m.inflight[pr.Number] = true
+
+	repo, number, head := m.cfg.Repo, pr.Number, pr.HeadRefName
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		d, err := client.Detail(ctx, repo, number, head)
+		d.Number = number // so a failed response is still attributable
+		return detailMsg{detail: d, err: err}
 	}
 }
 
@@ -105,6 +151,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg, refreshMsg:
 		return m.refresh()
+
+	case detailMsg:
+		delete(m.inflight, msg.detail.Number)
+		// A failed request costs the on-demand lines and nothing else: the
+		// overlay is already on screen and already useful without them, and
+		// saying so at the user would be noise about a page they are reading.
+		if msg.err == nil && msg.detail.Number != 0 {
+			m.detail[msg.detail.Number] = msg.detail
+		}
+		return m, nil
 
 	case statusMsg:
 		m.status = string(msg)
@@ -223,10 +279,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = !m.showHelp
 		return m, nil
 	case "c":
-		if _, ok := m.selected(); ok {
-			m.showChecks = true
+		pr, ok := m.selected()
+		if !ok {
+			return m, nil
 		}
-		return m, nil
+		m.showChecks = true
+		return m, m.fetchDetail(pr)
 	case "j", "down":
 		m.cursor++
 		m.clampCursor()
@@ -609,7 +667,7 @@ func (m Model) promptLine() string {
 }
 
 func (m Model) footer(spin string) string {
-	left := "  j/k move · l/h section · enter open · c checks · / filter · ? help · q quit"
+	left := "  j/k move · l/h section · enter open · c detail · / filter · ? help · q quit"
 	if m.filtering {
 		left = "  ctrl+n/p move · enter open · esc clear"
 	}
@@ -636,7 +694,7 @@ func (m Model) View() string {
 		return m.helpOverlay()
 	}
 	if m.showChecks {
-		return m.checksOverlay()
+		return m.detailOverlay()
 	}
 
 	spin := ""

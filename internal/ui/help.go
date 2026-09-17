@@ -8,6 +8,8 @@ import (
 	"github.com/barspielberg/prs-mng/internal/github"
 )
 
+// pr-detail.go carries the state block that sits under the check list.
+
 // The glyph key is rendered from the same helpers the rows use, so a legend can
 // never drift from what is actually on screen.
 func (m Model) helpOverlay() string {
@@ -22,7 +24,7 @@ func (m Model) helpOverlay() string {
 		{"l / h", "next / previous section"},
 		{"g / G", "top / bottom"},
 		{"enter", "open in browser"},
-		{"c", "checks for this PR"},
+		{"c", "detail for this PR"},
 		{"/", "filter"},
 		{"r", "reload"},
 		{"?", "close this"},
@@ -70,32 +72,85 @@ func (m Model) helpOverlay() string {
 	return b.String()
 }
 
-// checksOverlay answers "why is CI not green" for the selected PR. The row
-// carries only the count (✗6); this is where the names live.
+// detailOverlay answers "what do I do about this PR" for the selected row. It
+// began as the checks page and kept the key: the checks block is still the top
+// of it, so `c` still means what it did.
 //
-// It is not a full check list. Measured on the live board, 47% of contexts are
-// SKIPPED and 45% are SUCCESS, against 4% failing -- listing everything would
-// bury 7 signal lines under 24 on the worst PR. So failures and pending checks
-// are named, passing checks collapse to a count, and skipped ones are dropped.
-// docs/checks-page.md has the measurements and what was rejected.
+// The page is two blocks. The checks block names what is failing or running and
+// counts what passed -- 47% of contexts on this board are SKIPPED and 45%
+// SUCCESS, so listing everything would bury the signal. The state block below
+// it says what is true about the PR itself: conflicted and how far behind,
+// unresolved conversations, who it is from, how big, what it targets.
+//
+// Two of those lines arrive on a second request and are simply absent until it
+// lands (docs/pr-detail.md §7). The page never waits for the network.
 //
 // It closes on the next movement key, so it reads as a look rather than a mode.
-func (m Model) checksOverlay() string {
+func (m Model) detailOverlay() string {
 	pr, ok := m.selected()
 	if !ok {
 		return ""
 	}
 
-	var b strings.Builder
-	b.WriteString(headerStyle.Render(fmt.Sprintf("  #%d", pr.Number)) + " " +
-		mutedStyle.Render(clip(pr.Title, max(0, m.width-12))) + "\n\n")
+	lines := []string{
+		headerStyle.Render(fmt.Sprintf("  #%d", pr.Number)) + " " +
+			mutedStyle.Render(clip(pr.Title, max(0, m.width-12))),
+		"",
+	}
+	lines = append(lines, m.overlayBody(pr)...)
+	lines = append(lines, "", mutedStyle.Render("  any key closes"))
 
-	for _, line := range m.checkLines(pr) {
-		b.WriteString(line + "\n")
+	// No trailing newline: a pane is as many lines as it is tall, and one more
+	// scrolls the header off the top edge -- which at 14 rows is exactly where
+	// the page is already spending every line it has.
+	return strings.Join(lines, "\n")
+}
+
+// overlayBody assembles both blocks and enforces the degradation order: the
+// state block is clipped from its own bottom, entirely, before the checks block
+// gives up a single line. A PR with 8 failing checks must not drop a failure to
+// make room for its branch name -- that inverts what the page is for.
+// See docs/pr-detail.md §6.2.
+func (m Model) overlayBody(pr github.PR) []string {
+	checks := m.checkLines(pr)
+	state := m.stateLines(pr)
+	if len(state) == 0 {
+		return checks
 	}
 
-	b.WriteString("\n" + mutedStyle.Render("  any key closes") + "\n")
-	return b.String()
+	// The checks block is clipped only once the state block is entirely gone,
+	// so its budget is whatever is left after the state block has shrunk to
+	// nothing -- which is the full body budget.
+	body := m.bodyBudget()
+	if body <= 0 {
+		return append(checks, state...)
+	}
+
+	// +1 for the blank line between the blocks.
+	if room := body - len(checks) - 1; room < len(state) {
+		if room < 1 {
+			// No honest room for any state line: the whole block goes, and the
+			// checks block takes over the clipping exactly as it does today.
+			return checks
+		}
+		hidden := len(state) - (room - 1)
+		state = append(state[:room-1],
+			"  "+mutedStyle.Render(fmt.Sprintf("… %s not shown", plural(hidden, "more line"))))
+	}
+
+	out := append([]string(nil), checks...)
+	out = append(out, "")
+	return append(out, state...)
+}
+
+// bodyBudget is how many lines both blocks together may occupy: the pane less
+// the #-header and its blank line, and the blank line and footer below.
+func (m Model) bodyBudget() int {
+	const chrome = 4
+	if m.height <= 0 {
+		return 0
+	}
+	return m.height - chrome
 }
 
 // checkLines is the overlay's body, split out so a test can assert on the list
