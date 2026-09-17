@@ -504,9 +504,6 @@ func max(a, b int) int {
 	return b
 }
 
-// window scrolls the body just far enough to keep the cursor visible, rather
-// than paging: the board is mostly read by scanning, so keeping neighbouring
-// rows stable matters more than centring the selection.
 // scrollOff is how many lines of context are kept beyond the cursor, so moving
 // down shows what is coming rather than pinning the cursor to the bottom edge.
 // lazygit ships 2 and fzf 3; 2 is enough here to always reveal the first line
@@ -517,26 +514,14 @@ const scrollOff = 2
 // around it. It is stateless -- start is derived from the cursor each frame --
 // so a resize or a refetch needs no separate handling.
 //
-// cursorHeight is the selected row's line count: a PR with failing checks is
-// two lines, and anchoring to only its first line would leave the detail below
-// the fold. The scrollOff margin happens to cover a 2-line row on its own, so
-// this is belt and braces -- it is what keeps the two independent.
-// window scrolls the body to keep the cursor visible with a margin of context
-// around it. It is stateless -- start is derived from the cursor each frame --
-// so a resize or a refetch needs no separate handling.
-//
 // The viewport always starts on an anchor (a section header or a row's first
-// line). Scrolling by whole units is what keeps movement even: a row is one or
-// two lines tall, so a line-based offset made each keypress scroll a different
+// line). Scrolling by whole units keeps movement even: a row is one or two
+// lines tall, so a line-based offset made each keypress scroll a different
 // distance and could leave an orphaned detail line at the top.
-// window scrolls the body to keep the cursor visible with a margin of context
-// around it. It is stateless -- start is derived from the cursor each frame --
-// so a resize or a refetch needs no separate handling.
 //
-// The viewport always starts on an anchor (a section header or a row's first
-// line). Scrolling by whole units is what keeps movement even: a row is one or
-// two lines tall, so a line-based offset made each keypress scroll a different
-// distance and could leave an orphaned detail line at the top.
+// Known defect: the cursor's distance from the bottom still drifts, because a
+// section header is two lines but counts as one unit here. See
+// docs/DESIGN.md.
 func window(lines []string, cursorLine, cursorHeight, height int, anchors []int) []string {
 	if height <= 0 || len(lines) <= height {
 		return lines
