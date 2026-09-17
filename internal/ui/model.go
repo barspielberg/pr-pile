@@ -32,6 +32,9 @@ type Model struct {
 	filter     string
 	showHelp   bool
 	showChecks bool
+	// helpScroll is the help page's top line. The legend outgrows a short pane
+	// and the reader needs all of it, so that page scrolls rather than clips.
+	helpScroll int
 
 	// detail holds what the on-demand request returned, keyed by PR number.
 	// The key is what makes stale responses harmless: one that lands after the
@@ -134,7 +137,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinMsg:
-		if !m.fetching {
+		// The detail overlay's loader is the same spinner, so the tick has to
+		// survive a board that has finished fetching: otherwise the loader is
+		// a frozen glyph, which reads as stuck rather than as working.
+		if !m.fetching && len(m.inflight) == 0 {
 			return m, nil
 		}
 		m.spinner++
@@ -263,8 +269,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.showHelp = false
-		return m, nil
+		return m.handleHelpKey(msg)
 	}
 	if m.filtering {
 		return m.handleFilterKey(msg)
@@ -276,15 +281,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 		return m, nil
 	case "?":
-		m.showHelp = !m.showHelp
+		m.showHelp = true
+		m.helpScroll = 0
 		return m, nil
-	case "c":
+	case "d":
 		pr, ok := m.selected()
 		if !ok {
 			return m, nil
 		}
 		m.showChecks = true
-		return m, m.fetchDetail(pr)
+		cmd := m.fetchDetail(pr)
+		if cmd == nil {
+			return m, nil
+		}
+		// A board that has finished fetching has no live tick, so the loader
+		// would sit on one frozen frame. Restarting it here is safe because
+		// fetchDetail returns nil unless it actually started a request, and a
+		// still-fetching board already has its own tick -- adding a second
+		// would run the spinner at double speed.
+		if m.fetching {
+			return m, cmd
+		}
+		return m, tea.Batch(cmd, spinTick())
 	case "j", "down":
 		m.cursor++
 		m.clampCursor()
@@ -297,6 +315,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "h", "left":
 		m.cursor = m.prevSection()
 		m.clampCursor()
+	// `gg` is the vim chord, and it works because bare `g` already goes to the
+	// top: the second press repeats a move that is its own fixed point. That
+	// buys the chord without a pending-key mode, so a stray `g` cannot leave
+	// the board waiting for a key that never comes.
 	case "g", "home":
 		m.cursor = 0
 	case "G", "end":
@@ -315,6 +337,39 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
+	return m, nil
+}
+
+// handleHelpKey scrolls the help page or closes it. The page used to close on
+// any key; scrolling took j/k away from that, so the rule is now the inverse of
+// a mode: the scroll keys scroll, and **everything else closes**. A key the
+// reader guesses at still leaves the page, which is what keeps this from being
+// somewhere you can get stuck -- and the page says so on its bottom row, since
+// the old contract is no longer true.
+func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	page := max(1, m.height-2)
+	switch msg.String() {
+	case "j", "down":
+		m.helpScroll++
+	case "k", "up":
+		m.helpScroll--
+	case "ctrl+d", "pgdown":
+		m.helpScroll += page
+	case "ctrl+u", "pgup":
+		m.helpScroll -= page
+	case "g", "home":
+		m.helpScroll = 0
+	case "G", "end":
+		m.helpScroll = len(m.helpLines())
+	default:
+		m.showHelp = false
+		return m, nil
+	}
+	// Clamped here as well as at render. Render-time clamping alone lets the
+	// stored offset drift past the end while j is held, and then the first k
+	// only walks that invisible surplus back down -- the page sits still for as
+	// many presses as it overshot, which reads as k being broken.
+	m.helpScroll = m.helpTop(len(m.helpLines()), max(1, m.height-1))
 	return m, nil
 }
 
@@ -666,21 +721,53 @@ func (m Model) promptLine() string {
 		strings.Repeat(" ", gap) + mutedStyle.Render(right+"  ")
 }
 
+// cursorSection names the section the cursor is in and where it sits within it.
+// It is bound to the cursor, not to the top visible row: a board that fits the
+// pane never scrolls, so a top-row-bound field is frozen at its first section
+// forever -- which is exactly how the reverted sticky line failed. See
+// docs/section-layout.md §14.
+func (m Model) cursorSection() (name string, pos, total int) {
+	idx := 0
+	for _, s := range m.sections() {
+		if m.cursor >= idx && m.cursor < idx+len(s.Rows) {
+			return s.Rule.Name, m.cursor - idx + 1, len(s.Rows)
+		}
+		idx += len(s.Rows)
+	}
+	return "", 0, 0
+}
+
 func (m Model) footer(spin string) string {
-	left := "  j/k move · l/h section · enter open · c detail · / filter · ? help · q quit"
+	left := "  j/k move · l/h section · enter open · d detail · / filter · ? help · q quit"
 	if m.filtering {
 		left = "  ctrl+n/p move · enter open · esc clear"
 	}
 	if m.status != "" {
 		left = "  " + m.status
 	}
+	// The section name takes the right field and the repo yields it: the repo
+	// is a constant the user chose and can read in the window title, while the
+	// section changes under every keypress. The gutter only has 8 cells for it,
+	// so this is the one place the full name and the count are legible.
 	right := m.cfg.Repo
+	if name, pos, total := m.cursorSection(); name != "" {
+		right = fmt.Sprintf("%s · %d of %d", strings.ToUpper(name), pos, total)
+	}
 	if spin != "" {
 		right += " " + spin
 	}
+	// When the two fields do not both fit, the keys clip and the right field
+	// survives whole: the keys are a reminder of things the user already knows,
+	// while the section name is the only place the full name and the count are
+	// on screen at all. Below that the right field goes too, rather than being
+	// clipped into a half-truth like `NEEDS MY REVI`.
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
-		return mutedStyle.Render(clip(left, m.width))
+		keys := m.width - lipgloss.Width(right) - 3
+		if keys < 8 {
+			return mutedStyle.Render(clip(left, m.width))
+		}
+		return mutedStyle.Render(clip(left, keys) + " " + right + "  ")
 	}
 	return mutedStyle.Render(left + strings.Repeat(" ", gap) + right + "  ")
 }

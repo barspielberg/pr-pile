@@ -6,70 +6,164 @@ import (
 
 	"github.com/barspielberg/prs-mng/internal/config"
 	"github.com/barspielberg/prs-mng/internal/github"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // pr-detail.go carries the state block that sits under the check list.
 
+// helpBlock is one titled group of rows. The page is assembled from blocks
+// rather than written out as a string so the renderer can window it: the legend
+// is longer than a short pane and the reader needs all of it, so it scrolls.
+type helpBlock struct {
+	title string
+	rows  [][2]string
+}
+
 // The glyph key is rendered from the same helpers the rows use, so a legend can
 // never drift from what is actually on screen.
-func (m Model) helpOverlay() string {
-	line := func(label, body string) string {
-		return "  " + mutedStyle.Render(pad(label, 10)) + body
-	}
-
-	var b strings.Builder
-	b.WriteString(headerStyle.Render("  KEYS") + "\n")
-	for _, k := range [][2]string{
-		{"j / k", "move"},
-		{"l / h", "next / previous section"},
-		{"g / G", "top / bottom"},
-		{"enter", "open in browser"},
-		{"c", "detail for this PR"},
+func (m Model) helpBlocks() []helpBlock {
+	// Aliases are grouped onto the key's own line rather than listed
+	// separately: the reader is asking "how do I move", and four rows saying
+	// "move" answer it worse than one.
+	keys := helpBlock{"KEYS", [][2]string{
+		{"j / k", "move ( ↓ ↑ )"},
+		{"l / h", "next / previous section ( → ← )"},
+		{"gg / G", "top / bottom ( g, home / end )"},
+		{"enter", "open in browser ( o )"},
+		{"d", "detail for this PR"},
 		{"/", "filter"},
 		{"r", "reload"},
-		{"?", "close this"},
-		{"q", "quit"},
-	} {
-		b.WriteString(line(k[0], mutedStyle.Render(k[1])) + "\n")
-	}
+		{"?", "help, and close it again"},
+		{"q", "quit ( esc, ctrl+c )"},
+	}}
 	for _, a := range m.cfg.Actions {
 		if a.Run != "" {
-			b.WriteString(line(a.Key, mutedStyle.Render(a.Name)) + "\n")
+			keys.rows = append(keys.rows, [2]string{a.Key, a.Name})
 		}
 	}
 
-	b.WriteString("\n" + headerStyle.Render("  FILTER") + "\n")
-	for _, k := range [][2]string{
-		{"ctrl+n/p", "move within matches"},
-		{"esc", "clear the filter"},
-		{"123", "a bare number matches PR numbers"},
-		{"text", "fuzzy over author and title"},
-	} {
-		b.WriteString(line(k[0], mutedStyle.Render(k[1])) + "\n")
+	return []helpBlock{
+		keys,
+		// This page's own scroll and close keys are on its bottom row, live,
+		// so listing them here too would be the one redundancy a legend cannot
+		// justify -- it is the only section the reader can already see.
+		{"OVERLAYS", [][2]string{
+			{"d page", "any key closes it; j k l h close it and move"},
+			{"? page", "scrolls; see its bottom row"},
+		}},
+		{"FILTER", [][2]string{
+			{"ctrl+n/p", "move within matches ( ctrl+j/k, ↓ ↑ )"},
+			{"enter", "open the match, leave the filter"},
+			{"backspace", "edit the query"},
+			{"ctrl+u", "clear the query"},
+			{"esc", "leave the filter"},
+			{"123", "a bare number matches PR numbers"},
+			{"text", "fuzzy over author and title"},
+		}},
+		{"CI", [][2]string{
+			{okStyle.Render("✓"), "passing"},
+			{errorStyle.Render("✗2"), "2 checks failing"},
+			{attentionStyle.Render("◐"), "running"},
+			{mutedStyle.Render("·"), "no checks"},
+		}},
+		{"REVIEW", [][2]string{
+			{okStyle.Render("✓"), "approved"},
+			{errorStyle.Render("✗"), "changes requested"},
+			{attentionStyle.Render("○"), "review required"},
+		}},
+		{"BLOCKERS", [][2]string{
+			{errorStyle.Render("!"), "merge conflicts"},
+			{mutedStyle.Render("~"), "draft"},
+		}},
+		{"ROWS", [][2]string{
+			{mutedStyle.Render("╭╴│╰╴"), "a stack: each PR targets the one above"},
+			{"abc", "author initials, on rules with author: true"},
+			{"2h", "last updated"},
+		}},
 	}
+}
 
-	b.WriteString("\n" + headerStyle.Render("  CI") + "\n")
-	b.WriteString(line(okStyle.Render("✓"), mutedStyle.Render("passing")) + "\n")
-	b.WriteString(line(errorStyle.Render("✗2"), mutedStyle.Render("2 checks failing")) + "\n")
-	b.WriteString(line(attentionStyle.Render("◐"), mutedStyle.Render("running")) + "\n")
-	b.WriteString(line(mutedStyle.Render("·"), mutedStyle.Render("no checks")) + "\n")
+// helpLines is the whole page as one column, top to bottom, with the config
+// path as its last line. It is rendered in full and windowed afterwards, so the
+// scroll position is an index into a list that does not depend on it.
+func (m Model) helpLines() []string {
+	var out []string
+	for i, blk := range m.helpBlocks() {
+		if i > 0 {
+			out = append(out, "")
+		}
+		out = append(out, headerStyle.Render("  "+blk.title))
+		for _, r := range blk.rows {
+			out = append(out, "  "+mutedStyle.Render(pad(r[0], 10))+mutedStyle.Render(r[1]))
+		}
+	}
+	return append(out, "", mutedStyle.Render(fmt.Sprintf("  config: %s", config.Path())))
+}
 
-	b.WriteString("\n" + headerStyle.Render("  REVIEW") + "\n")
-	b.WriteString(line(okStyle.Render("✓"), mutedStyle.Render("approved")) + "\n")
-	b.WriteString(line(errorStyle.Render("✗"), mutedStyle.Render("changes requested")) + "\n")
-	b.WriteString(line(attentionStyle.Render("○"), mutedStyle.Render("review required")) + "\n")
+// helpOverlay draws the legend as one scrolling column. It clipped from the top
+// before, which lost KEYS -- the section anyone opening `?` is looking for. A
+// two-column fold was tried and reverted: it was more layout code and it still
+// clipped on a short pane, so it paid complexity without buying the fix.
+//
+// The last row is always a hint rather than more legend. Always, not only when
+// the page overflows: scrolling took the old "any key closes" contract away
+// from j and k at every height, so a page that quietly omitted the row at some
+// heights would be lying about how to leave it on exactly those screens.
+//
+// It cost a real bug to learn that. The row used to be drawn only when the
+// legend did not fit, which left a band of pane heights -- 45 and 46 rows for a
+// 45-line legend -- where `?` showed no affordance at all and `j` was a silent
+// no-op that still swallowed the key. That is indistinguishable from "scrolling
+// is broken", and it is at the heights a full-screen terminal actually reports.
+// One shape at every height is worth the row.
+func (m Model) helpOverlay() string {
+	lines := m.helpLines()
+	if m.height <= 1 {
+		return strings.Join(lines, "\n")
+	}
+	body := m.height - 1
+	if body > len(lines) {
+		body = len(lines)
+	}
+	top := m.helpTop(len(lines), body)
+	return strings.Join(append(lines[top:top+body], m.helpHint(top, len(lines), body)), "\n")
+}
 
-	b.WriteString("\n" + headerStyle.Render("  BLOCKERS") + "\n")
-	b.WriteString(line(errorStyle.Render("!"), mutedStyle.Render("merge conflicts")) + "\n")
-	b.WriteString(line(mutedStyle.Render("~"), mutedStyle.Render("draft")) + "\n")
+// helpTop clamps the stored scroll offset to what the page can actually show.
+// It is clamped at render rather than on the keypress so a resize cannot strand
+// the view past the end of a page that just got shorter.
+func (m Model) helpTop(total, body int) int {
+	top := m.helpScroll
+	if last := total - body; top > last {
+		top = last
+	}
+	if top < 0 {
+		top = 0
+	}
+	return top
+}
 
-	b.WriteString("\n" + headerStyle.Render("  ROWS") + "\n")
-	b.WriteString(line(mutedStyle.Render("╭╴│╰╴"), mutedStyle.Render("a stack: each PR targets the one above")) + "\n")
-	b.WriteString(line("abc", mutedStyle.Render("author initials, on rules with author: true")) + "\n")
-	b.WriteString(line("2h", mutedStyle.Render("last updated")) + "\n")
-
-	b.WriteString("\n" + mutedStyle.Render(fmt.Sprintf("  config: %s", config.Path())) + "\n")
-	return b.String()
+// helpHint is the page's bottom row: which keys close it, and where you are.
+// Both halves are load-bearing -- the keys because scrolling took `any key`
+// away, the position because the whole point of this change is that the page no
+// longer pretends it is showing everything.
+func (m Model) helpHint(top, total, body int) string {
+	left := "  esc q ? close · j/k scroll"
+	right := fmt.Sprintf("%d-%d of %d  ", top+1, top+body, total)
+	switch {
+	case body >= total:
+		// The whole legend is on screen, so a range would be noise. The closing
+		// keys still are not: they are why this row exists at every height.
+		left = "  esc q ? close"
+		right = fmt.Sprintf("all %d  ", total)
+	case top+body >= total:
+		right = fmt.Sprintf("%d-%d of %d · end  ", top+1, total, total)
+	}
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		return mutedStyle.Render(clip(left, m.width))
+	}
+	return mutedStyle.Render(left + strings.Repeat(" ", gap) + right)
 }
 
 // detailOverlay answers "what do I do about this PR" for the selected row. It

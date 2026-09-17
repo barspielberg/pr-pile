@@ -32,6 +32,9 @@ func (m Model) stateLines(pr github.PR) []string {
 		out = append(out, "  "+attentionStyle.Render("●")+" "+
 			mutedStyle.Render(plural(d.Unresolved, "unresolved comment")))
 	}
+	if s := m.pendingLine(pr); s != "" {
+		out = append(out, s)
+	}
 	if pr.Author != "" {
 		out = append(out, label("author", person(pr.AuthorName, pr.Author)))
 	}
@@ -56,6 +59,32 @@ func (m Model) stateLines(pr github.PR) []string {
 		out = append(out, label("opened", s))
 	}
 	return out
+}
+
+// pendingLine is the page's loading state: one skeleton line standing where the
+// on-demand lines will land, so the common case resolves in place instead of
+// pushing the rest of the block down. docs/pr-detail.md §7 chose to draw
+// nothing and let the lines appear, on the grounds that a line which appears
+// disturbs less than one that changes. The user reported not seeing a loading
+// state at all, which is the evidence against that: the appearing line reflows
+// everything below it, and there was nothing on screen to say why.
+//
+// It is one line and not one per field. `behind` and `unresolved` are each
+// conditional -- unresolved threads exist on 6 of 50 PRs (§5.4) -- so a
+// placeholder per field would draw two rows on most PRs that then vanish,
+// trading the reflow on arrival for a worse one on resolution. One line is what
+// the group usually resolves to, so usually nothing moves at all.
+func (m Model) pendingLine(pr github.PR) string {
+	if _, loaded := m.detail[pr.Number]; loaded {
+		return ""
+	}
+	// Nothing is coming when there is no client to ask, so a board rendered
+	// offline or in a test must not sit on a loader forever.
+	if m.client == nil {
+		return ""
+	}
+	frame := string(spinFrames[m.spinner%len(spinFrames)])
+	return "  " + mutedStyle.Render(frame+" checking for conflicts and open conversations")
 }
 
 // mergeLine states the merge problem and its size together. `26 commits behind`
