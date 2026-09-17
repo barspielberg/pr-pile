@@ -63,6 +63,55 @@ actions:
     mode: suspend       # hand over the terminal; default is background
 ```
 
+No actions are bound by default. The tool knows nothing about worktrees,
+editors or multiplexers — it renders a template and runs what it gets — so a
+default that shelled out to a script only the author has would fail with
+`command not found` on anyone else's machine. The examples below are ready to
+paste.
+
+### Example: open a PR as a worktree workspace (Worktrunk + herdr)
+
+```yaml
+repoPath: ~/Repos/owner/name    # {{.RepoPath}} is empty without this
+
+actions:
+  - key: w
+    name: worktree
+    run: pr-workspace {{.RepoPath}} {{.Number}}
+```
+
+Two steps, and both are already idempotent, which is what makes this safe to
+bind to a key that will get pressed twice:
+
+```sh
+p="$(wt switch "pr:$2" --no-cd --format json | jq -r .path)"
+exec herdr worktree open --cwd "$1" --path "$p" --no-focus
+```
+
+`wt switch pr:<n>` resolves the PR to its branch and returns the *existing*
+worktree if there is one. `herdr worktree open` returns the existing workspace
+id for a path it has already opened — measured at three calls, one workspace —
+so no dedupe logic is needed.
+
+Use `herdr worktree open` (a **workspace**), not `herdr tab create` (a tab in
+whatever workspace you happen to be in). `tab create` is also not idempotent: it
+will open a second tab on the same directory every press.
+
+`--no-focus` matters for a key binding. Opening the workspace focused yanks you
+out of whatever you were doing on every press; without it the workspace is there
+when you want it and you are not moved.
+
+Leave it on the default `background` mode. `suspend` is for commands that take
+over the terminal (a pager, a review TUI); this one only talks to the herdr
+socket and exits, so suspending would blank the board for a few seconds to run
+something that never wanted the terminal.
+
+One sharp edge that is not this tool's doing: `wt remove` deregisters a worktree
+but can leave the directory behind (a `node_modules` from a post-start hook is
+enough), and the next `wt switch pr:<n>` then fails with *Directory already
+exists* rather than reusing it. If the key stops working on a PR you have
+removed before, clear the leftover directory.
+
 Action keys are matched **last**, so they cannot shadow a built-in key: binding
 an action to `d` or `j` means it never fires. Pick a key the table above does
 not use.
@@ -75,9 +124,10 @@ Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`,
 |---|---|
 | `j` / `k` | move (also `↓` / `↑`) |
 | `l` / `h` | next / previous section (also `→` / `←`) |
-| `gg` / `G` | top / bottom (also `g`, `home` / `end`) |
+| `g` / `G` | top / bottom (also `home` / `end`) |
 | `enter` / `o` | open in browser (reuses an existing Arc tab) |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus conflict, unresolved comments, author, reviewer, size and branches |
+| `y` | copy the PR url to the clipboard (`pbcopy`) |
 | `/` | filter |
 | `r` | reload |
 | `?` | help and the glyph legend |

@@ -28,9 +28,10 @@ func (m Model) helpBlocks() []helpBlock {
 	keys := helpBlock{"KEYS", [][2]string{
 		{"j / k", "move ( ↓ ↑ )"},
 		{"l / h", "next / previous section ( → ← )"},
-		{"gg / G", "top / bottom ( g, home / end )"},
+		{"g / G", "top / bottom ( home / end )"},
 		{"enter", "open in browser ( o )"},
 		{"d", "detail for this PR"},
+		{"y", "copy the PR url"},
 		{"/", "filter"},
 		{"r", "reload"},
 		{"?", "help, and close it again"},

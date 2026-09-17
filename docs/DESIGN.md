@@ -71,6 +71,7 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | A resolved empty section collapses to one line | Reserving six blank rows for a section that *knows* it has nothing wasted most of a short pane. The reservation applies only while loading. |
 | No CODEOWNERS path matching | GitHub already turns CODEOWNERS into team review requests, so `team-review-requested:` covers it for free. No per-PR file-list fetch. |
 | Actions are shell templates | The tool knows nothing about worktrees, editors or multiplexers; it renders a template and runs what it gets. |
+| `y` copies via `pbcopy`, not a clipboard library | The same trade `browser.Open` already makes with `open`: a pipe to a binary that ships with the OS, against a dependency and its transitive tree. `bubbles/textinput` was turned down partly *because* it drags in a clipboard shell-out for a paste binding we do not want — the objection was to the dependency carrying it, not to the shell-out, so doing it directly costs nothing new. It is a `var` so tests never touch the real clipboard. |
 | Arc tab reuse built into `open` | Plain `open <url>` always spawns a new Arc tab, so opening the same PR twice buries the window in duplicates. Non-Arc browsers fall through to `open`. |
 
 ---
@@ -566,6 +567,46 @@ stalls everything under it — cheap, high-value rules go first.
 Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 `{{.Base}}` `{{.URL}}` `{{.Author}}` `{{.Title}}`.
 
+**No action is bound by default.** Actions are shell templates and the tool
+knows nothing about worktrees, editors or multiplexers, so a default that
+shelled out to a script only the author has would fail with `command not found`
+on every other machine — a bound key that is guaranteed to break is worse than
+an unbound one. The worktree-workspace action is documented in the README as a
+ready-to-paste example instead, which is the same call the starter config
+already makes by shipping its `actions:` block commented out.
+
+**A workspace, not a tab, and the primitive choice is what buys idempotency.**
+`herdr tab create` puts the worktree in a tab of whatever workspace you happened
+to be in, and it is not idempotent — the second press opened a second tab on the
+same directory (`w33:tC` and `w33:tD`, same label). `herdr worktree open` is the
+workspace-level primitive (it is what `hwt` calls) and it *is* idempotent:
+measured at three consecutive calls returning the same workspace id, `w3B`. So
+the action needs no dedupe logic of its own; picking the right primitive
+replaced the wrapper that was working around the wrong one.
+
+Verified end to end by pressing `w` three times on a real PR from the board:
+worktree count held at 5, workspace count at 7, one workspace `w3C`
+(`is_linked_worktree: true`), no error on the status line.
+
+**`--no-focus`, because a keypress should not move you.** `hwt` passes `--focus`,
+which is right when a human runs it from a shell and wrong for a key on a board
+— it yanks the user out of what they were doing on every press. `herdr worktree
+open` takes `--no-focus`, so the workspace is created in the background and is
+there when wanted.
+
+One failure mode worth knowing: `wt remove` deregisters a worktree but can leave
+the directory on disk (a `node_modules` from a post-start hook is enough), and
+the next `wt switch pr:<n>` then fails with *Directory already exists* instead of
+reusing it. This bit during testing and looks exactly like the action silently
+doing nothing, since a background action reports only its name.
+
+**`background`, not `suspend`, for this one.** `suspend` hands the terminal over
+via `tea.ExecProcess` and repaints on exit, which is right for a pager or a
+review TUI. This command opens a herdr tab over a socket and exits — timed at
+~4s with no terminal output — so suspending would blank the board to run
+something that never wanted the terminal. Background also puts the action's
+name on the status line, which is the only sign it fired.
+
 ### Default rules
 
 ```yaml
@@ -583,8 +624,9 @@ Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 |---|---|
 | `j` `k` / `↓` `↑` | move |
 | `l` `h` / `→` `←` | next / previous section (empty sections skipped; `h` goes to the start of the current section first, then back) |
-| `gg` `G` / `g` home end | top / bottom. `gg` is the vim chord; bare `g` is already top, so the second press repeats a move that is its own fixed point and there is no pending-key mode to wedge |
+| `g` `G` / home end | top / bottom. Documented as `g` rather than `gg`: bare `g` is the whole move, so advertising a chord that is one key repeated read as confusing. Typing `gg` still works — top is its own fixed point, so the second press lands in the same place, and there is no pending-key mode to wedge |
 | `enter` `o` | open in browser (reuses an existing Arc tab) |
+| `y` | copy the selected PR's url to the clipboard. `y` because the board already speaks vim (`j`/`k`, `g`/`G`, `l`/`h`), so yank is the key those fingers already reach for. A clipboard write is invisible, so it is acknowledged on the status line |
 | `r` | reload |
 | `/` | filter |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus the state block (any key closes; a movement key closes *and* moves) |

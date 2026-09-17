@@ -1517,7 +1517,7 @@ func TestHelpListsEveryKeyThatIsHandled(t *testing.T) {
 	out := stripANSI(m.helpOverlay())
 
 	for _, k := range []string{
-		"j / k", "↓ ↑", "l / h", "→ ←", "gg / G", "home", "end",
+		"j / k", "↓ ↑", "l / h", "→ ←", "g / G", "home", "end",
 		"enter", "o ", "d ", "/ ", "r ", "? ", "q ", "esc", "ctrl+c",
 		"ctrl+n/p", "ctrl+j/k", "backspace", "ctrl+u",
 	} {
@@ -1757,5 +1757,139 @@ func TestHelpScrollBackIsImmediateAfterHoldingJ(t *testing.T) {
 	}
 	if afterK == atEnd {
 		t.Error("k did not move the page after j was held to the bottom")
+	}
+}
+
+// runCmd runs whatever a keypress returned and reports the message it produced,
+// so a test can assert on the status line the user actually sees.
+func runCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		return nil
+	}
+	return cmd()
+}
+
+// withClipboard swaps the pbcopy shell-out for a recorder, so the suite never
+// writes to the developer's real clipboard.
+func withClipboard(t *testing.T, err error) *string {
+	t.Helper()
+	var got string
+	prev := copyToClipboard
+	copyToClipboard = func(s string) error {
+		got = s
+		return err
+	}
+	t.Cleanup(func() { copyToClipboard = prev })
+	return &got
+}
+
+// `y` is the vim yank verb, on a board that already answers to j/k, g/G and
+// l/h. It copies the selected PR's URL and says so on the status line, because
+// a clipboard write is invisible otherwise.
+func TestYCopiesTheSelectedURL(t *testing.T) {
+	got := withClipboard(t, nil)
+
+	mine, review := samplePRs()
+	mine[0].URL = "https://github.com/o/r/pull/3248"
+	m := loaded(t, 120, 20, mine, review)
+	m.cursor = 0
+
+	_, cmd := m.handleKey(runeKey('y'))
+	msg := runCmd(t, cmd)
+
+	if *got != "https://github.com/o/r/pull/3248" {
+		t.Errorf("copied %q, want the selected PR's url", *got)
+	}
+	if s, ok := msg.(statusMsg); !ok || !strings.Contains(string(s), "3248") {
+		t.Errorf("status was %v, want it to name the PR that was copied", msg)
+	}
+}
+
+// The cursor is what decides, not the board order: y must follow the selection.
+func TestYCopiesTheRowUnderTheCursor(t *testing.T) {
+	got := withClipboard(t, nil)
+
+	mine, review := samplePRs()
+	mine[0].URL = "https://github.com/o/r/pull/3248"
+	mine[1].URL = "https://github.com/o/r/pull/3100"
+	m := loaded(t, 120, 20, mine, review)
+	m = press(m, runeKey('j'))
+
+	_, cmd := m.handleKey(runeKey('y'))
+	runCmd(t, cmd)
+	if *got != "https://github.com/o/r/pull/3100" {
+		t.Errorf("copied %q, want the second row's url", *got)
+	}
+}
+
+// Nothing selected is a real state -- an empty board, or a filter that matched
+// nothing -- and it must not reach for a PR that is not there.
+func TestYWithNothingSelectedDoesNotCrash(t *testing.T) {
+	got := withClipboard(t, nil)
+
+	m := loaded(t, 120, 20, nil, nil)
+	_, cmd := m.handleKey(runeKey('y'))
+	msg := runCmd(t, cmd)
+
+	if *got != "" {
+		t.Errorf("copied %q from an empty board, want nothing", *got)
+	}
+	if s, ok := msg.(statusMsg); !ok || string(s) == "" {
+		t.Errorf("status was %v, want it to say nothing is selected", msg)
+	}
+}
+
+// Filtering to zero matches is the same no-selection state by another route.
+func TestYWithAFilterMatchingNothingDoesNotCrash(t *testing.T) {
+	got := withClipboard(t, nil)
+
+	mine, review := samplePRs()
+	mine[0].URL = "https://github.com/o/r/pull/3248"
+	m := typeQuery(loaded(t, 120, 20, mine, review), "zzzznotathing")
+	if n := len(m.visibleRows()); n != 0 {
+		t.Fatalf("expected the query to match nothing, got %d rows", n)
+	}
+
+	// y is query text while filtering, so the copy is reached the way the user
+	// would: leave the filter first.
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m.board.Apply(board.Result{Index: 0, PRs: nil})
+	m.board.Apply(board.Result{Index: 1, PRs: nil})
+	_, cmd := m.handleKey(runeKey('y'))
+	runCmd(t, cmd)
+
+	if *got != "" {
+		t.Errorf("copied %q with nothing selected, want nothing", *got)
+	}
+}
+
+// A failed pbcopy is reported rather than silently looking like it worked.
+func TestYReportsAFailedCopy(t *testing.T) {
+	withClipboard(t, fmt.Errorf("pbcopy: not found"))
+
+	mine, review := samplePRs()
+	mine[0].URL = "https://github.com/o/r/pull/3248"
+	m := loaded(t, 120, 20, mine, review)
+
+	_, cmd := m.handleKey(runeKey('y'))
+	msg := runCmd(t, cmd)
+	s, ok := msg.(statusMsg)
+	if !ok || !strings.Contains(string(s), "copy failed") {
+		t.Errorf("status was %v, want it to report the failure", msg)
+	}
+}
+
+// The footer hint and the help page both have to name y, or the key is
+// undiscoverable -- which is how o, home/end and the arrows drifted before.
+func TestCopyKeyIsDocumented(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 140, 40
+
+	if foot := stripANSI(m.footer("")); !strings.Contains(foot, "y copy") {
+		t.Errorf("the footer does not offer the copy key: %q", foot)
+	}
+	if out := stripANSI(m.helpOverlay()); !strings.Contains(out, "copy") {
+		t.Errorf("the help page does not mention copying:\n%s", out)
 	}
 }
