@@ -21,6 +21,7 @@ func (m Model) helpOverlay() string {
 		{"l / h", "next / previous section"},
 		{"g / G", "top / bottom"},
 		{"enter", "open in browser"},
+		{"c", "failing checks for this PR"},
 		{"/", "filter"},
 		{"r", "reload"},
 		{"?", "close this"},
@@ -65,5 +66,35 @@ func (m Model) helpOverlay() string {
 	b.WriteString(line("2h", mutedStyle.Render("last updated")) + "\n")
 
 	b.WriteString("\n" + mutedStyle.Render(fmt.Sprintf("  config: %s", config.Path())) + "\n")
+	return b.String()
+}
+
+// checksOverlay lists the selected PR's failing gates in full. The row itself
+// only carries the count (✗6): names are what you want after deciding a PR is
+// worth investigating, not while scanning, and giving them a line in the list
+// is what made the board scroll unevenly. See docs/uniform-rows.md.
+//
+// It closes on the next movement key, so it reads as a look rather than a mode.
+func (m Model) checksOverlay() string {
+	pr, ok := m.selected()
+	if !ok {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(headerStyle.Render(fmt.Sprintf("  #%d", pr.Number)) + " " +
+		mutedStyle.Render(clip(pr.Title, max(0, m.width-12))) + "\n\n")
+
+	if len(pr.FailedGates) == 0 {
+		b.WriteString("  " + mutedStyle.Render("no failing checks") + "\n")
+	} else {
+		// Unclipped and one per line: this overlay exists to show the whole
+		// list, which the old single-line version could not.
+		for _, g := range pr.FailedGates {
+			b.WriteString("  " + errorStyle.Render("✗") + " " + clip(g, max(0, m.width-4)) + "\n")
+		}
+	}
+
+	b.WriteString("\n" + mutedStyle.Render("  any key closes") + "\n")
 	return b.String()
 }

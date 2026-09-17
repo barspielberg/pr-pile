@@ -35,8 +35,10 @@ func TestViewShowsLoadingUntilFirstSectionResolves(t *testing.T) {
 	if out := m.View(); strings.Contains(out, "should not be visible yet") {
 		t.Error("section 2 rendered before section 1 resolved:\n" + out)
 	}
-	if !strings.Contains(m.View(), "REVIEW REQUESTED") {
-		t.Error("expected the pending section header")
+	// The section still announces itself while pending -- now via the row
+	// gutter rather than a header band.
+	if !strings.Contains(stripANSI(m.View()), "REVIEW") {
+		t.Error("expected the pending section in the gutter")
 	}
 
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
@@ -62,10 +64,19 @@ func TestViewRendersStatesAndGates(t *testing.T) {
 	out := m.View()
 	// Glyphs, per the design spec: ✗1 = one failing check, ✗ = changes
 	// requested, ! = conflicts.
-	for _, want := range []string{"#7", "✗1", "!", "webapp_e2e"} {
+	for _, want := range []string{"#7", "✗1", "!"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q:\n%s", want, out)
 		}
+	}
+	// The gate NAME is not in the list: it would cost the row a second line,
+	// which is what made the board scroll unevenly. It lives behind `c`.
+	if strings.Contains(out, "webapp_e2e") {
+		t.Errorf("gate name should not be in the row:\n%s", out)
+	}
+	m.showChecks = true
+	if !strings.Contains(m.View(), "webapp_e2e") {
+		t.Errorf("gate name missing from the checks overlay:\n%s", m.View())
 	}
 }
 
@@ -200,9 +211,11 @@ func TestStatusClusterIsPinnedAcrossWidths(t *testing.T) {
 				row = stripANSI(l)
 			}
 		}
-		// Display cells, not bytes: the ▌ mark is multi-byte.
-		if got := lipgloss.Width(row[:strings.Index(row, "✓")]); got != 11 {
-			t.Errorf("width %d: CI glyph at column %d, want 11\n%q", w, got, row)
+		// Display cells, not bytes: the ▌ mark is multi-byte. The cluster sits
+		// 11 cells into the row body, which the section gutter offsets.
+		want := sectionWidth + 2 + 11
+		if got := lipgloss.Width(row[:strings.Index(row, "✓")]); got != want {
+			t.Errorf("width %d: CI glyph at column %d, want %d\n%q", w, got, want, row)
 		}
 	}
 }
@@ -545,16 +558,17 @@ func TestResolvedEmptySectionIsOneLine(t *testing.T) {
 
 	lines := strings.Split(m.View(), "\n")
 	for i, l := range lines {
-		if !strings.Contains(stripANSI(l), "REVIEW REQUESTED") {
+		plain := stripANSI(l)
+		if !strings.Contains(plain, "REVIEW") {
 			continue
 		}
-		if got := strings.TrimSpace(stripANSI(lines[i+1])); got != "—" {
-			t.Fatalf("expected the dash directly under the header, got %q", got)
+		// The section name and its dash share one line now: the gutter carries
+		// the name, so an empty section costs exactly one row.
+		if !strings.HasSuffix(strings.TrimSpace(plain), "\u2014") {
+			t.Fatalf("expected the dash on the section's own line, got %q", plain)
 		}
-		// The next line must be the following section or the padding, not
-		// more reserved blanks for this one.
 		blank := 0
-		for j := i + 2; j < len(lines) && strings.TrimSpace(stripANSI(lines[j])) == ""; j++ {
+		for j := i + 1; j < len(lines) && strings.TrimSpace(stripANSI(lines[j])) == ""; j++ {
 			blank++
 		}
 		if blank > 1 {
@@ -562,7 +576,7 @@ func TestResolvedEmptySectionIsOneLine(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("section header not found")
+	t.Fatal("section not found in the gutter")
 }
 
 // esc and q close the help overlay rather than quitting: opening help must
@@ -745,9 +759,9 @@ func TestCursorReachesBothEndsOfTheList(t *testing.T) {
 	}
 }
 
-// A PR with failing checks is two lines. Scrolling to only its first line
-// leaves the detail line below the fold.
-func TestSelectedRowDetailLineStaysVisible(t *testing.T) {
+// Every row is one line, so a failing PR can never be half-scrolled: its gate
+// names are in the `c` overlay, which is not subject to the fold at all.
+func TestFailingRowIsOneLineAndItsGatesAreInTheOverlay(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 10
 
@@ -759,7 +773,7 @@ func TestSelectedRowDetailLineStaysVisible(t *testing.T) {
 		}
 		if i == 15 {
 			pr.CIState = "FAILURE"
-			pr.FailedGates = []string{"the-failing-gate"}
+			pr.FailedGates = []string{"the-failing-gate", "and-another"}
 		}
 		prs = append(prs, pr)
 	}
@@ -771,8 +785,18 @@ func TestSelectedRowDetailLineStaysVisible(t *testing.T) {
 	if !strings.Contains(out, "pr 15") {
 		t.Fatalf("selected row missing:\n%s", out)
 	}
-	if !strings.Contains(out, "the-failing-gate") {
-		t.Errorf("the selected row's detail line is below the fold:\n%s", out)
+	if strings.Contains(out, "the-failing-gate") {
+		t.Errorf("gate names must not take a line in the list:\n%s", out)
+	}
+
+	m.showChecks = true
+	over := stripANSI(m.View())
+	// The overlay shows the COMPLETE list, which the old one-line version
+	// could not: it clipped everything past the first gate or two.
+	for _, want := range []string{"the-failing-gate", "and-another"} {
+		if !strings.Contains(over, want) {
+			t.Errorf("checks overlay missing %q:\n%s", want, over)
+		}
 	}
 }
 
@@ -851,61 +875,130 @@ func TestAuthorColumnDoesNotStarveTheTitle(t *testing.T) {
 // line, which makes the cursor bob. The screen position is what the eye tracks,
 // so that is the invariant. It still steps when a section header scrolls past,
 // because a header genuinely occupies lines.
-func TestCursorHoldsASteadyScreenLineWhileScrolling(t *testing.T) {
+// The board must never scroll faster than the cursor. This is the invariant
+// that five earlier attempts at the viewport math could not hold: with
+// variable-height rows a single keypress moved the board 0 to 3 lines
+// depending on whether a neighbouring row carried a failing-check line, and
+// that is what the user saw as jumping. See docs/uniform-rows.md.
+func TestOneKeypressScrollsAtMostOneLine(t *testing.T) {
 	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
 		{Name: "Mine", Query: "a", Tree: true},
 		{Name: "Needs my review", Query: "b", Author: true},
+		{Name: "All open", Query: "c", Author: true},
 	}}
 	m := New(cfg, nil)
-	m.width, m.height = 147, 28
+	m.width, m.height = 147, 24
 
-	var prs []github.PR
-	for i := 0; i < 30; i++ {
-		pr := github.PR{
-			Number: 3200 + i, Title: fmt.Sprintf("pr %d", 3200+i), Author: "someone",
-			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+	// Every third PR fails a gate: under the old layout those were the rows
+	// that made the scroll uneven, so they are exactly what this must survive.
+	mk := func(base int, n int) []github.PR {
+		var prs []github.PR
+		for i := 0; i < n; i++ {
+			pr := github.PR{
+				Number: base + i, Title: fmt.Sprintf("pr %d", base+i), Author: "someone",
+				CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+			}
+			if i%3 == 0 {
+				pr.CIState = "FAILURE"
+				pr.FailedGates = []string{"a-failing-gate", "another-one", "and-a-third"}
+			}
+			prs = append(prs, pr)
 		}
-		if i%3 == 0 {
-			pr.CIState, pr.FailedGates = "FAILURE", []string{"a-failing-gate"}
-		}
-		prs = append(prs, pr)
+		return prs
 	}
-	m.board.Apply(board.Result{Index: 0, PRs: prs})
-	m.board.Apply(board.Result{Index: 1})
+	m.board.Apply(board.Result{Index: 0, PRs: mk(3200, 12)})
+	m.board.Apply(board.Result{Index: 1, PRs: mk(3300, 10)})
+	m.board.Apply(board.Result{Index: 2, PRs: mk(3400, 14)})
 
-	lineOfCursor := func() int {
-		for i, l := range strings.Split(m.View(), "\n") {
+	// The viewport is identified by its top line. Comparing whole rendered
+	// frames would also catch the selection bar moving, which is not the point.
+	topLine := func() string {
+		return strings.Split(m.View(), "\n")[0]
+	}
+	cursorOnScreen := func() bool {
+		for _, l := range strings.Split(m.View(), "\n") {
 			if strings.Contains(l, "▌") {
+				return true
+			}
+		}
+		return false
+	}
+
+	rows := len(m.visibleRows())
+	if rows < 30 {
+		t.Fatalf("board too small to scroll: %d rows", rows)
+	}
+
+	lineIndex := func(top string) int {
+		lines, _ := m.body("")
+		for i, l := range lines {
+			if l == top {
 				return i
 			}
 		}
 		return -1
 	}
 
-	// Walk past the point where the board starts scrolling, then require the
-	// cursor's screen line to stop moving.
-	var settled int
-	for c := 0; c < len(m.visibleRows()); c++ {
-		m.cursor = c
-		at := lineOfCursor()
-		if at < 0 {
-			t.Fatalf("cursor %d is off screen", c)
+	for _, dir := range []int{1, -1} {
+		start, stop := 0, rows-1
+		if dir < 0 {
+			start, stop = rows-1, 0
 		}
-		if c > 0 && at == settled {
-			// Reached the steady state; from here it must not drift. The last
-			// rows are excluded: at the end of the list there is nothing left
-			// to scroll, so the margin collapses and the cursor walks down to
-			// the final row.
-			for d := c; d < len(m.visibleRows())-scrollOffLines; d++ {
-				m.cursor = d
-				if got := lineOfCursor(); got != settled {
-					t.Errorf("cursor %d: screen line %d, want a steady %d", d, got, settled)
-					return
-				}
+		m.cursor = start
+		prev := lineIndex(topLine())
+		for c := start; c != stop; c += dir {
+			m.cursor = c + dir
+			if !cursorOnScreen() {
+				t.Fatalf("cursor %d is off screen", m.cursor)
 			}
-			return
+			now := lineIndex(topLine())
+			if now < 0 || prev < 0 {
+				t.Fatalf("cursor %d: could not locate the viewport top", m.cursor)
+			}
+			if d := now - prev; d < -1 || d > 1 {
+				t.Errorf("cursor %d -> %d: board scrolled %d lines, want at most 1",
+					c, m.cursor, d)
+				return
+			}
+			prev = now
 		}
-		settled = at
 	}
-	t.Fatal("the cursor never settled; the test proves nothing")
+}
+
+// The checks overlay is a look, not a mode: a movement key closes it and moves
+// in one keypress, so inspecting a PR does not interrupt scanning the list.
+func TestChecksOverlayClosesOnMovement(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 20
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "a", CIState: "FAILURE", FailedGates: []string{"gate-one"}, UpdatedAt: time.Unix(9000, 0)},
+		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
+	}})
+	m.board.Apply(board.Result{Index: 1})
+
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	if !m.showChecks {
+		t.Fatal("c should open the checks overlay")
+	}
+	if !strings.Contains(m.View(), "gate-one") {
+		t.Errorf("overlay missing the gate name:\n%s", m.View())
+	}
+
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.showChecks {
+		t.Error("a movement key should close the overlay")
+	}
+	if m.cursor != 1 {
+		t.Errorf("the same keypress should also move: cursor %d, want 1", m.cursor)
+	}
+
+	// esc closes without moving, and without quitting.
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.showChecks {
+		t.Error("esc should close the overlay")
+	}
+	if m.cursor != 1 {
+		t.Errorf("esc should not move: cursor %d, want 1", m.cursor)
+	}
 }

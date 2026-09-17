@@ -17,6 +17,13 @@ verify something I say so in §6.
 > since been consolidated into `DESIGN.md`. The citations are kept as written
 > for provenance; the surviving conclusions live in `DESIGN.md`.
 
+> **Superseded (2026-09-17).** §1's recommendation — "fix the scroll code, not
+> the layout" — was implemented and the jump survived. The board was then
+> restructured to uniform rows, which is what this study argued against. See
+> `uniform-rows.md` for the measurements that overturned it. The diagnosis in §2
+> and the industry survey in §6 remain accurate and are still worth reading;
+> it is the §1 conclusion that did not hold.
+
 
 ## 1. Recommendation
 

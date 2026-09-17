@@ -62,7 +62,8 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | `-review:approved` on "Needs my review" | Drops PRs somebody else already signed off, which is what makes it an action queue rather than a status list. Changes-requested PRs stay — those still want you. Note GitHub already drops a PR from `review-requested:@me` once *you* approve it. |
 | Numeric filter queries are exact, not fuzzy | Fuzzy treated `3248` as a subsequence, so it also hit titles containing 3…2…4…8 scattered across them. Bare numbers now match PR numbers by prefix. |
 | `sahilm/fuzzy`, not fzf's matcher | fzf ranks better but drags in tcell, go-colorful and a shellwords parser for one function. `bubbles/textinput` was also rejected: it pulls an OS clipboard shell-out for a paste binding this prompt does not need. |
-| Scroll margin of 2 lines | lazygit ships 2, fzf migrated 0 → 3 in 2024, nnn/micro use 3; no tool surveyed migrated the other way. 2 is the smallest in the cluster and still guarantees the first line of the next PR is visible. Every implementation caps at half the viewport; none is proportional (helix rejected that on the record, #8403). |
+| Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `c` overlay and section names to a left gutter, so every line on the board is a row and one keypress scrolls at most one line — unconditionally, not by argument. `uniform-rows.md` has the measurements; `view-restructure.md` is the earlier study this overturned. |
+| Scroll margin of 2 rows | lazygit ships 2, fzf migrated 0 → 3 in 2024, nnn/micro use 3; no tool surveyed migrated the other way. 2 is the smallest in the cluster and still guarantees the first line of the next PR is visible. Every implementation caps at half the viewport; none is proportional (helix rejected that on the record, #8403). |
 | Sections keep their rows while refetching | Rebuilding from empty collapsed the board and re-expanded it section by section, shoving every row below each one that resolved. A row should move when a value changes, not because a request finished. |
 | A resolved empty section collapses to one line | Reserving six blank rows for a section that *knows* it has nothing wasted most of a short pane. The reservation applies only while loading. |
 | No CODEOWNERS path matching | GitHub already turns CODEOWNERS into team review requests, so `team-review-requested:` covers it for free. No per-PR file-list fetch. |
@@ -77,14 +78,16 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 
 | # | field | offset | width | align | content |
 |---|---|---|---|---|---|
-| 1 | mark | 0 | 1 | — | `▌` when selected, else space |
-| 2 | gutter | 1 | 1 | — | space |
-| 3 | tree | 2 | 2 | left | `╭╴` `│ ` `╰╴` or two spaces |
-| 4 | number | 4 | 6 | left | `#3248`, padded right |
-| 5 | gutter | 10 | 1 | — | space |
-| 6 | status | 11 | 7 | left | glyph cluster, §3.2 |
-| 7 | gutter | 18 | 1 | — | space |
-| 8 | title | 19 | **flex** | left | clipped with `…` on display width |
+| 0 | section | 0 | 8 | left | rule name uppercased on the section's first row, else blank (§3.5) |
+| 0b | rule | 8 | 2 | — | ` │` |
+| 1 | mark | 10 | 1 | — | `▌` when selected, else space |
+| 2 | gutter | 11 | 1 | — | space |
+| 3 | tree | 12 | 2 | left | `╭╴` `│ ` `╰╴` or two spaces |
+| 4 | number | 14 | 6 | left | `#3248`, padded right |
+| 5 | gutter | 20 | 1 | — | space |
+| 6 | status | 21 | 7 | left | glyph cluster, §3.2 |
+| 7 | gutter | 28 | 1 | — | space |
+| 8 | title | 29 | **flex** | left | clipped with `…` on display width |
 | 9 | gutter | — | 1 | — | space (only when author shown) |
 | 10 | author | — | 3 | right | lowercase initials, only on rules with `author: true` |
 | 11 | gutter | — | 1 | — | space |
@@ -92,11 +95,16 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 
 **Exactly one column flexes: title.** Everything else is fixed, which is the
 mechanical fix for "columns spread across the terminal" — slack has only one
-place to go, so the status cluster is pinned at columns 11–17 at every width.
+place to go, so the status cluster is pinned at columns 21–27 at every width.
+
+**Every row is exactly one line, always.** Row height does not depend on the
+data. This is the invariant the whole viewport rests on: it is what makes one
+keypress scroll the board by at most one line. See `uniform-rows.md`.
 
 ```
-fixed = mark(1)+gut(1)+tree(2)+number(6)+gut(1)+status(7)+gut(1)+gut(1)+age(3) = 23
-titleWidth = max(0, terminalWidth - 23)            [FULL]
+section = name(8)+rule(2) = 10
+body  = mark(1)+gut(1)+tree(2)+number(6)+gut(1)+status(7)+gut(1)+gut(1)+age(3) = 23
+titleWidth = max(0, terminalWidth - 33)            [FULL]
 titleWidth -= 4 when the rule sets author: true    [FULL only]
 ```
 
@@ -185,37 +193,59 @@ Apply the background per-segment, not wrapped around the finished line: each
 segment's own style emits a reset, which would terminate an outer background
 part-way along the row.
 
-### 3.5 Section header
+### 3.5 Section gutter
 
 ```
-━━ MINE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5
+MINE     │▌   #3248  ✓  ○   fix(checkout): reach the dependency popup            now
+         │    #3031  ✓  ○ ! chore(admin-console): enforce no-floating-promises   2w
+NEEDS M… │    #3129  ✓  ○   refactor(frontend): share makeAutoObservableAndEx…   18h
 ```
 
-`━━ ` + NAME uppercased + ` ` + `━` fill to the edge + ` ` + count, full terminal
-width. Uppercase is the only uppercased text on the board, which alone makes
-headers identifiable without reading them. The count is right-aligned where the
-eye already stops; it becomes the spinner frame while loading and `!` on failure.
+The rule name, uppercased and clipped to 8 cells, on the section's **first row
+only**; blank on the rest; then ` │` as a permanent left rule. Uppercase is the
+only uppercased text on the board, which alone makes a section boundary
+identifiable without reading it.
 
-A blank line precedes every header except the first — the only pure-whitespace
-row in the design and the only section separator. While loading, a section with
-no rows yet reserves a placeholder block (capped at 6 rows, and at
-`(height-2)/len(rules)`) so the skeleton starts near its final height. Once
-resolved and empty it collapses to a single `muted` `—`.
+Sections are a gutter rather than a full-width header band because **a header
+line is not a row**: whenever one crossed the top edge, a single keypress moved
+the board two lines instead of one. Measured deltas for the three candidate
+layouts are in `uniform-rows.md` §4. With the gutter, every line on the board is
+a row and the invariant is unconditional.
 
-### 3.6 Continuation line (failing gate names)
+The cost is 10 cells of title width (every breakpoint in §3.8 moved up by 10 to
+compensate) and the per-section count, which the band used to carry.
+
+A section with no rows to show occupies exactly one line, drawn with the same
+gutter: the spinner while loading, `—` once resolved and empty, the error text
+on failure. While loading, a section with no rows yet reserves a placeholder
+block (capped at 6 rows, and at `(height-2)/len(rules)`) so the skeleton starts
+near its final height.
+
+### 3.6 Failing gate names (`c` overlay)
+
+Gate names are **not** in the list. The row carries the count (`✗6`), which
+answers "is this broken" and "how broken"; the names answer "why", which is what
+you want after deciding a PR is worth investigating, not while scanning.
+
+Pressing `c` opens an overlay listing them in full, one per line, unclipped:
 
 ```
-  │                └ unit-tests / node-20, e2e / checkout-flows
-   ^tree spine      ^aligned to the title column
+  #3231 chore: bump @types/serve-static from 1.15.7 to 2.2.0
+
+  ✗ build-push-image customer-portal
+  ✗ build-push-image billing-service
+  ✗ build-push-image web-client
+  ✗ build-push-image webapp
+
+  any key closes
 ```
 
-Indented to the title column so it reads as a child of the title, prefixed `└ `
-(a third glyph family, distinct from status and from selection), rendered
-`muted` — the red `✗2` already says "this is broken"; this says *which*, which is
-detail, not alarm. That is what stops it competing with titles. Multiple gates
-join with `, ` on one line, clipped with `…`; never a second line, never wrapped.
-Inside a stack, columns 2–3 carry `│ ` so the spine is unbroken. Always shown
-when `FailedGates` is non-empty, at every pane height.
+This is strictly more information than the old in-list continuation line, which
+joined the names with `, ` and clipped the result to one line — on a 4-to-6 gate
+dependabot PR it lost most of the list.
+
+Any key closes it; a **movement key closes it and moves in the same keypress**,
+so inspecting a PR does not interrupt scanning.
 
 Gate names are deduped and stripped of shard suffixes
 (`apps_ci / webapp_e2e / Run E2E Tests (1, 5)`), ported from `pr-status.jq`.
@@ -247,10 +277,14 @@ a row no longer above it.
 
 | tier | width | columns | title width |
 |---|---|---|---|
-| FULL | ≥ 76 | mark, tree, number, status(7), title, [author], age | `w - 23` (`-4` with author) |
-| MID | 60–75 | mark, tree, number, status(7), title | `w - 19` |
-| NARROW | 40–59 | mark, tree, number, status(3), title | `w - 15` |
-| below | < 40 | `terminal too narrow / (need 40 cols)` | — |
+| FULL | ≥ 86 | section, mark, tree, number, status(7), title, [author], age | `w - 33` (`-4` with author) |
+| MID | 70–85 | section, mark, tree, number, status(7), title | `w - 29` |
+| NARROW | 50–69 | section, mark, tree, number, status(3), title | `w - 25` |
+| below | < 50 | `terminal too narrow / (need 50 cols)` | — |
+
+Every breakpoint is 10 columns higher than it was before the section gutter,
+which is exactly the gutter's width — the title keeps the same readable floor at
+every tier.
 
 Drop order: **age and author first** (they change how urgent something feels but
 never what you do), then the **review glyph** (the field most likely to be
@@ -258,17 +292,19 @@ re-derived by opening the PR anyway — CI and conflicts decide whether opening 
 is even worth it). Mark, tree, number, CI, blocker and title are the irreducible
 board.
 
-Breakpoint arithmetic: FULL needs `w - 23 >= 53` → 76; MID needs `w - 19 >= 41`
-→ 60; NARROW needs `w - 15 >= 25` → 40.
+Breakpoint arithmetic: FULL needs `w - 33 >= 53` → 86; MID needs `w - 29 >= 41`
+→ 70; NARROW needs `w - 25 >= 25` → 50.
 
 **Stability guarantee:** within a tier only the title's width changes; across
-tiers columns 0–10 never move at all, so the left edge of the board is identical
-from 40 to 400 columns.
+tiers columns 0–20 never move at all, so the left edge of the board is identical
+from 50 to 400 columns.
 
 ### 3.9 Vertical budget
 
-20 rows − 1 footer = 19 list rows. With three sections and one failing PR that is
-3 headers + 2 blanks + 14 data rows, **74% data**. The footer is one `muted`
+20 rows − 1 footer = 19 list rows, and **all 19 are PRs** — there are no header
+rows, no blank separators and no continuation lines, so the list is 100% data at
+every board shape. Measured on the live board in a 27-row pane: 26 PRs visible,
+against 16 under the previous layout. The footer is one `muted`
 line, always: keybindings on the left, repo + spinner cell right-aligned. A
 status message *replaces* the keybinding text rather than adding a row — the
 keybindings are the least urgent thing on the board. While filtering, the prompt
@@ -343,6 +379,7 @@ Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 | `enter` `o` | open in browser (reuses an existing Arc tab) |
 | `r` | reload |
 | `/` | filter |
+| `c` | failing check names for the selected PR (any key closes; a movement key closes *and* moves) |
 | `?` | help + glyph legend |
 | `q` `esc` `ctrl+c` | quit |
 
@@ -350,7 +387,7 @@ Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 by match score, so the board's newest-first order does not hold while filtering;
 matched characters are underlined (weight, not hue — the title already spends
 colour on draft and may sit on the selection fill); sections with no matches are
-hidden header and all. A bare number matches PR numbers by prefix, not fuzzily.
+hidden gutter and all. A bare number matches PR numbers by prefix, not fuzzily.
 
 Every printable key is query text while filtering, so navigation moves to chords:
 
@@ -362,8 +399,8 @@ Every printable key is query text while filtering, so navigation moves to chords
 | `esc` | leave, restoring the full board |
 | `ctrl+c` | quit |
 
-From the help overlay, **only `ctrl+c` quits** — `esc` and `q` mean "back to the
-board", so opening help can never cost you the session by reflex.
+From either overlay, **only `ctrl+c` quits** — `esc` and `q` mean "back to the
+board", so opening one can never cost you the session by reflex.
 
 ---
 

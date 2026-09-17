@@ -6,7 +6,7 @@ Run it as `prs`. See [docs/DESIGN.md](docs/DESIGN.md) for the design, the decisi
 
 ## Status
 
-Scaffolding. The board fetches, buckets, renders, filters and opens PRs. Not yet: review progress, detail pane.
+Scaffolding. The board fetches, buckets, renders, filters and opens PRs. Not yet: review progress.
 
 ## Build
 
@@ -18,7 +18,9 @@ Needs `gh` installed and logged in (used only for the token) and a Nerd Font for
 
 ## How it works
 
-Every section is a **rule** — a GitHub search query plus a name. Rules are an ordered list, and a PR is shown under the **first** rule that matches it, so ordering is the configuration.
+Every section is a **rule** — a GitHub search query plus a name. Rules are an ordered list, and a PR is shown under the **first** rule that matches it, so ordering is the configuration. The rule's name is shown in the left gutter on the section's first row.
+
+Every row is exactly one line, which is what keeps scrolling steady: one keypress moves the board by at most one line. Failing check names are behind `c` rather than in the list — see [docs/uniform-rows.md](docs/uniform-rows.md).
 
 Rules are fetched in parallel but revealed in order: a section can only be drawn once every section above it has resolved, because an earlier rule may still claim a PR a later one has already fetched.
 
@@ -67,6 +69,7 @@ Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`,
 | `j` / `k` | move |
 | `g` / `G` | top / bottom |
 | `enter` / `o` | open in browser (reuses an existing Arc tab) |
+| `c` | failing check names for the selected PR |
 | `/` | filter |
 | `r` | reload |
 | `q` | quit |
