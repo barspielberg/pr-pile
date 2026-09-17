@@ -413,15 +413,14 @@ func (m *Model) clampCursor() {
 }
 
 // lineMeta says which section a rendered line belongs to and where the line
-// sits within it, so the sticky header and the top row's gutter can be resolved
-// after window() has chosen a start. Without it the label would have to be
-// decided before the window is known, which is why every row above a
-// scrolled-off boundary used to go unnamed.
+// sits within it, so the top row's gutter can be resolved after window() has
+// chosen a start. Without it the label would have to be decided before the
+// window is known, which is why every row above a scrolled-off boundary used
+// to go unnamed.
 type lineMeta struct {
 	section  string
 	author   bool // the section's rule shows an author column
 	row      int  // index within the section, -1 for notes and blanks
-	rows     int  // the section's total rows
 	isRow    bool
 	rowIndex int // index into the flattened visible rows, -1 when not a row
 }
@@ -445,12 +444,12 @@ func (m Model) body(spin string) (lines []string, rowStarts []int, meta []lineMe
 		}
 		add(m.renderRow(row, idx == m.cursor, s.Rule.Author, s.Rule.Name, gs),
 			lineMeta{section: s.Rule.Name, author: s.Rule.Author, row: i,
-				rows: len(s.Rows), isRow: true, rowIndex: idx})
+				isRow: true, rowIndex: idx})
 		idx++
 	}
 	note := func(s board.Section, text string) {
 		add(m.renderSectionNote(s.Rule.Name, text),
-			lineMeta{section: s.Rule.Name, row: -1, rows: len(s.Rows), rowIndex: -1})
+			lineMeta{section: s.Rule.Name, row: -1, rowIndex: -1})
 	}
 	for _, s := range m.sections() {
 		switch s.State {
@@ -628,34 +627,6 @@ func (m Model) footer(spin string) string {
 	return mutedStyle.Render(left + strings.Repeat(" ", gap) + right + "  ")
 }
 
-// stickyHeader names the section of the TOP VISIBLE ROW, never the cursor's.
-// A cursor-bound header lies whenever the cursor has crossed a boundary while
-// rows of the previous section are still on screen: it would name a section
-// that is not the section of the rows directly under it. Bound to the top row
-// it can never contradict the line beneath it, and it agrees by construction
-// with the gutter name that row already carries.
-//
-// The count answers what the gutter cannot: how much of this section is above
-// you. See docs/DESIGN.md §3.5.
-//
-// It is drawn unconditionally, including when the whole board fits. Chrome that
-// appears and disappears is its own kind of jump, and the list height would
-// then change by one as PRs merge.
-func (m Model) stickyHeader(meta []lineMeta, start int) string {
-	if start >= len(meta) {
-		return ""
-	}
-	mt := meta[start]
-	if mt.section == "" {
-		return ""
-	}
-	line := headerStyle.Render("  " + strings.ToUpper(mt.section))
-	if mt.isRow && mt.rows > 0 {
-		line += mutedStyle.Render(fmt.Sprintf("  ·  %d of %d", mt.row+1, mt.rows))
-	}
-	return line
-}
-
 func (m Model) View() string {
 	if m.width > 0 && m.width < minWidth {
 		return mutedStyle.Render(fmt.Sprintf("  terminal too narrow\n  (need %d cols)", minWidth))
@@ -674,15 +645,11 @@ func (m Model) View() string {
 	}
 
 	foot := m.footer(spin)
-	// The sticky header is fixed chrome above the list, exactly like the footer
-	// and the filter prompt: it never enters lines, so the row->line map stays
-	// the identity and one keypress still scrolls one line. See
-	// docs/uniform-rows.md and docs/section-layout.md §11.3.
-	chrome := 2
+	chrome := 1
 	if m.filtering {
-		// The prompt is a third chrome row, so the body has one line less.
+		// The prompt is a second chrome row, so the body has one line less.
 		foot = m.promptLine() + "\n" + foot
-		chrome = 3
+		chrome = 2
 	}
 
 	lines, rowStarts, meta := m.body(spin)
@@ -697,7 +664,7 @@ func (m Model) View() string {
 		}
 	}
 	lines = m.nameTopSection(lines, meta, start)
-	return m.stickyHeader(meta, start) + "\n" + strings.Join(lines, "\n") + "\n" + foot
+	return strings.Join(lines, "\n") + "\n" + foot
 }
 
 // nameTopSection re-renders the top visible line so it carries its section's

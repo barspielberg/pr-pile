@@ -896,3 +896,148 @@ filtering) — a path that already exists for the filter prompt.
 - **(b) with a background fill.** I rendered it and rejected it on reasoning
   about `selBg` competition (§11.1); I did not put it side by side with a real
   selected row to confirm the clash is as bad as I expect.
+
+---
+
+## 13. Revision two: the sticky line is reverted
+
+Shipped at `39ad152`, run by the user, and rejected:
+
+> *"is the designer ok with that? looks bad imho. duplicated headers, main top
+> header show the 1 of 5 is very not clear, not related to the cursor at all…"*
+
+**The line is removed.** §4.1 (`╷` at boundaries) and §4.2 (the window-relative
+gutter name) stay — neither was implicated, and §4.2 is again the thing that
+answers the original complaint. `chrome` in `View()` returns to 1, and 2 while
+filtering.
+
+### 13.1 What was actually wrong
+
+I reproduced it in a real 120×40 tmux pane against the live board before
+touching anything. All three of the user's complaints are correct, and they are
+one root cause plus two consequences.
+
+**The root cause: at 40 rows the board does not scroll, so `start` is pinned at
+0 and the header is a constant.** I walked the cursor down 34 rows, from `MINE`
+through to deep inside `ALL OPEN`. The header read `MINE · 1 of 5` on every
+single frame. Not "rarely updates" — it never updated once. A field that cannot
+change carries no information, and it sat in the most prominent position on the
+board. *"Not related to the cursor at all"* is not a perception; it is literally
+what the code does at this height.
+
+**Consequence 1 — duplicated headers.** `stickyHeader` and `nameTopSection` both
+read `meta[start]`. They are the same fact rendered twice, one line apart, by
+construction — not an edge case:
+
+```
+  MINE  ·  1 of 5            <- stickyHeader(meta, start)
+MINE     ╷▌   #3248  ✓  ○ ~ fix(webapp): reach the dependency popup  …
+```
+
+Whenever the top visible row's section starts on screen — which at 40 rows is
+*always*, and at 14 rows is whenever you are near the top — the line above the
+list says exactly what the gutter beneath it says. §11.6 argued the two
+"reinforce each other". Adjacent and identical is not reinforcement.
+
+**Consequence 2 — `N of M` reads as a cursor position.** `1 of 5` is shaped like
+one. §11.7 flagged the definition as an open question and §12 told the
+implementer to "pick one and put it in `DESIGN.md`". That was the wrong framing:
+the problem is not which definition to pick, it is that *any* top-row-indexed
+count is written in the visual language of a cursor position while meaning
+something else. On a non-scrolling board it is pinned at `1 of N` forever, so the
+one thing §11.4 claimed "makes the row pay for itself" is dead in the dominant
+case.
+
+### 13.2 Why I missed it
+
+Being specific, because "I measured the wrong pane heights" is the honest
+version and it is not the whole of it.
+
+**I measured 14, 20, 24, 30 and 40+, and then reasoned about the wrong one.**
+§11.2's table has a `40+` row. It says *"board fits either way, no observable
+cost"* — I treated "fits" as meaning the row is **free**, and stopped. Fitting is
+exactly the condition under which `start` is always 0, which makes the header a
+constant and the count a constant. The cheapest case on the cost axis is the
+*most broken* case on the value axis, and I never turned the table around to ask
+what the feature is worth at each height. I only ever asked what it costs.
+
+**§11.7 asked the right question and I answered it from a static frame.** It
+says the content changing as you scroll is *"the single thing most worth looking
+at in a real session"*. I never ran that session. Had I, the first thing I would
+have seen is that at the user's height it does not change at all — the opposite
+failure to the one I was braced for, and invisible to every mockup in §11.4 and
+§11.5, because a mockup is one frame and the defect is that all frames are
+identical.
+
+**I asked which heights the user runs, in §13 of the old numbering, and shipped
+before the answer arrived.** The doc says *"The entire cost argument in §11.2
+turns on this and I am guessing."* Naming a load-bearing unknown is not the same
+as waiting for it. That is the process error, and it is the one worth keeping.
+
+**The §11.4 binding argument was sound and irrelevant.** Top-row binding does
+guarantee the header never contradicts the row beneath it, and §11.7 correctly
+identified the invariant as the risky part. Both were about *correctness*. The
+line died on *usefulness*, which nothing in §11 measured.
+
+### 13.3 Re-deriving cursor-binding, as asked
+
+§11.4 rejected cursor-binding because it can name a section whose rows are not
+beneath it. That objection assumed a scrolling board. Re-derived against the
+non-scrolling 40-row case:
+
+Cursor-binding **works** there — it is the only binding that tracks anything at
+all when `start` is frozen at 0. But it does not save the line, for two reasons
+measured on the real board:
+
+1. **It becomes redundant against something already on screen.** When the board
+   fits, every section boundary is visible, so the cursor's section is always
+   the nearest `╷` above it — usually within a few rows. In the verified 40-row
+   frame the cursor sits on `#345` with `INVOLVED ╷` one row above. A chrome line
+   restating that is spending a row to repeat an adjacent fact.
+2. **It would still be wrong in the short pane.** Captured at 120×14, scrolled:
+   the shipped top-row binding says `NEEDS MY REVIEW · 5 of 10` while the cursor
+   is in `INVOLVED`, two sections later. Cursor-binding fixes that frame and
+   breaks the mirror-image one. There is no wrong-free binding, because one line
+   cannot simultaneously mean "where the viewport is" and "where you are".
+
+So the choice was never top-row vs cursor. It was: is there a question the board
+does not already answer? At 40 rows, no.
+
+**"Show it only when the top row's section start is not visible"** was also
+considered and rejected. It fixes the duplication and would blank the line
+entirely at 40 rows, which is the correct amount of ink — but chrome that
+appears and disappears changes the list height by one as you scroll, and that is
+the bug class `uniform-rows.md` exists to kill. A conditional header is worse
+than no header and worse than an unconditional one.
+
+### 13.4 What the board says now
+
+Nothing was lost that the user had before `39ad152`, and one row came back:
+
+- **Which section is this row in** — the gutter, on the section's first visible
+  row, plus §4.2's window-relative name on the top row. Verified at 120×14
+  scrolled: the top row reads `NEEDS M…` with `│`, so the name survives when the
+  boundary has scrolled off. That was the original defect and it is still fixed.
+- **Where do sections begin** — `╷` versus `│`, unchanged.
+- **The full, unclipped name and the per-section count** — not on the board.
+  They were not on the board before `39ad152` either. `l`/`h` jumps by section,
+  which is the affordance that existed and still does. If the full name turns out
+  to be genuinely needed, the footer (§4.3) is still available and is now the
+  only proposal left standing that costs no row — but the user rejected it on
+  prominence and I am not relitigating that without new evidence.
+
+The cost recorded in §11.2 is recovered exactly: at 40 rows the board is 29 rows
+of PRs plus a footer, with room to spare, and the h=30 "board stops fitting"
+threshold is gone.
+
+### 13.5 What I still cannot verify
+
+- **Whether the full section name is missed.** It is now absent at every width.
+  §10 flagged that a config whose rule names share a 7-character prefix would
+  make the 8-cell crop ambiguous; this config does not have that problem
+  (`MINE`, `NEEDS M…`, `MY TEAM…`, `INVOLVED`, `ALL OPEN` are all distinct at 8
+  cells), but another config could.
+- **Whether the per-section count is missed.** `uniform-rows.md` §6 listed this
+  as unverified before the sticky line and it is unverified after it. Two
+  attempts to place it have now been rejected; I would want evidence that it is
+  wanted before proposing a third.
