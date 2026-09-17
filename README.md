@@ -69,7 +69,7 @@ Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`,
 | `j` / `k` | move |
 | `g` / `G` | top / bottom |
 | `enter` / `o` | open in browser (reuses an existing Arc tab) |
-| `c` | checks for the selected PR: failing and running named, passing counted |
+| `c` | detail for the selected PR: failing and running checks named, passing counted, plus conflict, unresolved comments, author, reviewer, size and branches |
 | `/` | filter |
 | `r` | reload |
 | `q` | quit |

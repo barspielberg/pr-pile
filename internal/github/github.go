@@ -54,13 +54,18 @@ type PR struct {
 	Number       int
 	Title        string
 	URL          string
-	Author       string
+	Author       string // login; the identifier you actually @-mention
+	AuthorName   string // display name, null for 36% of this board: see docs/pr-detail.md §5.2
 	IsDraft      bool
 	Review       string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
 	Mergeable    string // MERGEABLE | CONFLICTING | UNKNOWN
 	UpdatedAt    time.Time
+	CreatedAt    time.Time
 	HeadRefName  string
 	BaseRefName  string
+	Additions    int
+	Deletions    int
+	ChangedFiles int
 	CIState      string   // SUCCESS | FAILURE | PENDING | ERROR | "" (none)
 	FailedGates  []string // names of failing checks, deduped
 	PendingGates []string // names of still-running checks, deduped
@@ -78,9 +83,10 @@ query($q: String!, $n: Int!) {
   search(query: $q, type: ISSUE, first: $n) {
     nodes {
       ... on PullRequest {
-        number title url isDraft reviewDecision mergeable updatedAt
+        number title url isDraft reviewDecision mergeable updatedAt createdAt
         headRefName baseRefName
-        author { login }
+        additions deletions changedFiles
+        author { login ... on User { name } }
         commits(last: 1) {
           nodes {
             commit {
@@ -121,10 +127,15 @@ type prNode struct {
 	ReviewDecision string    `json:"reviewDecision"`
 	Mergeable      string    `json:"mergeable"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+	CreatedAt      time.Time `json:"createdAt"`
 	HeadRefName    string    `json:"headRefName"`
 	BaseRefName    string    `json:"baseRefName"`
+	Additions      int       `json:"additions"`
+	Deletions      int       `json:"deletions"`
+	ChangedFiles   int       `json:"changedFiles"`
 	Author         struct {
 		Login string `json:"login"`
+		Name  string `json:"name"`
 	} `json:"author"`
 	Commits struct {
 		Nodes []struct {
@@ -245,12 +256,18 @@ func (n prNode) toPR() PR {
 		Title:       n.Title,
 		URL:         n.URL,
 		Author:      n.Author.Login,
+		AuthorName:  n.Author.Name,
 		IsDraft:     n.IsDraft,
 		Review:      n.ReviewDecision,
 		Mergeable:   n.Mergeable,
 		UpdatedAt:   n.UpdatedAt,
+		CreatedAt:   n.CreatedAt,
 		HeadRefName: n.HeadRefName,
 		BaseRefName: n.BaseRefName,
+
+		Additions:    n.Additions,
+		Deletions:    n.Deletions,
+		ChangedFiles: n.ChangedFiles,
 	}
 	if len(n.Commits.Nodes) == 0 {
 		return pr
@@ -348,4 +365,141 @@ func gateName(raw string) string {
 		return ""
 	}
 	return leaf
+}
+
+// Detail is the second request, made once per `c` press for one PR. Everything
+// here is either per-PR literal (compare needs the head ref, so it cannot be
+// batched across a search) or too expensive on a 50-PR query: reviewer names
+// cost +6,565 bytes and a rate-limit point on the board, and nothing here.
+// Measured at 912-1,400 bytes, 1.2-1.9s, 1 point. See docs/pr-detail.md §2.4.
+type Detail struct {
+	Number int // tags the response so a stale one can be dropped
+
+	BehindBy      int
+	Unresolved    int
+	Reviewers     []Reviewer
+	DefaultBranch string
+}
+
+// Reviewer is someone who has actually formed an opinion. Requested reviewers
+// are not carried: 17 of 50 are teams, which the board already expresses as a
+// whole section, so naming them restates the section header.
+type Reviewer struct {
+	Login string
+	Name  string
+	State string // APPROVED | CHANGES_REQUESTED
+}
+
+const detailQuery = `
+query($o: String!, $r: String!, $n: Int!, $head: String!) {
+  repository(owner: $o, name: $r) {
+    defaultBranchRef { name }
+    pullRequest(number: $n) {
+      baseRef { compare(headRef: $head) { behindBy } }
+      reviewThreads(first: 100) { nodes { isResolved isOutdated } }
+      latestOpinionatedReviews(first: 10) {
+        nodes { state author { login ... on User { name } } }
+      }
+    }
+  }
+}`
+
+// Detail fetches the on-demand half of the overlay. The caller renders without
+// it first and lets these lines arrive late, so a failure here costs the two
+// lines and nothing else.
+func (c *Client) Detail(ctx context.Context, repo string, number int, head string) (Detail, error) {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return Detail{}, fmt.Errorf("repo %q must be owner/name", repo)
+	}
+	body, err := json.Marshal(map[string]any{
+		"query": detailQuery,
+		"variables": map[string]any{
+			"o": owner, "r": name, "n": number, "head": head,
+		},
+	})
+	if err != nil {
+		return Detail{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
+	if err != nil {
+		return Detail{}, err
+	}
+	req.Header.Set("Authorization", "bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return Detail{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Detail{}, fmt.Errorf("github returned %s", resp.Status)
+	}
+
+	var out struct {
+		Data struct {
+			Repository struct {
+				DefaultBranchRef *struct {
+					Name string `json:"name"`
+				} `json:"defaultBranchRef"`
+				PullRequest *struct {
+					BaseRef *struct {
+						Compare *struct {
+							BehindBy int `json:"behindBy"`
+						} `json:"compare"`
+					} `json:"baseRef"`
+					ReviewThreads struct {
+						Nodes []struct {
+							IsResolved bool `json:"isResolved"`
+							IsOutdated bool `json:"isOutdated"`
+						} `json:"nodes"`
+					} `json:"reviewThreads"`
+					LatestOpinionatedReviews struct {
+						Nodes []struct {
+							State  string `json:"state"`
+							Author struct {
+								Login string `json:"login"`
+								Name  string `json:"name"`
+							} `json:"author"`
+						} `json:"nodes"`
+					} `json:"latestOpinionatedReviews"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return Detail{}, err
+	}
+	if len(out.Errors) > 0 {
+		return Detail{}, fmt.Errorf("github: %s", out.Errors[0].Message)
+	}
+
+	d := Detail{Number: number}
+	if ref := out.Data.Repository.DefaultBranchRef; ref != nil {
+		d.DefaultBranch = ref.Name
+	}
+	pr := out.Data.Repository.PullRequest
+	if pr == nil {
+		return d, fmt.Errorf("pr #%d not found", number)
+	}
+	if pr.BaseRef != nil && pr.BaseRef.Compare != nil {
+		d.BehindBy = pr.BaseRef.Compare.BehindBy
+	}
+	// Outdated threads hang off a line the PR has since rewritten, so they are
+	// not something anyone still has to answer.
+	for _, t := range pr.ReviewThreads.Nodes {
+		if !t.IsResolved && !t.IsOutdated {
+			d.Unresolved++
+		}
+	}
+	for _, r := range pr.LatestOpinionatedReviews.Nodes {
+		d.Reviewers = append(d.Reviewers, Reviewer{
+			Login: r.Author.Login, Name: r.Author.Name, State: r.State,
+		})
+	}
+	return d, nil
 }
