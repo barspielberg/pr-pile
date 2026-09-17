@@ -399,7 +399,7 @@ func (m *Model) clampCursor() {
 // body renders every section and reports which line the cursor landed on, so
 // the viewport can scroll to it. A row can occupy two lines (failing gates),
 // so the cursor line is not derivable from the row index.
-func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, anchors []int) {
+func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, anchors, rowStarts []int) {
 	cursorLine, cursorHeight = -1, 1
 	idx := 0
 	filtering := m.query() != ""
@@ -417,6 +417,7 @@ func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, 
 					cursorLine, cursorHeight = len(lines), len(rendered)
 				}
 				anchors = append(anchors, len(lines))
+				rowStarts = append(rowStarts, len(lines))
 				lines = append(lines, rendered...)
 				idx++
 			}
@@ -449,6 +450,7 @@ func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, 
 					cursorLine, cursorHeight = len(lines), len(rendered)
 				}
 				anchors = append(anchors, len(lines))
+				rowStarts = append(rowStarts, len(lines))
 				lines = append(lines, rendered...)
 				idx++
 			}
@@ -466,8 +468,13 @@ func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, 
 				anchors[i]--
 			}
 		}
+		for i := range rowStarts {
+			if rowStarts[i] > 0 {
+				rowStarts[i]--
+			}
+		}
 	}
-	return lines, cursorLine, cursorHeight, anchors
+	return lines, cursorLine, cursorHeight, anchors, rowStarts
 }
 
 func blanks(n int) []string {
@@ -510,74 +517,70 @@ func max(a, b int) int {
 // of the next PR while costing little of a 20-row pane.
 const scrollOff = 2
 
-// window scrolls the body to keep the cursor visible with a margin of context
-// around it. It is stateless -- start is derived from the cursor each frame --
-// so a resize or a refetch needs no separate handling.
+// window scrolls the body so the cursor keeps a constant number of whole rows
+// beneath it.
 //
-// The viewport always starts on an anchor (a section header or a row's first
-// line). Scrolling by whole units keeps movement even: a row is one or two
-// lines tall, so a line-based offset made each keypress scroll a different
-// distance and could leave an orphaned detail line at the top.
-//
-// Known defect: the cursor's distance from the bottom still drifts, because a
-// section header is two lines but counts as one unit here. See
-// docs/DESIGN.md.
-func window(lines []string, cursorLine, cursorHeight, height int, anchors []int) []string {
+// The constraint is on the BOTTOM edge: end is the line just past the last row
+// that should follow the cursor, and a fixed viewport height then determines
+// the top. start = end - height generally does not land on a row boundary, and
+// that remainder has to go somewhere -- snapping it away is what made the gap
+// under the cursor drift between 0 and 3 rows. So the top row is clipped
+// instead. Clipping the top is the degree of freedom that makes the constraint
+// satisfiable at all.
+func window(lines []string, cursorRow, height int, rowStarts []int) []string {
 	if height <= 0 || len(lines) <= height {
 		return lines
 	}
-	if cursorHeight < 1 {
-		cursorHeight = 1
-	}
-	if cursorLine < 0 {
+	if len(rowStarts) == 0 || cursorRow < 0 {
 		return lines[:height]
 	}
+	if cursorRow >= len(rowStarts) {
+		cursorRow = len(rowStarts) - 1
+	}
 
-	off := scrollOff
-	if half := height / 2; off > half {
-		off = half
-	}
-	cursorEnd := cursorLine + cursorHeight - 1
-
-	// Sit as high as possible: the board should hold still while the cursor
-	// walks down it, and only scroll once the cursor would reach the bottom
-	// margin. Anchors are ascending, so the first one that fits is the answer
-	// and it keeps the cursor a stable distance from the bottom thereafter.
-	for _, a := range anchors {
-		if a > cursorLine {
-			break
-		}
-		if cursorEnd+off-a < height {
-			return page(lines, a, height)
+	// The bottom edge: just past the LAST LINE of the scrollOff-th row after
+	// the cursor. Measuring to the start of the row after it instead would
+	// only half-guarantee a two-line row there, which is the residual wobble.
+	end := len(lines)
+	if last := cursorRow + scrollOff; last < len(rowStarts) {
+		if after := last + 1; after < len(rowStarts) {
+			end = rowStarts[after]
 		}
 	}
-	// Near the end of the list nothing satisfies the margin; fall back to the
-	// last anchor that at least shows the whole selected row.
-	best := -1
-	for _, a := range anchors {
-		if a > cursorLine {
-			break
-		}
-		if cursorEnd-a < height {
-			best = a
-		}
-	}
-	if best < 0 {
-		best = snapToAnchor(cursorLine, anchors)
-	}
-	return page(lines, best, height)
-}
-
-// page returns height lines from start, or everything remaining when start
-// sits close enough to the end that a full page is not available.
-func page(lines []string, start, height int) []string {
+	start := end - height
 	if start < 0 {
 		start = 0
+		end = height
 	}
-	if start+height > len(lines) {
-		return lines[start:]
+	// Never scroll past the cursor's own row, and never clip it off the
+	// bottom: near either end of the list the margin simply collapses.
+	cursorStart := rowStarts[cursorRow]
+	cursorEnd := len(lines)
+	if cursorRow+1 < len(rowStarts) {
+		cursorEnd = rowStarts[cursorRow+1]
 	}
-	return lines[start : start+height]
+	if start > cursorStart {
+		start = cursorStart
+		if end = start + height; end > len(lines) {
+			end = len(lines)
+		}
+	}
+	if cursorEnd > start+height {
+		start = cursorEnd - height
+		if start < 0 {
+			start = 0
+		}
+		end = start + height
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	// A clipped row at the top is fine; a blank separator line is not, so skip
+	// it and show the header it belongs to.
+	if start < len(lines) && strings.TrimSpace(stripSGR(lines[start])) == "" && start+1 < end {
+		start++
+	}
+	return lines[start:end]
 }
 
 // snapToAnchor rounds a line offset down to the nearest line that can legally
@@ -663,10 +666,10 @@ func (m Model) View() string {
 		chrome = 2
 	}
 
-	lines, cursorLine, cursorHeight, anchors := m.body(spin)
+	lines, _, _, _, rowStarts := m.body(spin)
 	if m.height > 0 {
 		avail := m.height - chrome
-		lines = window(lines, cursorLine, cursorHeight, avail, anchors)
+		lines = window(lines, m.cursor, avail, rowStarts)
 		// Pad to the full height so the prompt and footer stay pinned to the
 		// bottom edge instead of floating under a short result set.
 		for len(lines) < avail {
