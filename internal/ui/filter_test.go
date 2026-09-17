@@ -201,17 +201,18 @@ func TestEmptySectionsAreHiddenWhileFiltering(t *testing.T) {
 	mine, review := samplePRs()
 	m := typeQuery(loaded(t, 120, 40, mine, review), "refuse")
 
-	out := m.View()
-	if strings.Contains(out, "REVIEW REQUESTED") {
-		t.Errorf("a section with no matches should be hidden, header included:\n%s", out)
+	// The gutter clips the rule name to sectionWidth, so match on its stem.
+	out := stripANSI(m.View())
+	if strings.Contains(out, "REVIEW") {
+		t.Errorf("a section with no matches should be hidden, gutter included:\n%s", out)
 	}
 	if !strings.Contains(out, "MINE") {
-		t.Errorf("the matching section should keep its header:\n%s", out)
+		t.Errorf("the matching section should keep its gutter label:\n%s", out)
 	}
 
 	// And the section comes back when the query stops excluding it.
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
-	if !strings.Contains(m.View(), "REVIEW REQUESTED") {
+	if !strings.Contains(stripANSI(m.View()), "REVIEW") {
 		t.Error("the hidden section did not come back after esc")
 	}
 }

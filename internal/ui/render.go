@@ -33,17 +33,39 @@ var (
 // on the selected row, so it inherits a colour guaranteed to contrast.
 var selBg = lipgloss.Color("8")
 
+// sectionWidth is the left gutter carrying the section name. Sections are a
+// gutter rather than a header band so that every line on the board is a row:
+// a header line makes one keypress scroll two lines whenever it crosses the
+// top edge, which is the jump five attempts at the viewport math could not fix.
+// See docs/uniform-rows.md.
+//
+// 8 cells fits MINE, REVIEW and ALL OPEN, and clips longer rule names the same
+// way the title column clips.
+const sectionWidth = 8
+
+// sectionGutter draws the gutter: the name on a section's first row, blank on
+// the rest, and a rule separating it from the row body.
+func sectionGutter(name string, first bool) string {
+	label := ""
+	if first {
+		label = strings.ToUpper(name)
+	}
+	return pad(clip(label, sectionWidth), sectionWidth)
+}
+
 // Width tiers. Exactly one column flexes (title), so the status cluster stays
 // pinned at the same screen offset at every width.
 const (
-	fixedFull   = 23 // mark+gut+tree+number+gut+status(7)+gut+gut+age
-	fixedMid    = 19 // age dropped
-	fixedNarrow = 15 // review glyph dropped, status compressed to 3
+	fixedFull   = 23 + sectionWidth + 2 // mark+gut+tree+number+gut+status(7)+gut+gut+age
+	fixedMid    = 19 + sectionWidth + 2 // age dropped
+	fixedNarrow = 15 + sectionWidth + 2 // review glyph dropped, status compressed to 3
 
-	minWidth    = 40
-	narrowUntil = 48
-	midUntil    = 60
-	fullFrom    = 76
+	// Each tier starts sectionWidth+2 later than it did before the gutter, so
+	// the title keeps the same readable floor at every tier.
+	minWidth    = 40 + sectionWidth + 2
+	narrowUntil = 48 + sectionWidth + 2
+	midUntil    = 60 + sectionWidth + 2
+	fullFrom    = 76 + sectionWidth + 2
 )
 
 type tier int
@@ -240,7 +262,7 @@ func padLeft(s string, w int) string {
 
 // renderRow draws one PR. Every sub-slot is always emitted, blank when absent,
 // so no field ever shifts as state changes.
-func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
+func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string, firstInSection bool) string {
 	t := widthTierFor(m.width, showAuthor)
 	tw := titleWidth(m.width, t)
 	if showAuthor && t == tierFull {
@@ -276,6 +298,11 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	}
 
 	var b strings.Builder
+	// The section gutter sits outside the selection fill: it belongs to the
+	// board, not to the row, and highlighting it would make the band look like
+	// part of the selected PR.
+	b.WriteString(headerStyle.Render(sectionGutter(section, firstInSection)))
+	b.WriteString(mutedStyle.Render(" │"))
 	b.WriteString(paint(accentStyle).Render(mark))
 	b.WriteString(paint(fgStyle).Render(" "))
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
@@ -307,16 +334,9 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 		}
 	}
 
-	// Failing gate names are secondary detail: muted, indented under the row,
-	// never competing with an actionable title.
-	if len(r.PR.FailedGates) > 0 {
-		cont := "  "
-		if r.Prefix == "╭╴" || r.Prefix == "│ " {
-			cont = "│ "
-		}
-		gates := clip(strings.Join(r.PR.FailedGates, ", "), tw)
-		line += "\n  " + mutedStyle.Render(cont) + "       " + mutedStyle.Render("└ "+gates)
-	}
+	// Gate names live in the `c` overlay, not here: a row whose height depends
+	// on its data gives the list an uneven scroll rhythm, which is the bug five
+	// attempts at the viewport math could not fix. See docs/uniform-rows.md.
 	return line
 }
 
@@ -379,13 +399,9 @@ func stripSGR(s string) string {
 	return b.String()
 }
 
-// renderSectionHeader draws a rule as a full-width band so it can never be
-// mistaken for a PR row.
-func (m Model) renderSectionHeader(name string, count string) string {
-	label := "━━ " + strings.ToUpper(name) + " "
-	tail := m.width - lipgloss.Width(label) - lipgloss.Width(count) - 1
-	if tail < 0 {
-		tail = 0
-	}
-	return headerStyle.Render(label+strings.Repeat("━", tail)) + " " + mutedStyle.Render(count)
+// renderSectionNote draws a section that has no rows to show -- still loading,
+// resolved empty, or failed. It reuses the row's gutter so the board keeps one
+// left edge, and occupies exactly one line like everything else.
+func (m Model) renderSectionNote(name, note string) string {
+	return headerStyle.Render(sectionGutter(name, true)) + mutedStyle.Render(" │ ") + note
 }

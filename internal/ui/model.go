@@ -28,9 +28,10 @@ type Model struct {
 	status        string
 	fetching      bool
 
-	filtering bool
-	filter    string
-	showHelp  bool
+	filtering  bool
+	filter     string
+	showHelp   bool
+	showChecks bool
 }
 
 type resultMsg board.Result
@@ -190,11 +191,21 @@ func (m Model) openSelected() tea.Cmd {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.showHelp {
+	if m.showHelp || m.showChecks {
 		// Only ctrl+c quits from here: esc and q mean "back to the board", so
-		// opening help can never cost the user their session by reflex.
+		// opening an overlay can never cost the user their session by reflex.
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+		// A movement key closes the overlay AND moves, so checking a PR then
+		// carrying on down the list is one keypress, not two.
+		if m.showChecks {
+			m.showChecks = false
+			switch msg.String() {
+			case "j", "down", "k", "up", "l", "right", "h", "left", "g", "home", "G", "end":
+				return m.handleKey(msg)
+			}
+			return m, nil
 		}
 		m.showHelp = false
 		return m, nil
@@ -210,6 +221,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "?":
 		m.showHelp = !m.showHelp
+		return m, nil
+	case "c":
+		if _, ok := m.selected(); ok {
+			m.showChecks = true
+		}
 		return m, nil
 	case "j", "down":
 		m.cursor++
@@ -396,85 +412,49 @@ func (m *Model) clampCursor() {
 	}
 }
 
-// body renders every section and reports which line the cursor landed on, so
-// the viewport can scroll to it. A row can occupy two lines (failing gates),
-// so the cursor line is not derivable from the row index.
-func (m Model) body(spin string) (lines []string, cursorLine, cursorHeight int, anchors, rowStarts []int) {
-	cursorLine, cursorHeight = -1, 1
+// body renders every section and reports the line each row starts on, so the
+// viewport can scroll to the cursor. Every row is exactly one line, but section
+// headers and separators sit between them, so the line is not the row index.
+func (m Model) body(spin string) (lines []string, rowStarts []int) {
 	idx := 0
 	filtering := m.query() != ""
 	for _, s := range m.sections() {
 		switch s.State {
 		case board.Pending:
-			// A section that already has rows keeps them, so only the count in
-			// the header changes while the refetch is in flight.
-			lines = append(lines, "")
-			anchors = append(anchors, len(lines))
-			lines = append(lines, m.renderSectionHeader(s.Rule.Name, spin))
-			for _, row := range s.Rows {
-				rendered := strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")
-				if idx == m.cursor {
-					cursorLine, cursorHeight = len(lines), len(rendered)
-				}
-				anchors = append(anchors, len(lines))
+			// A section that already has rows keeps them, so only the spinner
+			// in the gutter changes while the refetch is in flight.
+			for i, row := range s.Rows {
 				rowStarts = append(rowStarts, len(lines))
-				lines = append(lines, rendered...)
+				lines = append(lines, m.renderRow(row, idx == m.cursor, s.Rule.Author, s.Rule.Name, i == 0))
 				idx++
 			}
 			// On a cold start there is nothing to keep, so hold a placeholder
 			// block instead: without it each section that lands pushes every
-			// header below it down the screen. While filtering the board is
+			// section below it down the screen. While filtering the board is
 			// deliberately narrowing, so reserving space fights the point.
 			if len(s.Rows) == 0 && !filtering {
-				lines = append(lines, blanks(m.placeholderRows(s.Rule))...)
+				lines = append(lines, m.renderSectionNote(s.Rule.Name, spin))
+				lines = append(lines, blanks(m.placeholderRows(s.Rule)-1)...)
 			}
 		case board.Failed:
-			lines = append(lines, "")
-			anchors = append(anchors, len(lines))
-			lines = append(lines, m.renderSectionHeader(s.Rule.Name, "!"),
-				errorStyle.Render("    "+s.Err.Error()))
+			lines = append(lines, m.renderSectionNote(s.Rule.Name,
+				errorStyle.Render(clip(s.Err.Error(), max(0, m.width-sectionWidth-3)))))
 		case board.Ready:
-			lines = append(lines, "")
-			anchors = append(anchors, len(lines))
-			lines = append(lines, m.renderSectionHeader(s.Rule.Name, fmt.Sprint(len(s.Rows))))
 			if len(s.Rows) == 0 {
 				// A resolved empty section collapses to one line: it knows it
 				// has nothing, so holding six blank rows for it would waste
 				// most of a short pane. The shrink is the value changing,
 				// which is the one reason a row is allowed to move.
-				lines = append(lines, mutedStyle.Render("    —"))
+				lines = append(lines, m.renderSectionNote(s.Rule.Name, mutedStyle.Render("—")))
 			}
-			for _, row := range s.Rows {
-				rendered := strings.Split(m.renderRow(row, idx == m.cursor, s.Rule.Author), "\n")
-				if idx == m.cursor {
-					cursorLine, cursorHeight = len(lines), len(rendered)
-				}
-				anchors = append(anchors, len(lines))
+			for i, row := range s.Rows {
 				rowStarts = append(rowStarts, len(lines))
-				lines = append(lines, rendered...)
+				lines = append(lines, m.renderRow(row, idx == m.cursor, s.Rule.Author, s.Rule.Name, i == 0))
 				idx++
 			}
 		}
 	}
-	// The leading blank before the first section is chrome in a short pane.
-	// Everything indexing into lines shifts with it.
-	if len(lines) > 0 && lines[0] == "" {
-		lines = lines[1:]
-		if cursorLine > 0 {
-			cursorLine--
-		}
-		for i := range anchors {
-			if anchors[i] > 0 {
-				anchors[i]--
-			}
-		}
-		for i := range rowStarts {
-			if rowStarts[i] > 0 {
-				rowStarts[i]--
-			}
-		}
-	}
-	return lines, cursorLine, cursorHeight, anchors, rowStarts
+	return lines, rowStarts
 }
 
 func blanks(n int) []string {
@@ -517,20 +497,20 @@ func max(a, b int) int {
 // of the next PR while costing little of a 20-row pane.
 const scrollOff = 2
 
-// scrollOffLines is the margin in lines. Two lines is one clean row of context
-// below the cursor, or the continuation line of a failing row.
-const scrollOffLines = 2
-
-// window scrolls the body so the cursor keeps a constant number of whole rows
-// beneath it.
+// window scrolls the body so the cursor keeps scrollOff rows of context on
+// whichever edge it is approaching.
 //
-// The constraint is on the BOTTOM edge: end is the line just past the last row
-// that should follow the cursor, and a fixed viewport height then determines
-// the top. start = end - height generally does not land on a row boundary, and
-// that remainder has to go somewhere -- snapping it away is what made the gap
-// under the cursor drift between 0 and 3 rows. So the top row is clipped
-// instead. Clipping the top is the degree of freedom that makes the constraint
-// satisfiable at all.
+// The invariant is that ONE keypress scrolls the board by at most ONE line.
+// Five earlier attempts could not hold it, because a row's height depended on
+// its data and a section header took a line of its own: a single `j` moved the
+// world by 0 to 3 lines depending on what happened to be nearby, which is what
+// read as jumping. Now every line on the board is a row -- gate names live in
+// the `c` overlay and the section name lives in each row's left gutter -- so
+// the clamp below is the whole of it. See docs/uniform-rows.md.
+//
+// Clamping both edges rather than pinning one means the board does not move at
+// all while the cursor crosses the middle, which is the conventional behaviour
+// (vim's scrolloff, less, fzf).
 func window(lines []string, cursorRow, height int, rowStarts []int) []string {
 	if height <= 0 || len(lines) <= height {
 		return lines
@@ -541,69 +521,29 @@ func window(lines []string, cursorRow, height int, rowStarts []int) []string {
 	if cursorRow >= len(rowStarts) {
 		cursorRow = len(rowStarts) - 1
 	}
+	cur := rowStarts[cursorRow]
 
-	// The bottom edge sits a fixed number of LINES below the cursor's row.
-	//
-	// A constant row margin and a constant screen position cannot both hold
-	// when rows differ in height: keeping scrollOff whole rows below the cursor
-	// makes the bottom edge move by 1 or 2 lines depending on whether those
-	// rows carry a failing-check line, and the cursor visibly bobs up and down
-	// as a result. The screen position is what the eye tracks, so that is the
-	// one held fixed.
-	// Anchored to the cursor row's FIRST line, not its last: a failing row is
-	// two lines tall, so measuring from its end would move the anchor by two
-	// whenever the cursor stepped onto or off one -- the cursor would bob.
-	end := rowStarts[cursorRow] + 1 + scrollOffLines
-	if end > len(lines) {
-		end = len(lines)
+	// The margin has to fit above and below the cursor or the two clamps fight
+	// and the viewport oscillates; a very short pane centres instead.
+	off := scrollOff
+	if 2*off+1 > height {
+		off = (height - 1) / 2
 	}
-	start := end - height
+
+	// Two bounds on the top line, each shifting by exactly one when the cursor
+	// does. Between them the top is free, so the board holds still through the
+	// middle of the viewport and only moves at the edges.
+	start := cur - (height - 1 - off)
+	if lo := cur - off; start > lo {
+		start = lo
+	}
+	if last := len(lines) - height; start > last {
+		start = last
+	}
 	if start < 0 {
 		start = 0
-		end = height
 	}
-	// Never scroll past the cursor's own row, and never clip it off the
-	// bottom: near either end of the list the margin simply collapses.
-	cursorStart := rowStarts[cursorRow]
-	cursorEnd := len(lines)
-	if cursorRow+1 < len(rowStarts) {
-		cursorEnd = rowStarts[cursorRow+1]
-	}
-	if start > cursorStart {
-		start = cursorStart
-		if end = start + height; end > len(lines) {
-			end = len(lines)
-		}
-	}
-	if cursorEnd > start+height {
-		start = cursorEnd - height
-		if start < 0 {
-			start = 0
-		}
-		end = start + height
-	}
-	if end > len(lines) {
-		end = len(lines)
-	}
-	// A clipped row at the top is fine; a blank separator line is not, so skip
-	// it and show the header it belongs to.
-	if start < len(lines) && strings.TrimSpace(stripSGR(lines[start])) == "" && start+1 < end {
-		start++
-	}
-	return lines[start:end]
-}
-
-// snapToAnchor rounds a line offset down to the nearest line that can legally
-// be the top of the viewport: a section header or a row's first line.
-func snapToAnchor(start int, anchors []int) int {
-	best := 0
-	for _, a := range anchors {
-		if a > start {
-			break
-		}
-		best = a
-	}
-	return best
+	return lines[start : start+height]
 }
 
 // The footer carries the repo and the spinner, so no global header row is
@@ -636,7 +576,7 @@ func (m Model) promptLine() string {
 }
 
 func (m Model) footer(spin string) string {
-	left := "  j/k move · l/h section · enter open · / filter · ? help · q quit"
+	left := "  j/k move · l/h section · enter open · c checks · / filter · ? help · q quit"
 	if m.filtering {
 		left = "  ctrl+n/p move · enter open · esc clear"
 	}
@@ -662,6 +602,9 @@ func (m Model) View() string {
 	if m.showHelp {
 		return m.helpOverlay()
 	}
+	if m.showChecks {
+		return m.checksOverlay()
+	}
 
 	spin := ""
 	if m.fetching {
@@ -676,7 +619,7 @@ func (m Model) View() string {
 		chrome = 2
 	}
 
-	lines, _, _, _, rowStarts := m.body(spin)
+	lines, rowStarts := m.body(spin)
 	if m.height > 0 {
 		avail := m.height - chrome
 		lines = window(lines, m.cursor, avail, rowStarts)
