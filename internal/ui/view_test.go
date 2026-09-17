@@ -325,11 +325,11 @@ func TestSelectedRowIsFilledEdgeToEdge(t *testing.T) {
 			unsel = l
 		}
 	}
-	// 100 is "bright black background" (ANSI 8 as bg).
-	if !strings.Contains(sel, "\x1b[100m") && !strings.Contains(sel, "48;5;8") {
+	// selBg is 237, which the 256-colour profile emits as 48;5;237.
+	if !strings.Contains(sel, "48;5;237") {
 		t.Errorf("selected row has no background fill:\n%q", sel)
 	}
-	if strings.Contains(unsel, "\x1b[100m") {
+	if strings.Contains(unsel, "48;5;237") {
 		t.Errorf("unselected row should not be filled:\n%q", unsel)
 	}
 	if !strings.Contains(sel, "▌") {
