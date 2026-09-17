@@ -43,14 +43,37 @@ var selBg = lipgloss.Color("8")
 // way the title column clips.
 const sectionWidth = 8
 
-// sectionGutter draws the gutter: the name on a section's first row, blank on
-// the rest, and a rule separating it from the row body.
-func sectionGutter(name string, first bool) string {
+// gutterState is a row's relationship to its section, which the gutter and the
+// rule glyph both read. It is three states rather than a bool because "the
+// section starts here" and "the section started above the window" are different
+// facts: the first draws the rule broken, the second draws it continuing and
+// still names the section, so the top visible row is never anonymous.
+type gutterState int
+
+const (
+	sectionContinues gutterState = iota
+	sectionStarts
+	sectionAbove
+)
+
+// sectionGutter draws the gutter: the name on a section's first visible row,
+// blank on the rest.
+func sectionGutter(name string, st gutterState) string {
 	label := ""
-	if first {
+	if st != sectionContinues {
 		label = strings.ToUpper(name)
 	}
 	return pad(clip(label, sectionWidth), sectionWidth)
+}
+
+// sectionRule draws the one-cell rule beside the gutter. `╷` at a section's
+// first row makes the rule visibly start rather than continue, so a boundary
+// reads even when the name is clipped to all 8 cells and cannot signal it.
+func sectionRule(st gutterState) string {
+	if st == sectionStarts {
+		return " ╷"
+	}
+	return " │"
 }
 
 // Width tiers. Exactly one column flexes (title), so the status cluster stays
@@ -262,7 +285,7 @@ func padLeft(s string, w int) string {
 
 // renderRow draws one PR. Every sub-slot is always emitted, blank when absent,
 // so no field ever shifts as state changes.
-func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string, firstInSection bool) string {
+func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string, gs gutterState) string {
 	t := widthTierFor(m.width, showAuthor)
 	tw := titleWidth(m.width, t)
 	if showAuthor && t == tierFull {
@@ -301,8 +324,8 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	// The section gutter sits outside the selection fill: it belongs to the
 	// board, not to the row, and highlighting it would make the band look like
 	// part of the selected PR.
-	b.WriteString(headerStyle.Render(sectionGutter(section, firstInSection)))
-	b.WriteString(mutedStyle.Render(" │"))
+	b.WriteString(headerStyle.Render(sectionGutter(section, gs)))
+	b.WriteString(mutedStyle.Render(sectionRule(gs)))
 	b.WriteString(paint(accentStyle).Render(mark))
 	b.WriteString(paint(fgStyle).Render(" "))
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
@@ -403,5 +426,6 @@ func stripSGR(s string) string {
 // resolved empty, or failed. It reuses the row's gutter so the board keeps one
 // left edge, and occupies exactly one line like everything else.
 func (m Model) renderSectionNote(name, note string) string {
-	return headerStyle.Render(sectionGutter(name, true)) + mutedStyle.Render(" │ ") + note
+	return headerStyle.Render(sectionGutter(name, sectionStarts)) +
+		mutedStyle.Render(sectionRule(sectionStarts)+" ") + note
 }

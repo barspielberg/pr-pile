@@ -64,6 +64,8 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | `sahilm/fuzzy`, not fzf's matcher | fzf ranks better but drags in tcell, go-colorful and a shellwords parser for one function. `bubbles/textinput` was also rejected: it pulls an OS clipboard shell-out for a paste binding this prompt does not need. |
 | The checks overlay names failures and pending, counts passes | 47% of check contexts on the live board are skipped and 45% pass, against 4% failing — listing passes buries 7 signal lines under 24 on the worst PR. Pending checks are named instead of counted because they are 1–3 per PR and say *what* you are waiting on. The overlay also stopped dead-ending: 47% of PRs are in PENDING rollup with nothing failing, where it used to say "no failing checks". `checks-page.md` has the measurements. |
 | Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `c` overlay and section names to a left gutter, so every line on the board is a row and one keypress scrolls at most one line — unconditionally, not by argument. `uniform-rows.md` has the measurements; `view-restructure.md` is the earlier study this overturned. |
+| One sticky section line above the list, bound to the top visible row | The 8-cell gutter clips `NEEDS MY REVIEW` to `NEEDS M…` and has no room at all for the per-section count the header band used to carry. Both were tried in the footer first and rejected by the user on prominence: `muted` text in the bottom-right corner is where this board puts what you are allowed to ignore, which contradicted the one field being asked for. Binding it to the top visible row rather than the cursor is what keeps it from naming a section that is not the section of the rows beneath it. It is chrome *above* the list, so it never enters `lines` and the scroll invariant is untouched. `section-layout.md` §11 has the argument and the costs. |
+| The gutter name is window-relative, and `╷` ≠ `│` | `firstInSection` was `i == 0` over the whole section, so a scrolled board left every row above the boundary unnamed — the gutter went blank exactly when you most needed to know where you were. Kept even though the sticky line now carries the same name in full, because it keeps the gutter column uniformly populated: without it the eye has to bind a line *outside* the list to a column *inside* it. `╷` is retained separately from `│`: "a section starts here" and "its start is above the window" are different facts and the sticky line says nothing about boundaries within the visible list. |
 | Scroll margin of 2 rows | lazygit ships 2, fzf migrated 0 → 3 in 2024, nnn/micro use 3; no tool surveyed migrated the other way. 2 is the smallest in the cluster and still guarantees the first line of the next PR is visible. Every implementation caps at half the viewport; none is proportional (helix rejected that on the record, #8403). |
 | Sections keep their rows while refetching | Rebuilding from empty collapsed the board and re-expanded it section by section, shoving every row below each one that resolved. A row should move when a value changes, not because a request finished. |
 | A resolved empty section collapses to one line | Reserving six blank rows for a section that *knows* it has nothing wasted most of a short pane. The reservation applies only while loading. |
@@ -79,8 +81,8 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 
 | # | field | offset | width | align | content |
 |---|---|---|---|---|---|
-| 0 | section | 0 | 8 | left | rule name uppercased on the section's first row, else blank (§3.5) |
-| 0b | rule | 8 | 2 | — | ` │` |
+| 0 | section | 0 | 8 | left | rule name uppercased on the section's first **visible** row, else blank (§3.5) |
+| 0b | rule | 8 | 2 | — | ` ╷` where a section starts, ` │` where it continues (§3.5) |
 | 1 | mark | 10 | 1 | — | `▌` when selected, else space |
 | 2 | gutter | 11 | 1 | — | space |
 | 3 | tree | 12 | 2 | left | `╭╴` `│ ` `╰╴` or two spaces |
@@ -197,15 +199,81 @@ part-way along the row.
 ### 3.5 Section gutter
 
 ```
-MINE     │▌   #3248  ✓  ○   fix(checkout): reach the dependency popup            now
-         │    #3031  ✓  ○ ! chore(admin-console): enforce no-floating-promises   2w
-NEEDS M… │    #3129  ✓  ○   refactor(frontend): share makeAutoObservableAndEx…   18h
+  NEEDS MY REVIEW  ·  2 of 10
+NEEDS M… │    #3239  ◐  ○   feat(checkout): PROJ-2038 show an "On hold" status…  19h
+         │    #3234  ◐  ○   feat(api-service): PROJ-2037 refuse order plan wri…  19h
+MY TEAM… ╷    #3211  ✗1 ✓   feat(api-service,schemas): PROJ-1880 build the XLR…  23h
+         │    #3134  ✓  ✓   feat(checkout): PROJ-1418 enable the Trade-ups ent…   1d
 ```
 
-The rule name, uppercased and clipped to 8 cells, on the section's **first row
-only**; blank on the rest; then ` │` as a permanent left rule. Uppercase is the
-only uppercased text on the board, which alone makes a section boundary
-identifiable without reading it.
+The rule name, uppercased and clipped to 8 cells, on the section's first
+**visible** row; blank on the rest; then a one-cell rule. Uppercase is the only
+uppercased text on the board, which alone makes a section boundary identifiable
+without reading it.
+
+**The rule breaks at a boundary.** A section's first row draws `╷` U+2577 where
+a continuation row draws `│`, so the rule visibly *starts* rather than running
+through. This is what makes a boundary readable when the name fills all 8 cells
+and is clipped (`NEEDS M…`), which is exactly the case where the name itself
+cannot signal "new section" by shape. A blanked cell was tried and is too weak
+to read as intentional beside a column of `│`.
+
+**The name is computed against the visible window, not the board.** The top
+visible row always carries its section's name. Before this, `firstInSection` was
+`i == 0` over the whole section, so every row above a scrolled-off boundary was
+anonymous — on a scrolled board the gutter went blank and the section you were
+looking at was unnamed, which was the actual defect.
+
+The top row keeps `│` when its section began above the window. The two glyphs
+carry different facts and the board does not conflate them:
+
+| glyph | name | meaning |
+|---|---|---|
+| `╷` | yes | a section starts on this row |
+| `│` | yes | you are inside this section; its start is above the window |
+| `│` | no | continuation |
+
+### 3.5.1 The sticky section line
+
+One `header` line above the list, outside the scrolling region, carrying the
+section name in full plus its position:
+
+```
+  NEEDS MY REVIEW  ·  2 of 10
+```
+
+It exists because the 8-cell gutter cannot hold a full name — `NEEDS MY REVIEW`
+clips to `NEEDS M…` — and cannot hold a count at all. The count is the part that
+earns the line: it answers *how much of this section am I not looking at*, which
+is the one question nothing else on the board answers, and it is what the header
+band used to carry before the gutter replaced it (`uniform-rows.md` §5).
+
+**It is bound to the top visible row's section, never the cursor's.** A
+cursor-bound header lies: with the cursor just over a boundary and rows of the
+previous section still filling the screen, it names a section that is not the
+section of the rows underneath it. The top-row binding can never contradict the
+line beneath it, and it agrees with that row's gutter name by construction.
+
+**`N of M` means: the top visible row is the Nth row of this section's M.** Of
+the three readings considered, this is the only one that describes *the thing
+the line is bound to*. "Rows visible of total" describes the window rather than
+a position, so it cannot say how far down you are — `10 of 30` and `10 of 30`
+read identically at the top of a section and in its middle. "Cursor index within
+section" reintroduces the cursor binding the line was deliberately built to
+avoid, so the number and the name would answer about different rows. Reading N
+off the top row keeps every field on the line describing one row, and N
+advancing by one per scrolled line matches what the eye sees move.
+
+**It is drawn unconditionally**, including when the whole board fits and nothing
+scrolls. Chrome that appears and disappears is its own kind of jump, and a
+height-dependent list would change size as PRs merge.
+
+**It does not touch the scroll invariant.** It is fixed chrome above the list,
+like the footer and the filter prompt: it never enters `lines`, so the row→line
+map stays the identity and one keypress still scrolls one line. What
+`uniform-rows.md` §4 measured at deltas of 0–3 was a header interleaved *between
+rows inside* the scrolled region. `chrome` in `View()` goes 1 → 2, and 2 → 3
+while filtering, a path the prompt already exercised.
 
 Sections are a gutter rather than a full-width header band because **a header
 line is not a row**: whenever one crossed the top edge, a single keypress moved
@@ -332,16 +400,29 @@ from 50 to 400 columns.
 
 ### 3.9 Vertical budget
 
-20 rows − 1 footer = 19 list rows, and **all 19 are PRs** — there are no header
-rows, no blank separators and no continuation lines, so the list is 100% data at
-every board shape. Measured on the live board in a 27-row pane: 26 PRs visible,
-against 16 under the previous layout. The footer is one `muted`
-line, always: keybindings on the left, repo + spinner cell right-aligned. A
-status message *replaces* the keybinding text rather than adding a row — the
-keybindings are the least urgent thing on the board. While filtering, the prompt
-is a second chrome row above the footer and the body loses one line. The body is
-padded to the full viewport height so the footer stays pinned to the bottom edge
-instead of floating under a short result set.
+Chrome is **two lines**: the sticky section line above the list (§3.5.1) and the
+footer below it. 20 rows − 2 chrome = 18 list rows, and **all 18 are PRs** —
+there are no header rows inside the list, no blank separators and no
+continuation lines, so the list is 100% data at every board shape. Measured on
+the live board in a 27-row pane: 25 PRs visible, against 16 under the layout
+before the uniform-row restructure.
+
+The sticky line costs one row permanently. It is worth naming where that bites:
+at exactly one pane height per board — 30 rows for the live board at the time of
+writing, and it moves as PRs open and merge — it converts "the board fits" into
+"the board scrolls". At every shorter height the board was already scrolling, so
+the row trades one line of an already-truncated list for a permanent answer to
+"where am I".
+
+The footer is one `muted` line, always: keybindings on the left, repo + spinner
+cell right-aligned. A status message *replaces* the keybinding text rather than
+adding a row — the keybindings are the least urgent thing on the board. While
+filtering, the prompt is a third chrome row between the list and the footer and
+the body loses one more line. The body is padded to the full viewport height so
+the prompt and footer stay pinned to the bottom edge instead of floating under a
+short result set.
+
+The overlays (`?` and `c`) replace the whole view, so they carry no chrome.
 
 ---
 
