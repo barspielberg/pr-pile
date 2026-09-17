@@ -23,6 +23,17 @@ const endpoint = "https://api.github.com/graphql"
 type Client struct {
 	token string
 	http  *http.Client
+
+	// endpoint is a field only so tests can point it at a stub; production
+	// always uses the const above.
+	endpoint string
+}
+
+func (c *Client) url() string {
+	if c.endpoint != "" {
+		return c.endpoint
+	}
+	return endpoint
 }
 
 // Token comes from `gh auth token` so we inherit the user's existing login
@@ -40,18 +51,26 @@ func New() (*Client, error) {
 }
 
 type PR struct {
-	Number      int
-	Title       string
-	URL         string
-	Author      string
-	IsDraft     bool
-	Review      string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
-	Mergeable   string // MERGEABLE | CONFLICTING | UNKNOWN
-	UpdatedAt   time.Time
-	HeadRefName string
-	BaseRefName string
-	CIState     string   // SUCCESS | FAILURE | PENDING | ERROR | "" (none)
-	FailedGates []string // names of failing checks, deduped
+	Number       int
+	Title        string
+	URL          string
+	Author       string
+	IsDraft      bool
+	Review       string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
+	Mergeable    string // MERGEABLE | CONFLICTING | UNKNOWN
+	UpdatedAt    time.Time
+	HeadRefName  string
+	BaseRefName  string
+	CIState      string   // SUCCESS | FAILURE | PENDING | ERROR | "" (none)
+	FailedGates  []string // names of failing checks, deduped
+	PendingGates []string // names of still-running checks, deduped
+	PassedCount  int      // passing checks are counted, not named: see docs/checks-page.md
+
+	// Skipped is the largest bucket on this board (47% of contexts) and means
+	// a job's path filter did not match, which is a fact about the workflow
+	// rather than about the PR. Counted so the overlay can reconcile its
+	// total against GitHub's, never listed.
+	SkippedCount int
 }
 
 const searchQuery = `
@@ -70,7 +89,7 @@ query($q: String!, $n: Int!) {
                 contexts(first: 100) {
                   nodes {
                     __typename
-                    ... on CheckRun { name conclusion }
+                    ... on CheckRun { name status conclusion }
                     ... on StatusContext { context state }
                   }
                 }
@@ -116,6 +135,7 @@ type prNode struct {
 						Nodes []struct {
 							TypeName   string `json:"__typename"`
 							Name       string `json:"name"`
+							Status     string `json:"status"`
 							Conclusion string `json:"conclusion"`
 							Context    string `json:"context"`
 							State      string `json:"state"`
@@ -143,7 +163,7 @@ func (c *Client) CheckRepo(ctx context.Context, repo string) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -186,7 +206,7 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]PR, err
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -240,21 +260,46 @@ func (n prNode) toPR() PR {
 		return pr
 	}
 	pr.CIState = rollup.State
-	seen := map[string]bool{}
+	// Deduped per bucket rather than globally: the same leaf name legitimately
+	// appears once as a skipped reusable-workflow stub and once as the real
+	// run, and dropping the second would lose the one that matters.
+	failed := map[string]bool{}
+	pending := map[string]bool{}
+	passed := map[string]bool{}
 	for _, ctxNode := range rollup.Contexts.Nodes {
 		name, state := ctxNode.Name, ctxNode.Conclusion
 		if ctxNode.TypeName == "StatusContext" {
 			name, state = ctxNode.Context, ctxNode.State
+		} else if state == "" {
+			// A CheckRun that has not finished carries a null conclusion, so
+			// its status is the only thing that says it is still running.
+			state = ctxNode.Status
 		}
-		if !isFailure(state) {
+		if state == "SKIPPED" {
+			pr.SkippedCount++
 			continue
 		}
 		leaf := gateName(name)
-		if leaf == "" || seen[leaf] {
+		if leaf == "" {
 			continue
 		}
-		seen[leaf] = true
-		pr.FailedGates = append(pr.FailedGates, leaf)
+		switch {
+		case isFailure(state):
+			if !failed[leaf] {
+				failed[leaf] = true
+				pr.FailedGates = append(pr.FailedGates, leaf)
+			}
+		case isPending(state):
+			if !pending[leaf] {
+				pending[leaf] = true
+				pr.PendingGates = append(pr.PendingGates, leaf)
+			}
+		case isSuccess(state):
+			if !passed[leaf] {
+				passed[leaf] = true
+				pr.PassedCount++
+			}
+		}
 	}
 	return pr
 }
@@ -262,6 +307,26 @@ func (n prNode) toPR() PR {
 func isFailure(state string) bool {
 	switch state {
 	case "FAILURE", "TIMED_OUT", "CANCELLED", "ERROR", "ACTION_REQUIRED":
+		return true
+	}
+	return false
+}
+
+// PENDING covers both a StatusContext that has not reported and a CheckRun's
+// queued/in-progress status, which arrive on different fields.
+func isPending(state string) bool {
+	switch state {
+	case "PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED":
+		return true
+	}
+	return false
+}
+
+// NEUTRAL counts as passing because it does not block a merge, which is the
+// question the count is standing in for.
+func isSuccess(state string) bool {
+	switch state {
+	case "SUCCESS", "NEUTRAL":
 		return true
 	}
 	return false
