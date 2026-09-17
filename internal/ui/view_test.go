@@ -345,6 +345,46 @@ func TestSelectedRowIsFilledEdgeToEdge(t *testing.T) {
 	}
 }
 
+// The accent brightens only on the selected row. An unselected row keeping
+// plain ANSI 4 is the regression this guards: the board's normal look must not
+// move just because the selected row needed more contrast against selBg.
+func TestAccentBrightensOnlyWhenSelected(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	m := New(testCfg(), nil)
+	m.width = 60
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "selected", UpdatedAt: time.Now()},
+		{Number: 2, Title: "not selected", UpdatedAt: time.Now().Add(-time.Hour)},
+	}})
+	m.board.Apply(board.Result{Index: 1})
+	m.cursor = 0
+
+	var sel, unsel string
+	for _, l := range strings.Split(m.View(), "\n") {
+		if strings.Contains(l, "#1") {
+			sel = l
+		}
+		if strings.Contains(l, "#2") {
+			unsel = l
+		}
+	}
+
+	if !strings.Contains(sel, "38;5;75") {
+		t.Errorf("selected row did not brighten the accent to 75:\n%q", sel)
+	}
+	if strings.Contains(sel, "\x1b[34m") {
+		t.Errorf("selected row still emits plain ANSI 4:\n%q", sel)
+	}
+	if !strings.Contains(unsel, "\x1b[34m") {
+		t.Errorf("unselected row lost plain ANSI 4:\n%q", unsel)
+	}
+	if strings.Contains(unsel, "38;5;75") {
+		t.Errorf("unselected row brightened, which changes the board:\n%q", unsel)
+	}
+}
+
 // A refresh must not collapse the board and re-expand it: that shoves every
 // row below each resolving section down the screen.
 func TestRefreshDoesNotChangeLayout(t *testing.T) {
