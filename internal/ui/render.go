@@ -403,41 +403,54 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	return line
 }
 
-// renderTitle draws the title, underlining the characters the active filter
-// matched. Underline rather than a colour: the title column already encodes
-// draft as muted and the row may sit on the selection fill, so the one free
-// channel left is weight, not hue.
+// renderTitle draws the title: the conventional-commit prefix coloured by
+// part, and the characters the active filter matched underlined.
 //
-// The clipped-and-padded string is built first and styled per-rune after, so
-// the column is exactly tw cells wide whether or not anything matched.
+// The two are independent channels on purpose. Hue says what kind of change
+// this is, underline says where the query hit, and a query that lands inside a
+// scope has to keep both -- losing either one would make filtering and reading
+// fight over the same column. Runs are therefore coalesced on the pair
+// (part, hit) rather than on hit alone.
+//
+// Parsing runs on the clipped-and-padded string rather than the raw title, so
+// the part boundaries are the ones actually on screen. A narrow terminal that
+// cuts through a scope degrades to a half-coloured prefix, which is honest
+// about the clipping rather than drifting out of alignment with it.
 func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.Style) lipgloss.Style, tw int) string {
 	text := pad(clip(r.PR.Title, tw), tw)
 	hits := matchedTitleIndexes(r, m.query())
-	if len(hits) == 0 {
+	parts := parseTitle(text)
+	if len(hits) == 0 && parts == nil {
 		return paint(st).Render(text)
 	}
 
-	hl := paint(st.Underline(true))
-	plain := paint(st)
+	typeWord := leadingType(text, parts)
+	styleFor := func(p titlePart, hit bool) lipgloss.Style {
+		s := titlePartStyle(st, p, typeWord)
+		if hit {
+			s = s.Underline(true)
+		}
+		return paint(s)
+	}
+
 	var b strings.Builder
-	// Runs are coalesced so a matched span emits one SGR pair, not one per rune.
 	var run strings.Builder
-	runHit := false
+	runPart, runHit := partSubject, false
 	flush := func() {
 		if run.Len() == 0 {
 			return
 		}
-		if runHit {
-			b.WriteString(hl.Render(run.String()))
-		} else {
-			b.WriteString(plain.Render(run.String()))
-		}
+		b.WriteString(styleFor(runPart, runHit).Render(run.String()))
 		run.Reset()
 	}
 	for i, ch := range []rune(text) {
-		if h := hits[i]; h != runHit {
+		p := partSubject
+		if i < len(parts) {
+			p = parts[i]
+		}
+		if h := hits[i]; p != runPart || h != runHit {
 			flush()
-			runHit = h
+			runPart, runHit = p, h
 		}
 		run.WriteRune(ch)
 	}
