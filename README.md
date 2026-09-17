@@ -118,6 +118,12 @@ not use.
 
 Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`, `{{.Base}}`, `{{.URL}}`, `{{.Author}}`, `{{.Title}}`.
 
+[docs/config-example.md](docs/config-example.md) works a five-section team board
+through end to end: what each rule claims versus what it actually shows once the
+rules above it have taken their share, why `-review:approved` and not
+`review:required`, and why "PRs from a team" has to be written as a list of
+authors.
+
 ## Keys
 
 | key | action |

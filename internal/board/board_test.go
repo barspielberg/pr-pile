@@ -152,3 +152,54 @@ func TestUnstackedPRsSurviveTreeLayout(t *testing.T) {
 		}
 	}
 }
+
+// A stack split across two sections is the normal case, not an edge case:
+// first-match-wins claims part of a chain for an earlier rule. Each section
+// must close the sub-chain it actually holds rather than emitting a dangling
+// glyph or dropping the orphaned children.
+func TestSplitStackClosesEachSubChain(t *testing.T) {
+	c := []github.PR{
+		{Number: 1, HeadRefName: "a", BaseRefName: "main", UpdatedAt: time.Unix(1, 0)},
+		{Number: 2, HeadRefName: "b", BaseRefName: "a", UpdatedAt: time.Unix(2, 0)},
+		{Number: 3, HeadRefName: "c", BaseRefName: "b", UpdatedAt: time.Unix(3, 0)},
+		{Number: 4, HeadRefName: "d", BaseRefName: "c", UpdatedAt: time.Unix(4, 0)},
+	}
+	b := New(config.Config{Repo: "o/r", Rules: []config.Rule{
+		{Name: "first", Query: "x", Tree: true},
+		{Name: "rest", Query: "x", Tree: true},
+	}})
+	b.Apply(Result{Index: 0, PRs: []github.PR{c[0], c[1]}})
+	b.Apply(Result{Index: 1, PRs: c})
+
+	for i, want := range [][]string{{"╭╴", "╰╴"}, {"╭╴", "╰╴"}} {
+		rows := b.Sections()[i].Rows
+		if len(rows) != len(want) {
+			t.Fatalf("section %d: want %d rows, got %d", i, len(want), len(rows))
+		}
+		for j, g := range want {
+			if rows[j].Prefix != g {
+				t.Errorf("section %d row %d: want %q, got %q", i, j, g, rows[j].Prefix)
+			}
+		}
+	}
+	if got := nums(b.Sections()[1]); got[0] != 3 || got[1] != 4 {
+		t.Errorf("leftover chain should be 3,4; got %v", got)
+	}
+}
+
+// A PR whose base is claimed by another section has no parent here, so it is a
+// root of its own chain -- and a chain of one draws no glyph at all. The glyph
+// means "stacked on something in this section", and must not claim otherwise.
+func TestLoneStackTopDrawsNoGlyph(t *testing.T) {
+	top := github.PR{Number: 2, HeadRefName: "b", BaseRefName: "a", UpdatedAt: time.Unix(2, 0)}
+	b := New(config.Config{Repo: "o/r", Rules: []config.Rule{{Name: "team", Query: "x", Tree: true}}})
+	b.Apply(Result{Index: 0, PRs: []github.PR{top}})
+
+	rows := b.Sections()[0].Rows
+	if len(rows) != 1 {
+		t.Fatalf("want 1 row, got %d", len(rows))
+	}
+	if rows[0].Prefix != "" {
+		t.Errorf("a stack top with no parent here should draw no glyph, got %q", rows[0].Prefix)
+	}
+}

@@ -548,12 +548,36 @@ keeps its default; an explicit `rules:` list replaces them wholesale.
 |---|---|---|
 | `name` | string | required; the section header, uppercased on render |
 | `query` | string | required; GitHub search syntax. Scoped automatically: `repo:<repo> is:pr is:open <query>` — a rule carries only what distinguishes it. |
-| `limit` | int | page size, default 20 |
-| `tree` | bool | group stacked PRs into a chain |
+| `limit` | int | page size, default 20. Applied as `first:N` on the search, so it truncates before `tree` groups anything |
+| `tree` | bool | group stacked PRs into a chain. Chains are computed from the PRs *in that section*, so first-match-wins splits a stack into per-section sub-chains (§4.1) |
 | `author` | bool | show the author's initials column |
 
 Rules are fetched in parallel but revealed in order, so a slow rule near the top
 stalls everything under it — cheap, high-value rules go first.
+
+### 4.1 `tree` across section boundaries
+
+`stacks()` derives a chain from the head/base refs of the PRs a section actually
+claimed, not from the repo's true stack graph. Since first-match-wins routinely
+splits one stack across two sections, this is the common case, not an edge case.
+It degrades in a defined way:
+
+| case | renders |
+|---|---|
+| whole chain in one section | full `╭╴ │ ╰╴` chain |
+| chain split across sections | each section draws a correctly-closed sub-chain of what it holds |
+| only the top of a stack present | no glyph — an ordinary row |
+| a gap in the middle | the sub-chain below the gap groups; the PR above it falls out as a plain row |
+
+The glyph sequence is always well-formed and a child is never orphaned from a
+parent that is on screen. The honest reading of `╭╴` is "stacked on something in
+this section", not "stacked" — the gap case is the one where a root is stacked
+on something not shown and nothing says so.
+
+Because `limit` is `first:N` on the search and results come back newest-first,
+a limit that cuts a chain cuts it at the **root** (the oldest PR), leaving the
+children to regroup into a valid but shorter chain. Tree rules therefore want a
+limit above the number of PRs they match.
 
 ### Action
 
