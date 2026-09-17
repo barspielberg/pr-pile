@@ -5,6 +5,11 @@ Snapping the viewport's top to a whole row is what makes the goal unsatisfiable;
 
 ---
 
+> Note: this study cites `design-research.md` and `design-spec.md`, which have
+> since been consolidated into `DESIGN.md`. The citations are kept as written
+> for provenance; the surviving conclusions live in `DESIGN.md`.
+
+
 ## 1. The answer
 
 The goal — "the cursor always has exactly N whole rows below it" — is a constraint on the **bottom** edge of the viewport. The viewport has a fixed height `H`, so fixing the bottom fixes the top:

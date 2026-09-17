@@ -2,7 +2,7 @@
 
 A terminal PR board. One keybind away, shows every PR worth looking at, opens them.
 
-Run it as `prs`. See [REQUIREMENTS.md](REQUIREMENTS.md) for the design and the latency measurements behind it.
+Run it as `prs`. See [docs/DESIGN.md](docs/DESIGN.md) for the design, the decisions behind it, and the measured numbers.
 
 ## Status
 
