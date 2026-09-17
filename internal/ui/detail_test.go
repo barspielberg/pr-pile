@@ -172,7 +172,7 @@ func TestDetailOverlayClipsTheStateBlockBeforeTheChecks(t *testing.T) {
 	}
 }
 
-// The overlay is usable before the on-demand request lands: `c` draws it from
+// The overlay is usable before the on-demand request lands: `d` draws it from
 // data already held, and the two late lines are simply absent. §7.
 func TestDetailOverlayIsUsableBeforeTheRequestLands(t *testing.T) {
 	pr := github.PR{
@@ -305,7 +305,7 @@ func TestALateResponseIsFiledUnderItsOwnPR(t *testing.T) {
 	}
 }
 
-// Pressing `c` must not fire a second request for a PR already answered or
+// Pressing `d` must not fire a second request for a PR already answered or
 // already asked about: holding the key down would otherwise queue one per
 // repeat.
 func TestRepeatedPressesDoNotRefetch(t *testing.T) {
@@ -328,7 +328,7 @@ func TestRepeatedPressesDoNotRefetch(t *testing.T) {
 	}
 }
 
-// `c` still opens instantly and still closes on the next movement, with the
+// `d` still opens instantly and still closes on the next movement, with the
 // state block present. The overlay grew a block; it did not grow a mode.
 func TestDetailOverlayStaysAGlance(t *testing.T) {
 	m := detailModel(t, github.PR{
@@ -341,9 +341,9 @@ func TestDetailOverlayStaysAGlance(t *testing.T) {
 		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
 	}})
 
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	if !m.showChecks {
-		t.Fatal("c should open the detail overlay")
+		t.Fatal("d should open the detail overlay")
 	}
 	out := stripANSI(m.View())
 	if !strings.Contains(out, "gate-one") || !strings.Contains(out, "author") {
@@ -459,5 +459,96 @@ func TestFilterMatchesTheAuthorsDisplayName(t *testing.T) {
 	m = typeQuery(m, "dependabot")
 	if rows := m.visibleRows(); len(rows) != 1 || rows[0].PR.Number != 2 {
 		t.Fatalf("login-only author stopped matching: got %d rows", len(rows))
+	}
+}
+
+// The page says it is still loading, and it says so where the answer will
+// land: the skeleton line stands in the on-demand lines' own position, so the
+// common case -- one of the two lines arriving -- resolves in place and nothing
+// below it moves. docs/pr-detail.md §7 chose to draw nothing and let the lines
+// appear; that reflows the whole block and shows no loading state at all.
+func TestDetailOverlayShowsItIsStillLoading(t *testing.T) {
+	pr := github.PR{
+		Number: 3186, Title: "free unit numbers", CIState: "SUCCESS",
+		PassedCount: 18, Author: "cdiaz88", AuthorName: "Carol Diaz",
+		Additions: 596, Deletions: 45, ChangedFiles: 7,
+		HeadRefName: "PROJ-1951", BaseRefName: "master", UpdatedAt: time.Now(),
+	}
+	m := detailModel(t, pr, 24)
+	// The loader only promises what something is actually fetching, so it needs
+	// a client to have asked.
+	m.client = &github.Client{}
+
+	before := strings.Split(stripANSI(m.detailOverlay()), "\n")
+	if !strings.Contains(strings.Join(before, "\n"), "checking for conflicts and open conversations") {
+		t.Fatalf("no loading state on an unresolved detail page:\n%s", strings.Join(before, "\n"))
+	}
+	loaderAt := -1
+	for i, l := range before {
+		if strings.Contains(l, "checking for conflicts") {
+			loaderAt = i
+		}
+	}
+
+	// One on-demand line arrives, which is the common shape, and it lands on
+	// the loader's own row.
+	next, _ := m.Update(detailMsg{detail: github.Detail{
+		Number: 3186, BehindBy: 26, DefaultBranch: "master",
+	}})
+	after := strings.Split(stripANSI(next.(Model).detailOverlay()), "\n")
+
+	if strings.Contains(strings.Join(after, "\n"), "checking for conflicts") {
+		t.Errorf("the loader outlived the response:\n%s", strings.Join(after, "\n"))
+	}
+	if len(after) != len(before) {
+		t.Errorf("the page changed height on resolution: %d lines, was %d", len(after), len(before))
+	}
+	if !strings.Contains(after[loaderAt], "26 commits behind master") {
+		t.Errorf("the answer did not land on the loader's row %d: %q", loaderAt, after[loaderAt])
+	}
+	for i := range before {
+		if i == loaderAt {
+			continue
+		}
+		if i < len(after) && after[i] != before[i] {
+			t.Errorf("line %d reflowed when the response landed:\n before %q\n  after %q",
+				i, before[i], after[i])
+		}
+	}
+}
+
+// A board with no client is not waiting on anything, so it must not sit on a
+// loader forever.
+func TestDetailOverlayHasNoLoaderWithNothingInFlight(t *testing.T) {
+	pr := github.PR{Number: 1, Title: "a", CIState: "SUCCESS", PassedCount: 1,
+		Author: "someone", UpdatedAt: time.Now()}
+	m := detailModel(t, pr, 24)
+	if out := stripANSI(m.detailOverlay()); strings.Contains(out, "checking for") {
+		t.Errorf("a loader with nothing to wait for:\n%s", out)
+	}
+}
+
+// The spinner has to keep ticking while a detail request is out, or the loader
+// is a frozen glyph -- which reads as stuck, not as working. The board may well
+// have finished fetching by the time `d` is pressed.
+func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
+	pr := github.PR{Number: 1, Title: "a", CIState: "SUCCESS", PassedCount: 1,
+		Author: "someone", UpdatedAt: time.Now()}
+	m := detailModel(t, pr, 24)
+	m.fetching = false
+	m.inflight[1] = true
+
+	next, cmd := m.Update(spinMsg(time.Now()))
+	if next.(Model).spinner == m.spinner {
+		t.Error("the spinner did not advance while a detail request was in flight")
+	}
+	if cmd == nil {
+		t.Error("the tick stopped while a detail request was in flight")
+	}
+
+	// And it stops once nothing is out, so an idle board is not spinning.
+	m.inflight = map[int]bool{}
+	if _, cmd := m.Update(spinMsg(time.Now())); cmd != nil {
+		t.Error("the spinner kept ticking on an idle board")
 	}
 }

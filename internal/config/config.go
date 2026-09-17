@@ -106,7 +106,7 @@ rules:
 #   - key: w
 #     name: worktree
 #     run: wt switch -x nvim pr:{{.Number}}
-#   - key: d
+#   - key: v
 #     name: review
 #     run: tuicr pr {{.Number}}
 #     mode: suspend     # hand over the terminal; default is background

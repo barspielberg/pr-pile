@@ -552,7 +552,7 @@ block lives inside the same body budget rather than adding fixed chrome.
 
 ---
 
-## 7. Rendering before the data arrives
+## 7. Rendering before the data arrives — **REVISED, see §7.1**
 
 The on-demand request is **1.2–1.9 s**. The overlay must not wait for it.
 
@@ -573,6 +573,73 @@ This is the one place the page is not instantaneous, and it is the price of
 `behindBy` and unresolved threads. Both were judged worth it — they are the top
 two items on the field list — but the *page* stays instant, which is the
 property that matters.
+
+### 7.1 Revision: there is a loading line, and the "absent" rule was wrong
+
+The user, after running it:
+
+> *"I do not see a loader in the details page, usually in the web we do a
+> placeholder loading state for stuff like that."*
+
+There **was** a loader — `reviewerLine` renders `…` — and it is invisible in
+practice for two reasons the spec did not account for. `m.detail` is a cache
+keyed by PR number, so the loading state only ever appears on the *first* open
+of a given PR; and the reviewer line is the one field that is silent on an
+unreviewed PR, so on a large share of the board there is nothing to hold a
+placeholder at all.
+
+**The rule above — "absent, not a spinner placeholder" — is reversed.** The
+argument was that *"a line that appears is less disruptive than a line that
+changes content in place"*. That is the wrong comparison. A line that appears
+does not merely appear: it **inserts**, and `behind` and `unresolved` insert at
+the *top* of the state block, so every line below them — author, review, size,
+branch, opened — moves down a row. A placeholder that resolves in place changes
+one line and moves nothing. The spec compared "appear" against "change" and
+should have compared "push five lines down" against "change one line".
+
+The user reporting it is the evidence. They were not asking for a spinner as
+decoration; they were describing a page that visibly rearranged itself and said
+nothing about why.
+
+**What shipped: one skeleton line, in the on-demand lines' own position.**
+
+```
+  ! conflicted
+  ⠹ checking for conflicts and open conversations      <- the skeleton
+  author    Daniel (danielmar121)
+  review    …
+```
+
+resolving to
+
+```
+  ! conflicted · 17034 commits behind master
+  author    Daniel (danielmar121)
+  review    ✓ Bar Spielberg (barspielberg)
+```
+
+**One line and not one per field**, which is the judgement call. Per-field
+placeholders are the obvious reading of "web skeleton" and they are wrong here,
+because both fields are conditional: unresolved threads exist on **6 of 50 PRs**
+(§5.4), and `behindBy > 0` is common but not universal. Reserving a row for each
+would draw two rows on most PRs that then vanish — trading a reflow on arrival
+for a worse one on resolution, on more PRs. One line is what the group usually
+resolves to, so the common case moves nothing at all.
+
+Verified live against `#3220`, a PR not previously opened, in a 40×120 pane: the
+loader animated for ~5 s and then `· 20 commits behind master` landed **on the
+loader's own row**, with every other line byte-identical. A test asserts that
+directly.
+
+It is not free in every case. When the group resolves to zero lines, or to two,
+or when `behind` merges into an existing `conflicted` line as it does on `#345`,
+the block changes height by one and the lines below shift a row. That is the
+same magnitude as the behaviour it replaces, and it now happens on the minority
+of PRs rather than all of them.
+
+The spinner also had to be taught to keep ticking: it stopped once the *board*
+finished fetching, so a loader opened on a settled board would have been a
+frozen glyph, which reads as stuck rather than as working.
 
 ---
 

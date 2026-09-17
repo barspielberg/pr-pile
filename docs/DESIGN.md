@@ -63,7 +63,7 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | Numeric filter queries are exact, not fuzzy | Fuzzy treated `3248` as a subsequence, so it also hit titles containing 3…2…4…8 scattered across them. Bare numbers now match PR numbers by prefix. |
 | `sahilm/fuzzy`, not fzf's matcher | fzf ranks better but drags in tcell, go-colorful and a shellwords parser for one function. `bubbles/textinput` was also rejected: it pulls an OS clipboard shell-out for a paste binding this prompt does not need. |
 | The checks overlay names failures and pending, counts passes | 47% of check contexts on the live board are skipped and 45% pass, against 4% failing — listing passes buries 7 signal lines under 24 on the worst PR. Pending checks are named instead of counted because they are 1–3 per PR and say *what* you are waiting on. The overlay also stopped dead-ending: 47% of PRs are in PENDING rollup with nothing failing, where it used to say "no failing checks". `checks-page.md` has the measurements. |
-| Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `c` overlay and section names to a left gutter, so every line on the board is a row and one keypress scrolls at most one line — unconditionally, not by argument. `uniform-rows.md` has the measurements; `view-restructure.md` is the earlier study this overturned. |
+| Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `d` overlay and section names to a left gutter, so every line on the board is a row and one keypress scrolls at most one line — unconditionally, not by argument. `uniform-rows.md` has the measurements; `view-restructure.md` is the earlier study this overturned. |
 | No chrome line above the list | A pinned section line with a `N of M` count was built and reverted. Bound to the top visible row it could not name the wrong section — but on a pane tall enough to show the whole board nothing scrolls, so it froze on the first section and read `MINE · 1 of 5` while the cursor was three sections away. It also restated the gutter label directly beneath it, since both resolved from the same `meta[start]`. The full name and the per-section count are not on the board; `l`/`h` jumps between sections. `section-layout.md` §13 has the reproduction and what I got wrong. |
 | The gutter name is window-relative, and `╷` ≠ `│` | `firstInSection` was `i == 0` over the whole section, so a scrolled board left every row above the boundary unnamed — the gutter went blank exactly when you most needed to know where you were. With no chrome line above the list this is again the only thing naming the top row's section. `╷` is retained separately from `│`: "a section starts here" and "its start is above the window" are different facts, and conflating them would claim a boundary that is not there. |
 | Scroll margin of 2 rows | lazygit ships 2, fzf migrated 0 → 3 in 2024, nnn/micro use 3; no tool surveyed migrated the other way. 2 is the smallest in the cluster and still guarantees the first line of the next PR is visible. Every implementation caps at half the viewport; none is proportional (helix rejected that on the record, #8403). |
@@ -276,7 +276,7 @@ on failure. While loading, a section with no rows yet reserves a placeholder
 block (capped at 6 rows, and at `(height-2)/len(rules)`) so the skeleton starts
 near its final height.
 
-### 3.6 The PR detail overlay (`c`)
+### 3.6 The PR detail overlay (`d`)
 
 Check names are **not** in the list. The row carries the count (`✗6`), which
 answers "is this broken" and "how broken"; the overlay answers "why", which is
@@ -310,7 +310,8 @@ to be learned to read this page.
 
 Below the checks sits a **state block**: what is true about the PR itself rather
 than about its CI. It is what makes this the detail page rather than the checks
-page, and the key stayed `c` because the checks are still the top of it.
+page. The key was `c` while it was the checks page and is now `d` for detail,
+which is what the page became; the checks are still the top of it.
 
 ```
   #3186 fix(api-service): PROJ-1951 free unit numbers when a plan is abandoned
@@ -351,10 +352,16 @@ underneath "which files conflict" — *how much work is this to fix?*
 `pr-detail.md` §4 has the ground-truth measurements.
 
 **Two of these lines arrive late.** `behindBy`, unresolved threads, the reviewer
-names and the default branch come from a second request made on `c` press,
+names and the default branch come from a second request made on `d` press,
 measured at 1.2–1.9 s. The overlay is drawn immediately from data the board
-already holds and those lines appear when they land, so `c` is instant and
-`c`-then-any-key works even if the request never returns. Fetching them upfront
+already holds, so `d` is instant and `d`-then-any-key works even if the request
+never returns. A **skeleton line stands where those lines will land** — `⠹
+checking for conflicts and open conversations` — so the common case resolves in
+place instead of inserting a row and pushing the rest of the block down. It is
+one line and not one per field: both fields are conditional (unresolved threads
+exist on 6 of 50 PRs), so a placeholder each would draw rows that vanish on most
+PRs. `pr-detail.md` §7.1 records the reversal of the original "absent, not a
+placeholder" rule and why the user's report is the evidence against it. Fetching them upfront
 would mean ~100 requests on a cold start, roughly doubling the 2–4 s the tool
 commits to in §2.
 
@@ -368,7 +375,7 @@ it would pull the eye to the least important line.
 
 Responses are keyed by PR number, so one that lands after the cursor has moved
 on files itself under the PR it describes. Nothing is cancelled: holding `j`
-with `c` at each row leaves requests answering questions nobody is asking, which
+with `d` at each row leaves requests answering questions nobody is asking, which
 is harmless and cheaper than threading cancellation through the command model.
 A PR already answered is never re-asked within a session.
 
@@ -467,15 +474,51 @@ A second chrome line was tried above the list (§3.5.1) and reverted, so the row
 it cost is back. Verified in a real 120×40 pane: the whole 29-row board plus the
 footer, with room to spare.
 
-The footer is one `muted` line, always: keybindings on the left, repo + spinner
-cell right-aligned. A status message *replaces* the keybinding text rather than
+The footer is one `muted` line, always: keybindings on the left, and on the
+right the **cursor's section with its position in it** — `NEEDS MY REVIEW · 3 of
+10` — plus the spinner cell. The repo yielded that slot: it is a constant the
+user chose, while the section changes under every keypress, and the 8-cell
+gutter can only draw `NEEDS M…`. It is bound to the **cursor**, never to the top
+visible row: at 40 rows the board does not scroll, so a top-row binding is
+frozen at the first section forever, which is exactly how the reverted sticky
+line failed. `section-layout.md` §14 has the walk that verifies it changes on
+every keypress. When the two fields do not both fit the keys clip and the name
+survives whole. A status message *replaces* the keybinding text rather than
 adding a row — the keybindings are the least urgent thing on the board. While
 filtering, the prompt is a second chrome row between the list and the footer and
 the body loses one more line. The body is padded to the full viewport height so
 the prompt and footer stay pinned to the bottom edge instead of floating under a
 short result set.
 
-The overlays (`?` and `c`) replace the whole view, so they carry no chrome.
+The overlays (`?` and `d`) replace the whole view, so they carry no chrome, with
+one exception: **`?` scrolls**, and spends its bottom row saying so.
+
+The legend is 45 lines and does not fit the pane the board is usually run in. It
+used to clip, losing its *top* — the key list, which is the reason anyone opens
+it. A two-column fold was tried and reverted: it was more layout code and it
+still clipped on a short pane, so it bought nothing. The page is now one column
+that scrolls with `j`/`k`, the arrows, `ctrl+d`/`ctrl+u`, page keys, and `g`/`G`.
+
+Scrolling costs the old **"any key closes"** contract, because `j` and `k` now
+mean something else. The rule is the inverse of a mode: the scroll keys scroll
+and **everything else closes**, so a key the reader guesses at still leaves the
+page. The bottom row says which keys close it and where in the legend you are —
+`esc q ? close · j/k scroll` on the left, `9-45 of 45 · end` on the right.
+
+**That row is drawn at every height**, including when the whole legend fits (it
+reads `esc q ? close` and `all 45`). Drawing it only on overflow cost a real
+bug: for a 45-line legend in a 45- or 46-row pane the page showed no affordance
+at all and `j` was a silent no-op that still swallowed the key, which is
+indistinguishable from "scrolling is broken" — at exactly the heights a
+full-screen terminal reports. One shape at every height is worth the row, and
+the closing keys need saying everywhere regardless, since scrolling took the
+`any key closes` contract away at all heights, not just short ones.
+
+**The detail overlay does not scroll and should not.** `fitChecks` clips it from
+the bottom of a list already ranked by what you pressed `d` for, and its any-key
+contract is load-bearing: `d` then `j` inspects a PR and carries on down the
+board in one motion. Adding a scroll mode there would spend that motion to solve
+a problem the ranking already handles.
 
 ---
 
@@ -540,12 +583,12 @@ Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 |---|---|
 | `j` `k` / `↓` `↑` | move |
 | `l` `h` / `→` `←` | next / previous section (empty sections skipped; `h` goes to the start of the current section first, then back) |
-| `g` `G` / home end | top / bottom |
+| `gg` `G` / `g` home end | top / bottom. `gg` is the vim chord; bare `g` is already top, so the second press repeats a move that is its own fixed point and there is no pending-key mode to wedge |
 | `enter` `o` | open in browser (reuses an existing Arc tab) |
 | `r` | reload |
 | `/` | filter |
-| `c` | checks for the selected PR: failing and running named, passing counted (any key closes; a movement key closes *and* moves) |
-| `?` | help + glyph legend |
+| `d` | detail for the selected PR: failing and running checks named, passing counted, plus the state block (any key closes; a movement key closes *and* moves) |
+| `?` | help and the glyph legend. It scrolls (`j`/`k`, arrows, `ctrl+d`/`ctrl+u`, page keys, `g`/`G`); `esc`, `q` and `?` close it, as does any key that is not a scroll key |
 | `q` `esc` `ctrl+c` | quit |
 
 **Filtering.** `/` opens a fuzzy prompt over number, author and title. Rows rank

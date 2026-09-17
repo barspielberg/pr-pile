@@ -146,6 +146,10 @@ The failure count stays in the status cluster (`✗6`), so "is this broken" and
 
 ### 3.2 Gate names — the `c` overlay
 
+> **The key is now `d`.** It was `c` for checks; the page grew a state block and
+> became the detail page, and the user renamed the key to match. Everything
+> below is unchanged apart from which key opens it. See `DESIGN.md` §3.6.
+
 Pressing `c` on a row with failing gates opens an overlay listing them in full,
 one per line, unclipped. This is strictly *more* information than the old
 continuation line, which clipped to a single line with `…` and in the

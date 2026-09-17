@@ -1041,3 +1041,100 @@ threshold is gone.
   as unverified before the sticky line and it is unverified after it. Two
   attempts to place it have now been rejected; I would want evidence that it is
   wanted before proposing a third.
+
+---
+
+## 14. Revision three: the footer, bound to the cursor
+
+The user changed their mind and asked for §4.3 back, with the count:
+
+> *"sticky header looks good and I now think the designer was right, we should
+> display the full header of the current section in the bottom with 1 of 5"*
+
+**Shipped.** The footer's right field carries `SECTION · N of M` and the repo
+yields the slot, which is §4.3 exactly. What is new is the binding, and it is
+the whole reason this can work where §11 could not.
+
+### 14.1 The binding is the cursor, not the top visible row
+
+§13.1 measured the defect that killed the sticky line: at 40 rows the board does
+not scroll, `start` is pinned at 0, and a top-row-bound field reads `MINE · 1 of
+5` on every frame of a 34-row walk. The user's *"not related to the cursor at
+all"* was a literal description of the code.
+
+So this field is bound to the cursor's own section and the cursor's index within
+it. Verified against the live board in a 40×120 pane, walking `j` 34 times from
+`MINE` into `ALL OPEN`:
+
+| keypress | footer | selected row |
+|---|---|---|
+| 4 | `MINE · 5 of 5` | `#2909` |
+| 5 | `NEEDS MY REVIEW · 1 of 10` | `#3189` |
+| 14 | `NEEDS MY REVIEW · 10 of 10` | `#2902` |
+| 15 | `MY TEAM'S · 1 of 2` | `#3211` |
+| 17 | `INVOLVED · 1 of 4` | `#2741` |
+| 21 | `ALL OPEN · 1 of 14` | `#3253` |
+
+The value changed on **every one of the 34 keypresses** and matched the selected
+row on every one. That is the property §13.1 found absent, and it is what a test
+now asserts directly rather than by argument.
+
+§13.3 re-derived cursor-binding and found it correct but not worth a *row*. That
+reasoning is intact and is why this is in the footer: the footer already exists,
+so the field costs no line. The two objections §13.3 raised against cursor
+binding were both about spending a row on it, and neither survives when the row
+is not spent.
+
+At 14 rows, scrolled, the mirror case §13.3 worried about was captured live: the
+top row is `NEEDS M…`, the cursor is on `#345` in `INVOLVED`, and the footer
+reads `INVOLVED · 2 of 4`. The shipped sticky line said `NEEDS MY REVIEW · 5 of
+10` on this exact shape.
+
+### 14.2 Why the footer is acceptable now and was not in §11
+
+§11 rejected the footer on prominence — muted text in the bottom-right corner is
+where this board puts what you may ignore. That objection was correct and is
+unchanged; what changed is the alternative. §11 was choosing between a footer
+and a pinned row. §13 removed the pinned row for reasons that have nothing to do
+with prominence, so the choice now is between the footer and **nothing at all**,
+which is what §13.4 left on the board. Muted and available beats absent.
+
+It also answers something the board never could: the gutter has 8 cells, so
+`MY TEAM'S` is drawn `MY TEAM…` and `NEEDS MY REVIEW` is drawn `NEEDS M…`. The
+footer is the only place either name is legible in full, and the only place the
+count exists at all — §13.5 listed both as unverified losses.
+
+### 14.3 Degradation
+
+The footer's left field already clipped when the two fields did not both fit;
+what changed is that the right field no longer disappears when it does. Measured
+live at 80 columns:
+
+```
+  j/k move · l/h section · enter open · d detail · / filter · ?… MINE · 1 of 5
+  j/k move · l/h section · enter open · d detail · / filte… MY TEAM'S · 2 of 2
+```
+
+The keys clip and the name survives whole, and the keys give up exactly as many
+cells as the name needs. Below the point where the name would leave the keys
+under 8 cells, the right field goes too rather than being clipped into a
+half-truth like `NEEDS MY REVI`.
+
+### 14.4 What this does not change
+
+`chrome` in `View()` stays 1, and 2 while filtering. No line was added, so
+`TestNoChromeLineAboveTheList` and the one-keypress-one-line invariant are
+untouched — this is the property that made the footer the only proposal left
+standing in §13.4.
+
+### 14.5 What I could not verify
+
+- **Whether the count is what the user wanted it to mean.** `N of M` is now the
+  cursor's position in its section, which is the reading §13.1 said the shape
+  implies. The user asked for "1 of 5" without defining it; this is the only
+  definition that changes on every keypress, so it is the one that carries
+  information, but it is an inference from the shape rather than from the ask.
+- **Whether the footer is prominent enough now.** §11's objection was never
+  answered, only outvoted by the alternative being nothing. If it turns out to
+  be too quiet, the remaining lever is colour — the field could leave `muted`
+  without costing a row — and that was not tried.

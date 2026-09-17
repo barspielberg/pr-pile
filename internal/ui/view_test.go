@@ -70,7 +70,7 @@ func TestViewRendersStatesAndGates(t *testing.T) {
 		}
 	}
 	// The gate NAME is not in the list: it would cost the row a second line,
-	// which is what made the board scroll unevenly. It lives behind `c`.
+	// which is what made the board scroll unevenly. It lives behind `d`.
 	if strings.Contains(out, "webapp_e2e") {
 		t.Errorf("gate name should not be in the row:\n%s", out)
 	}
@@ -585,9 +585,10 @@ func TestResolvedEmptySectionIsOneLine(t *testing.T) {
 }
 
 // esc and q close the help overlay rather than quitting: opening help must
-// never cost the user their session by reflex.
+// never cost the user their session by reflex. `j` no longer closes it -- it
+// scrolls -- which is exactly why the closing keys are printed on the page.
 func TestHelpOverlayClosesWithoutQuitting(t *testing.T) {
-	for _, key := range []string{"esc", "q", "?", "j"} {
+	for _, key := range []string{"esc", "q", "?"} {
 		m := New(testCfg(), nil)
 		m.width, m.height = 100, 30
 		m.showHelp = true
@@ -606,6 +607,112 @@ func TestHelpOverlayClosesWithoutQuitting(t *testing.T) {
 	m.showHelp = true
 	if _, cmd := m.handleKey(keyOf("ctrl+c")); cmd == nil {
 		t.Error("ctrl+c should still quit from the help overlay")
+	}
+}
+
+// Everything that is not a scroll key closes the page. A reader who guesses
+// wrong still gets out, which is what keeps a scrolling overlay from being
+// somewhere you can be trapped.
+func TestAnyUnknownKeyStillClosesTheHelp(t *testing.T) {
+	for _, key := range []string{"x", "z", "1", "/", "enter", "r", "o"} {
+		m := New(testCfg(), nil)
+		m.width, m.height = 100, 14
+		m.showHelp = true
+		got, _ := m.handleKey(keyOf(key))
+		if got.(Model).showHelp {
+			t.Errorf("%q left the reader stuck in the help page", key)
+		}
+	}
+}
+
+// The page scrolls, reaches its end, and cannot be scrolled off either edge.
+func TestHelpScrolls(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 14
+	m.showHelp = true
+
+	total := len(m.helpLines())
+	if total <= m.height {
+		t.Fatalf("help fits at h=%d, this test proves nothing", m.height)
+	}
+
+	first := func(mm Model) string {
+		return stripANSI(strings.Split(mm.helpOverlay(), "\n")[0])
+	}
+	top := first(m)
+	if !strings.Contains(top, "KEYS") {
+		t.Fatalf("help does not start at the top: %q", top)
+	}
+
+	// j moves by one and k brings it back.
+	m = press(m, runeKey('j'))
+	if first(m) == top {
+		t.Error("j did not scroll the help page")
+	}
+	m = press(m, runeKey('k'))
+	if first(m) != top {
+		t.Errorf("k did not scroll back: %q, want %q", first(m), top)
+	}
+	if m.showHelp == false {
+		t.Fatal("scrolling closed the page")
+	}
+
+	// It cannot be scrolled above the first line.
+	for i := 0; i < 5; i++ {
+		m = press(m, runeKey('k'))
+	}
+	if first(m) != top {
+		t.Errorf("k ran off the top: %q", first(m))
+	}
+
+	// G reaches the end and the last legend line is on screen.
+	m = press(m, runeKey('G'))
+	out := stripANSI(m.helpOverlay())
+	if !strings.Contains(out, "config:") {
+		t.Errorf("G did not reach the bottom:\n%s", out)
+	}
+	if !strings.Contains(out, "end") {
+		t.Errorf("the page did not say it was at the end:\n%s", out)
+	}
+
+	// Holding G cannot push past it.
+	last := m.helpOverlay()
+	m = press(m, runeKey('G'))
+	m = press(m, runeKey('j'))
+	if m.helpOverlay() != last {
+		t.Error("the page scrolled past its own end")
+	}
+
+	// g returns to the top, and ctrl+d/ctrl+u move by a page.
+	m = press(m, runeKey('g'))
+	if first(m) != top {
+		t.Errorf("g did not return to the top: %q", first(m))
+	}
+	m = press(m, keyOf("ctrl+d"))
+	paged := first(m)
+	if paged == top {
+		t.Error("ctrl+d did not page down")
+	}
+	m = press(m, keyOf("ctrl+u"))
+	if first(m) != top {
+		t.Errorf("ctrl+u did not page back: %q", first(m))
+	}
+}
+
+// Re-opening starts at the top: the scroll position is a property of the
+// reading, not of the session.
+func TestHelpReopensAtTheTop(t *testing.T) {
+	mine, review := samplePRs()
+	m := loaded(t, 120, 14, mine, review)
+	m = press(m, runeKey('?'))
+	m = press(m, runeKey('G'))
+	m = press(m, runeKey('q'))
+	if m.showHelp {
+		t.Fatal("q should have closed the page")
+	}
+	m = press(m, runeKey('?'))
+	if got := stripANSI(strings.Split(m.helpOverlay(), "\n")[0]); !strings.Contains(got, "KEYS") {
+		t.Errorf("help reopened mid-page: %q", got)
 	}
 }
 
@@ -765,7 +872,7 @@ func TestCursorReachesBothEndsOfTheList(t *testing.T) {
 }
 
 // Every row is one line, so a failing PR can never be half-scrolled: its gate
-// names are in the `c` overlay, which is not subject to the fold at all.
+// names are in the `d` overlay, which is not subject to the fold at all.
 func TestFailingRowIsOneLineAndItsGatesAreInTheOverlay(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 10
@@ -998,9 +1105,9 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 	}})
 	m.board.Apply(board.Result{Index: 1})
 
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	if !m.showChecks {
-		t.Fatal("c should open the checks overlay")
+		t.Fatal("d should open the checks overlay")
 	}
 	if !strings.Contains(m.View(), "gate-one") {
 		t.Errorf("overlay missing the gate name:\n%s", m.View())
@@ -1015,7 +1122,7 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 	}
 
 	// esc closes without moving, and without quitting.
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.showChecks {
 		t.Error("esc should close the overlay")
@@ -1058,7 +1165,7 @@ func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
 }
 
 // Nearly half the live board sits in PENDING rollup state, where there is
-// nothing failing at all. Before pending gates were carried, `c` answered
+// nothing failing at all. Before pending gates were carried, `d` answered
 // "no failing checks" on all of them, which is a dead end.
 func TestChecksOverlayOnPendingPRNamesWhatIsRunning(t *testing.T) {
 	m := New(testCfg(), nil)
@@ -1250,5 +1357,405 @@ func TestSectionBoundaryBreaksTheRule(t *testing.T) {
 	}
 	if continues != 1 {
 		t.Errorf("got %d continuation rows, want 1", continues)
+	}
+}
+
+// The footer names the cursor's section and where the cursor sits inside it.
+// It is bound to the cursor and not to the top visible row: at the user's 40
+// rows the board does not scroll, so a top-row binding is frozen at the first
+// section forever. That is how the sticky line died -- docs/section-layout.md
+// §13.1, §14.
+func TestFooterNamesTheCursorSection(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 40
+
+	var mine, review []github.PR
+	for i := 1; i <= 5; i++ {
+		mine = append(mine, github.PR{Number: 3000 + i, Title: fmt.Sprintf("mine %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0)})
+	}
+	for i := 1; i <= 7; i++ {
+		review = append(review, github.PR{Number: 4000 + i, Title: fmt.Sprintf("theirs %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(8000-i), 0)})
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: mine})
+	m.board.Apply(board.Result{Index: 1, PRs: review})
+
+	// The board must fit, or this proves nothing about the frozen case.
+	if len(m.visibleRows()) >= m.height-1 {
+		t.Fatalf("board scrolls at h=%d, the case under test is the one that does not", m.height)
+	}
+
+	foot := func() string {
+		lines := strings.Split(stripANSI(m.View()), "\n")
+		return lines[len(lines)-1]
+	}
+
+	want := []string{}
+	for i := 1; i <= 5; i++ {
+		want = append(want, fmt.Sprintf("MINE · %d of 5", i))
+	}
+	for i := 1; i <= 7; i++ {
+		want = append(want, fmt.Sprintf("REVIEW REQUESTED · %d of 7", i))
+	}
+
+	m.cursor = 0
+	for i, w := range want {
+		m.cursor = i
+		if got := foot(); !strings.Contains(got, w) {
+			t.Fatalf("cursor %d: footer %q, want it to carry %q", i, got, w)
+		}
+	}
+
+	// The repo yielded the slot, so it is not also drawn there.
+	if strings.Contains(foot(), "o/r") {
+		t.Errorf("the repo still holds the footer's right field: %q", foot())
+	}
+}
+
+// The value has to change on every keypress, which is the property the sticky
+// line failed: it read `MINE · 1 of 5` on all 34 frames of a walk down the
+// board. Asserting the strings differ catches a regression to any binding that
+// is constant while the cursor moves.
+func TestFooterSectionCountChangesOnEveryKeypress(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 40
+
+	var mine, review []github.PR
+	for i := 1; i <= 6; i++ {
+		mine = append(mine, github.PR{Number: 3000 + i, Title: fmt.Sprintf("mine %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0)})
+	}
+	for i := 1; i <= 6; i++ {
+		review = append(review, github.PR{Number: 4000 + i, Title: fmt.Sprintf("theirs %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(8000-i), 0)})
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: mine})
+	m.board.Apply(board.Result{Index: 1, PRs: review})
+
+	field := func() string {
+		lines := strings.Split(stripANSI(m.View()), "\n")
+		last := lines[len(lines)-1]
+		f := strings.Fields(last)
+		// The field is the trailing `NAME · N of M`, four fields from the end.
+		if len(f) < 5 {
+			t.Fatalf("footer has no section field: %q", last)
+		}
+		return strings.Join(f[len(f)-5:], " ")
+	}
+
+	prev := ""
+	for c := 0; c < len(m.visibleRows()); c++ {
+		m.cursor = c
+		now := field()
+		if now == prev {
+			t.Fatalf("cursor %d: footer field did not change, still %q", c, now)
+		}
+		prev = now
+	}
+}
+
+// At 80 columns the two fields do not both fit. The keys clip and the section
+// name survives whole, because the keys are a reminder of what the user knows
+// and the name is the only place the full name and count exist.
+func TestFooterKeepsTheSectionNameWhenItClips(t *testing.T) {
+	mine, review := samplePRs()
+	for _, w := range []int{80, 86, 100, 120} {
+		m := loaded(t, w, 24, mine, review)
+		m.cursor = 1
+		lines := strings.Split(stripANSI(m.View()), "\n")
+		foot := lines[len(lines)-1]
+		if !strings.Contains(foot, "MINE · 2 of 2") {
+			t.Errorf("w=%d: the section name did not survive the clip: %q", w, foot)
+		}
+		if lipgloss.Width(foot) > w {
+			t.Errorf("w=%d: footer overflows at %d cells: %q", w, lipgloss.Width(foot), foot)
+		}
+	}
+}
+
+// `gg` is the vim chord. It works because bare `g` is already top, so the
+// second press repeats a move that is its own fixed point -- no pending-key
+// mode, and a stray `g` cannot leave the board waiting for a key.
+func TestGGGoesToTheTop(t *testing.T) {
+	mine, review := samplePRs()
+	m := loaded(t, 120, 20, mine, review)
+
+	m.cursor = 2
+	m = press(m, runeKey('g'))
+	m = press(m, runeKey('g'))
+	if m.cursor != 0 {
+		t.Errorf("gg left the cursor at %d, want 0", m.cursor)
+	}
+
+	// A stray single `g` is a complete move, not half a chord: the next key is
+	// read as itself.
+	m.cursor = 2
+	m = press(m, runeKey('g'))
+	if m.cursor != 0 {
+		t.Errorf("a bare g left the cursor at %d, want 0", m.cursor)
+	}
+	m = press(m, runeKey('j'))
+	if m.cursor != 1 {
+		t.Errorf("j after g moved to %d, want 1: g swallowed the next key", m.cursor)
+	}
+
+	// G is still the bottom, and gG is not a chord that wedges anything.
+	m = press(m, runeKey('g'))
+	m = press(m, runeKey('G'))
+	if want := len(m.visibleRows()) - 1; m.cursor != want {
+		t.Errorf("G left the cursor at %d, want %d", m.cursor, want)
+	}
+}
+
+// The help page lists every key the board and the filter actually handle. It
+// drifted once already: the arrows, home/end, o and the two extra quit keys
+// were all live and undocumented.
+func TestHelpListsEveryKeyThatIsHandled(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 40
+	out := stripANSI(m.helpOverlay())
+
+	for _, k := range []string{
+		"j / k", "↓ ↑", "l / h", "→ ←", "gg / G", "home", "end",
+		"enter", "o ", "d ", "/ ", "r ", "? ", "q ", "esc", "ctrl+c",
+		"ctrl+n/p", "ctrl+j/k", "backspace", "ctrl+u",
+	} {
+		if !strings.Contains(out, k) {
+			t.Errorf("help does not mention %q:\n%s", k, out)
+		}
+	}
+
+	// This page's own keys are on its bottom row rather than in the list, so
+	// they are checked where they actually live -- on a pane short enough that
+	// the row is drawn.
+	short := New(testCfg(), nil)
+	short.width, short.height = 120, 14
+	short.showHelp = true
+	hint := stripANSI(short.helpOverlay())
+	for _, k := range []string{"esc", "q", "?", "close", "scroll"} {
+		if !strings.Contains(hint, k) {
+			t.Errorf("the help page does not say %q on its own bottom row:\n%s", k, hint)
+		}
+	}
+}
+
+// The help page never overflows its pane and never clips its top: it scrolls
+// instead. Clipping from the top is the bug this replaces -- it lost KEYS, the
+// section anyone opening `?` is looking for. A two-column fold was tried and
+// reverted; it still clipped on a short pane, so it paid layout complexity
+// without buying the fix.
+func TestHelpFitsEveryPane(t *testing.T) {
+	for _, h := range []int{14, 20, 24, 30, 40, 58, 80} {
+		for _, w := range []int{80, 120, 147} {
+			m := New(testCfg(), nil)
+			m.width, m.height = w, h
+			m.showHelp = true
+			lines := strings.Split(m.helpOverlay(), "\n")
+			if len(lines) > h {
+				t.Errorf("%dx%d: help is %d lines, pane is %d", w, h, len(lines), h)
+			}
+			for _, l := range lines {
+				if lipgloss.Width(l) > w {
+					t.Errorf("%dx%d: help line overflows at %d cells: %q",
+						w, h, lipgloss.Width(l), stripANSI(l))
+				}
+			}
+
+			out := stripANSI(m.helpOverlay())
+			// The page always opens on KEYS, at every size.
+			if !strings.Contains(out, "KEYS") || !strings.Contains(out, "j / k") {
+				t.Errorf("%dx%d: help does not open on the key list:\n%s", w, h, out)
+			}
+
+			full := len(m.helpLines())
+			if full <= h {
+				// It fits: no hint row, no indicator fuss.
+				if strings.Contains(out, fmt.Sprintf("of %d", full)) {
+					t.Errorf("%dx%d: a page that fits still drew a position:\n%s", w, h, out)
+				}
+				for _, want := range []string{"FILTER", "CI", "REVIEW", "BLOCKERS", "ROWS", "config:"} {
+					if !strings.Contains(out, want) {
+						t.Errorf("%dx%d: help lost %s though it fits:\n%s", w, h, want, out)
+					}
+				}
+				continue
+			}
+			// It does not fit, so it says where you are and how to leave.
+			if !strings.Contains(out, fmt.Sprintf("of %d", full)) {
+				t.Errorf("%dx%d: scrolling page did not show its position:\n%s", w, h, out)
+			}
+			for _, want := range []string{"esc", "q", "?", "scroll"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("%dx%d: hint row does not mention %q:\n%s", w, h, want, out)
+				}
+			}
+		}
+	}
+}
+
+// Every line of the legend is reachable by scrolling, at the shortest pane the
+// board supports. A reference you cannot reach the bottom of is not one.
+func TestHelpScrollReachesEveryLine(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 14
+	m.showHelp = true
+
+	seen := map[string]bool{}
+	for i := 0; i < len(m.helpLines())+5; i++ {
+		for _, l := range strings.Split(stripANSI(m.helpOverlay()), "\n") {
+			seen[strings.TrimRight(l, " ")] = true
+		}
+		m = press(m, runeKey('j'))
+	}
+	for _, l := range m.helpLines() {
+		if want := strings.TrimRight(stripANSI(l), " "); !seen[want] {
+			t.Errorf("line never became visible while scrolling: %q", want)
+		}
+	}
+}
+
+// drive runs messages through Update the way the runtime does, returning the
+// rendered frame. Every test above this one pokes the Model directly, and three
+// bugs in a row shipped green because of it: the path the terminal actually
+// uses -- tea.KeyMsg through Update, after a WindowSizeMsg -- was never
+// exercised.
+func drive(m Model, msgs ...tea.Msg) (Model, string) {
+	var mm tea.Model = m
+	for _, msg := range msgs {
+		mm, _ = mm.Update(msg)
+	}
+	return mm.(Model), mm.(Model).View()
+}
+
+func keyRune(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+
+// The help scrolls through the real Update path, at every height -- including
+// the ones where the legend nearly fits, which is where it broke. `j` must
+// change the frame and must not close the page.
+func TestHelpScrollsThroughUpdate(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
+	}})
+	m.board.Apply(board.Result{Index: 1})
+
+	total := len(m.helpLines())
+	// Heights either side of the legend's own length: total-1 and total are the
+	// boundary where "fits" and "scrolls" disagree about the hint row.
+	for _, h := range []int{12, 14, 20, 30, 40, total - 2, total - 1, total, total + 1, 58} {
+		if h < 2 {
+			continue
+		}
+		start, _ := drive(m, tea.WindowSizeMsg{Width: 120, Height: h}, keyRune('?'))
+		if !start.showHelp {
+			t.Fatalf("h=%d: ? did not open the help", h)
+		}
+		before := start.View()
+
+		if len(strings.Split(before, "\n")) > h {
+			t.Errorf("h=%d: help renders %d lines into a %d-row pane",
+				h, len(strings.Split(before, "\n")), h)
+		}
+
+		next, after := drive(start, keyRune('j'))
+		if !next.showHelp {
+			t.Errorf("h=%d: j closed the help instead of scrolling it", h)
+			continue
+		}
+		fits := total <= h-1
+		switch {
+		case fits && after != before:
+			t.Errorf("h=%d: the whole legend fits, so j should not have moved it", h)
+		case !fits && after == before:
+			t.Errorf("h=%d: j did not scroll the page:\n%s", h, stripANSI(after))
+		}
+	}
+}
+
+// The hint row is on the page at EVERY height, and j is never a silent no-op.
+// Both used to be false in a band of heights around the legend's own length:
+// the row was drawn only when the page overflowed, so at h == total the page
+// showed no affordance and j did nothing while still eating the key. This walks
+// every height rather than sampling, because the defect was two rows wide.
+func TestHelpHintIsOnEveryHeight(t *testing.T) {
+	m := New(testCfg(), nil)
+	total := len(m.helpLines())
+
+	for h := 4; h <= total+6; h++ {
+		mm, view := drive(m, tea.WindowSizeMsg{Width: 120, Height: h}, keyRune('?'))
+		out := stripANSI(view)
+		lines := strings.Split(view, "\n")
+
+		if len(lines) > h {
+			t.Errorf("h=%d: %d lines rendered into %d rows", h, len(lines), h)
+		}
+		// The closing keys are stated at every height: scrolling took `any key
+		// closes` away everywhere, not only where the page overflows.
+		if !strings.Contains(out, "esc q ? close") {
+			t.Errorf("h=%d (total %d): no closing hint on the page:\n%s", h, total, out)
+		}
+
+		fits := total <= h-1
+		moved, movedView := drive(mm, keyRune('j'))
+		if !moved.showHelp {
+			t.Fatalf("h=%d: j closed the page", h)
+		}
+		switch {
+		case fits && !strings.Contains(out, fmt.Sprintf("all %d", total)):
+			t.Errorf("h=%d: whole legend shown but the row does not say so:\n%s", h, out)
+		case fits && movedView != view:
+			t.Errorf("h=%d: the legend all fits, so j should not move it", h)
+		case !fits && !strings.Contains(out, fmt.Sprintf("of %d", total)):
+			t.Errorf("h=%d: no position on a page that does not fit:\n%s", h, out)
+		case !fits && movedView == view:
+			t.Errorf("h=%d: j did not scroll a page that does not fit:\n%s", h, out)
+		}
+	}
+}
+
+// Every closing key works through Update, and so does a key with no meaning.
+// Scrolling took `any key closes` away from j/k, so this is the property that
+// keeps the page from being somewhere a reader can be trapped.
+func TestHelpClosesThroughUpdate(t *testing.T) {
+	m := New(testCfg(), nil)
+	for _, h := range []int{14, 45, 58} {
+		for _, k := range []tea.KeyMsg{
+			{Type: tea.KeyEsc}, keyRune('q'), keyRune('?'), keyRune('z'), keyRune('1'),
+		} {
+			open, _ := drive(m, tea.WindowSizeMsg{Width: 120, Height: h}, keyRune('?'))
+			if !open.showHelp {
+				t.Fatalf("h=%d: ? did not open the help", h)
+			}
+			closed, _ := drive(open, k)
+			if closed.showHelp {
+				t.Errorf("h=%d: %q left the reader stuck in the help page", h, k.String())
+			}
+		}
+	}
+}
+
+// One k after holding j to the bottom must move the page. The offset used to be
+// clamped only at render, so holding j banked an invisible surplus and the
+// first several k presses spent it without the page moving -- which reads as k
+// being broken, and only ever showed up after a real hold.
+func TestHelpScrollBackIsImmediateAfterHoldingJ(t *testing.T) {
+	m := New(testCfg(), nil)
+	const h = 20
+	mm, _ := drive(m, tea.WindowSizeMsg{Width: 120, Height: h}, keyRune('?'))
+	if len(m.helpLines()) <= h {
+		t.Skip("legend fits; nothing to overshoot")
+	}
+	for i := 0; i < 40; i++ {
+		mm, _ = drive(mm, keyRune('j'))
+	}
+	atEnd := mm.View()
+
+	back, afterK := drive(mm, keyRune('k'))
+	if !back.showHelp {
+		t.Fatal("k closed the page")
+	}
+	if afterK == atEnd {
+		t.Error("k did not move the page after j was held to the bottom")
 	}
 }
