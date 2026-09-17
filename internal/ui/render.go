@@ -54,6 +54,19 @@ const (
 	tierFull
 )
 
+// An author column costs 4 more cells, so FULL has to start 4 columns later
+// for a rule that shows one -- otherwise the title drops below the readable
+// floor the breakpoint exists to guarantee.
+func widthTierFor(w int, showAuthor bool) tier {
+	if showAuthor && w < fullFrom+authorWidth+1 {
+		if w >= midUntil {
+			return tierMid
+		}
+		return tierNarrow
+	}
+	return widthTier(w)
+}
+
 func widthTier(w int) tier {
 	switch {
 	case w >= fullFrom:
@@ -228,7 +241,7 @@ func padLeft(s string, w int) string {
 // renderRow draws one PR. Every sub-slot is always emitted, blank when absent,
 // so no field ever shifts as state changes.
 func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
-	t := widthTier(m.width)
+	t := widthTierFor(m.width, showAuthor)
 	tw := titleWidth(m.width, t)
 	if showAuthor && t == tierFull {
 		tw -= authorWidth + 1

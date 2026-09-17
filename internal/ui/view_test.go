@@ -829,3 +829,26 @@ func TestScrollAlwaysStartsOnAWholeRow(t *testing.T) {
 		}
 	}
 }
+
+// The author column costs 4 cells, so a rule that shows one needs FULL to
+// start 4 columns later -- otherwise the title falls below the readable floor
+// that the breakpoint exists to guarantee.
+func TestAuthorColumnDoesNotStarveTheTitle(t *testing.T) {
+	const floor = 53
+	for w := 70; w <= 90; w++ {
+		for _, author := range []bool{false, true} {
+			tier := widthTierFor(w, author)
+			if tier != tierFull {
+				continue
+			}
+			got := titleWidth(w, tier)
+			if author {
+				got -= authorWidth + 1
+			}
+			if got < floor {
+				t.Errorf("w=%d author=%v: title is %d cells, below the %d floor",
+					w, author, got, floor)
+			}
+		}
+	}
+}
