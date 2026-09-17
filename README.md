@@ -18,7 +18,7 @@ Needs `gh` installed and logged in (used only for the token) and a Nerd Font for
 
 ## How it works
 
-Every section is a **rule** — a GitHub search query plus a name. Rules are an ordered list, and a PR is shown under the **first** rule that matches it, so ordering is the configuration. The rule's name is shown in the left gutter on the section's first visible row, and in full on a sticky line above the list along with your position within that section.
+Every section is a **rule** — a GitHub search query plus a name. Rules are an ordered list, and a PR is shown under the **first** rule that matches it, so ordering is the configuration. The rule's name is shown in the left gutter on the section's first visible row, clipped to 8 cells, and on the top visible row even when that section began above the fold.
 
 Every row is exactly one line, which is what keeps scrolling steady: one keypress moves the board by at most one line. Failing check names are behind `c` rather than in the list — see [docs/uniform-rows.md](docs/uniform-rows.md).
 

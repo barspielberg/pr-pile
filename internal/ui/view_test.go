@@ -413,13 +413,13 @@ func TestFooterStaysPinnedToTheBottom(t *testing.T) {
 		if last := stripANSI(lines[len(lines)-1]); !strings.Contains(last, "quit") {
 			t.Errorf("%d rows: last line is not the footer: %q", n, last)
 		}
-		// The sticky section line is the chrome row above the list, so the
-		// list itself is height-2 lines.
+		// The footer is the only chrome, so the list owns every line above it
+		// and the first one carries the first section's gutter name.
 		if first := stripANSI(lines[0]); !strings.Contains(first, "MINE") {
-			t.Errorf("%d rows: first line is not the sticky header: %q", n, first)
+			t.Errorf("%d rows: first line is not the first row: %q", n, first)
 		}
 
-		// And the same while filtering, where the prompt is a third chrome row.
+		// And the same while filtering, where the prompt is a second chrome row.
 		m.filtering = true
 		m.filter = "pr"
 		flines := strings.Split(m.View(), "\n")
@@ -917,10 +917,8 @@ func TestOneKeypressScrollsAtMostOneLine(t *testing.T) {
 
 	// The viewport is identified by its top line. Comparing whole rendered
 	// frames would also catch the selection bar moving, which is not the point.
-	// Line 0 is the sticky header, which is fixed chrome above the list; the
-	// list's own top line is the one after it.
 	topLine := func() string {
-		return strings.Split(m.View(), "\n")[1]
+		return strings.Split(m.View(), "\n")[0]
 	}
 	cursorOnScreen := func() bool {
 		for _, l := range strings.Split(m.View(), "\n") {
@@ -1161,16 +1159,16 @@ func TestChecksOverlayTallySurvivesClipping(t *testing.T) {
 	}
 }
 
-// The sticky line names the section of the TOP VISIBLE ROW, not the cursor's.
-// A cursor-bound header names a section that is not the section of the rows
-// underneath it whenever the cursor has crossed a boundary while rows of the
-// previous section are still on screen.
-func TestStickyHeaderNamesTheTopVisibleSection(t *testing.T) {
+// The board's first line is a row, not a section header. A pinned header was
+// tried and removed: bound to the top visible row it froze on the first section
+// on any pane tall enough to show the whole board, which is the common case.
+// See docs/section-layout.md §13.
+func TestNoChromeLineAboveTheList(t *testing.T) {
 	m := New(testCfg(), nil)
-	m.width, m.height = 120, 14
+	m.width, m.height = 120, 40
 
 	var mine []github.PR
-	for i := 1; i <= 30; i++ {
+	for i := 1; i <= 5; i++ {
 		mine = append(mine, github.PR{
 			Number: 3000 + i, Title: fmt.Sprintf("mine %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
@@ -1181,24 +1179,13 @@ func TestStickyHeaderNamesTheTopVisibleSection(t *testing.T) {
 		{Number: 4001, Title: "theirs", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
 	}})
 
-	// Deep into the first section, so its start has scrolled off.
-	m.cursor = 20
-	head := stripANSI(strings.Split(m.View(), "\n")[0])
-	if !strings.Contains(head, "MINE") {
-		t.Errorf("sticky header does not name the top section: %q", head)
+	first := stripANSI(strings.Split(m.View(), "\n")[0])
+	if !strings.Contains(first, "#3001") {
+		t.Errorf("first line is not the first row: %q", first)
 	}
-	// The top visible row is the section's 10th of 30 at this cursor, and
-	// whatever it is, the count must describe MINE rather than the board.
-	if !strings.Contains(head, "of 30") {
-		t.Errorf("sticky header missing the section total: %q", head)
-	}
-
-	// Cursor in the last section while rows of the first are still on screen:
-	// the header must still say MINE, which is what the rows beneath it are.
-	m.cursor = 30
-	head = stripANSI(strings.Split(m.View(), "\n")[0])
-	if !strings.Contains(head, "MINE") {
-		t.Errorf("header followed the cursor instead of the top row: %q", head)
+	// A count like "1 of 5" read as a cursor position and was never one.
+	if strings.Contains(first, " of ") {
+		t.Errorf("first line carries a position count: %q", first)
 	}
 }
 
@@ -1220,7 +1207,7 @@ func TestTopVisibleRowCarriesItsSectionName(t *testing.T) {
 	m.board.Apply(board.Result{Index: 1})
 
 	m.cursor = 20
-	top := stripANSI(strings.Split(m.View(), "\n")[1])
+	top := stripANSI(strings.Split(m.View(), "\n")[0])
 	if !strings.HasPrefix(top, "MINE") {
 		t.Errorf("top visible row is unnamed: %q", top)
 	}
