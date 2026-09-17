@@ -238,6 +238,40 @@ func (m Model) exitFilter() Model {
 	return m
 }
 
+// copyToClipboard shells out to pbcopy rather than taking a clipboard
+// dependency, which is the same trade browser.Open makes with `open`. DESIGN.md
+// turned down bubbles/textinput partly because it drags in a clipboard
+// shell-out for a binding we did not want -- the objection was to the
+// dependency, not to the pipe, and this is the pipe on its own.
+//
+// It is a var so a test can watch what would be copied without writing to the
+// developer's real clipboard.
+var copyToClipboard = func(s string) error {
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(s)
+	return cmd.Run()
+}
+
+// copySelected yanks the selected PR's URL. With nothing selected -- an empty
+// board, or a filter that matches nothing -- there is no URL to copy and
+// saying so is better than a silent no-op.
+func (m Model) copySelected() tea.Cmd {
+	pr, ok := m.selected()
+	if !ok {
+		return func() tea.Msg { return statusMsg("no PR selected") }
+	}
+	url, number := pr.URL, pr.Number
+	if url == "" {
+		return func() tea.Msg { return statusMsg("no URL for this PR") }
+	}
+	return func() tea.Msg {
+		if err := copyToClipboard(url); err != nil {
+			return statusMsg("copy failed: " + err.Error())
+		}
+		return statusMsg(fmt.Sprintf("copied #%d url", number))
+	}
+}
+
 func (m Model) openSelected() tea.Cmd {
 	pr, ok := m.selected()
 	if !ok {
@@ -315,10 +349,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "h", "left":
 		m.cursor = m.prevSection()
 		m.clampCursor()
-	// `gg` is the vim chord, and it works because bare `g` already goes to the
-	// top: the second press repeats a move that is its own fixed point. That
-	// buys the chord without a pending-key mode, so a stray `g` cannot leave
-	// the board waiting for a key that never comes.
+	// Documented as `g`, not `gg`: bare `g` is already the whole move, so
+	// advertising a chord that is really one key repeated was confusing. A
+	// second `g` still lands in the same place -- top is its own fixed point --
+	// so vim fingers typing `gg` cost nothing and there is no pending-key mode
+	// a stray `g` could wedge.
 	case "g", "home":
 		m.cursor = 0
 	case "G", "end":
@@ -330,6 +365,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if cmd := m.openSelected(); cmd != nil {
 			return m, cmd
 		}
+	case "y":
+		return m, m.copySelected()
 	default:
 		// User-configured actions are matched last so they cannot shadow
 		// navigation keys.
@@ -738,7 +775,7 @@ func (m Model) cursorSection() (name string, pos, total int) {
 }
 
 func (m Model) footer(spin string) string {
-	left := "  j/k move · l/h section · enter open · d detail · / filter · ? help · q quit"
+	left := "  j/k move · l/h section · enter open · d detail · y copy · / filter · ? help · q quit"
 	if m.filtering {
 		left = "  ctrl+n/p move · enter open · esc clear"
 	}
