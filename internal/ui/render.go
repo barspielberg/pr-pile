@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
 
@@ -32,6 +33,45 @@ var (
 // terminal's own background whichever end that sits at. No foreground is forced
 // on the selected row, so it inherits a colour guaranteed to contrast.
 var selBg = lipgloss.Color("8")
+
+// authorPalette colours the author column so the same person is the same
+// colour on every row, the way lazygit colours its authors.
+//
+// These are 256-cube indices rather than the 0-15 the rest of the file sticks
+// to, and that is the point: every colour the board already uses carries a
+// meaning -- 1 is CI failing, 2 approved, 3 pending, 4 the accent, 6 the
+// header -- and an author colour means nothing at all. Landing an author on
+// red or green would read as a status. There is no room left in 0-15 for
+// eight arbitrary colours once those and their bright variants are out, so
+// the palette comes from the cube instead: pale tints in the blue-violet,
+// magenta-pink and peach-tan families, none of them in the red or green the
+// status colours own.
+//
+// Every entry was checked against selBg as well as the default background,
+// since the selected row keeps its foreground and only gains a background.
+// Anything that washed out on colour 8 was dropped.
+var authorPalette = []lipgloss.Color{
+	"117", // sky
+	"189", // pale periwinkle
+	"183", // lavender
+	"213", // orchid
+	"211", // pink
+	"216", // peach
+	"180", // tan
+	"152", // pale teal
+}
+
+// authorStyle maps a login to its palette entry. FNV-1a keeps it stable across
+// runs and machines -- a map's iteration order or anything seeded would repaint
+// people on every launch, which defeats the point of recognising them by colour.
+func authorStyle(login string) lipgloss.Style {
+	if login == "" {
+		return mutedStyle
+	}
+	h := fnv.New32a()
+	h.Write([]byte(login))
+	return lipgloss.NewStyle().Foreground(authorPalette[h.Sum32()%uint32(len(authorPalette))])
+}
 
 // sectionWidth is the left gutter carrying the section name. Sections are a
 // gutter rather than a header band so that every line on the board is a row:
@@ -343,7 +383,7 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	if t == tierFull {
 		if showAuthor {
 			b.WriteString(paint(fgStyle).Render(" "))
-			b.WriteString(paint(mutedStyle).Render(padLeft(initials(r.PR.Author), authorWidth)))
+			b.WriteString(paint(authorStyle(r.PR.Author)).Render(padLeft(initials(r.PR.Author), authorWidth)))
 		}
 		b.WriteString(paint(fgStyle).Render(" "))
 		b.WriteString(paint(mutedStyle).Render(padLeft(clip(age(r.PR.UpdatedAt), 3), 3)))
