@@ -394,19 +394,39 @@ is proportional.
 
 ## 7. Known problems and open questions
 
-**Scroll behaviour is unresolved.** The cursor's distance from the bottom drifts
-as you move. Two causes, both structural:
+**Scroll behaviour — solved, and worth not re-litigating.** A constant row gap
+under the cursor is a constraint on the **bottom** edge of the viewport: `end`
+is fixed by the rows that must follow the cursor, and a fixed height then
+determines the top as `start = end - height`. That value generally does not land
+on a row boundary, and the leftover fraction of a row has to be absorbed
+somewhere.
 
-- The margin is measured in **lines**, but a section header is 2 lines (blank +
-  header) that behaves as one unit, and a row is 1 or 2 lines (failing-gate
-  continuation). A row-count-derived margin and a line-based viewport cannot
-  agree.
-- `window()` slices a flat line list at a line offset chosen from an **anchor**
-  list (section headers and row first-lines), picking the earliest anchor that
-  still honours the margin. That keeps the board still and guarantees the
-  viewport never opens mid-row or on a blank separator, but it means the offset
-  is rounded to whole units, so the cursor's distance from the bottom rounds with
-  it.
+Eight attempts anchored the **top** to a row boundary and snapped the remainder
+away; every one of them made the gap oscillate (measured: 0–3 rows where it
+should be 2). Snapping down scrolls too far and the cursor rises; snapping up
+and the cursor sinks or falls off. The constraint is genuinely unsatisfiable
+that way — brute force found board states where the only viewport start giving
+"2 rows below" is a non-boundary line.
+
+The top row is therefore **clipped**. That is the degree of freedom that makes
+the constraint satisfiable at all. A blank section separator is still skipped
+(it is chrome, not content), but a clipped continuation line at the top is
+expected and correct.
+
+Two things this depends on, both easy to reintroduce as bugs: the bottom edge
+must be measured past the **last line** of the margin row, not the start of the
+row after it, or a two-line row there is only half-guaranteed; and the cursor's
+own row needs an explicit guard against being clipped off the bottom.
+
+Note the metric: the cursor's **screen line** still varies, because rows above
+it differ in height. What is constant is the number of whole PR rows below it.
+
+Evidence: `docs/scroll-feasibility.md` (a 5000-board fuzz put clipped-top at
+1370/1370 exact against 6/1370 for the anchored version) and
+`docs/view-restructure.md` (the drift tracks anchor spacing, not row heights —
+so restructuring the layout would not have fixed it). `bubbles/list` cannot help
+here: `ItemDelegate.Height()` takes no item, so variable row heights are
+structurally impossible in it.
 
 Near the end of the list nothing satisfies the margin and `window()` falls back
 to the last anchor showing the whole selected row, which can produce a short
@@ -447,12 +467,12 @@ user).
 - The spec's drop order was age → review glyph; adding the author column made it
   age+author → review glyph, and author only exists at FULL tier.
 - The spec asserts the FULL breakpoint must be recomputed once the author column
-  costs 4 cells (it would push the FULL floor to 80). The code kept **76** and
-  subtracts the 4 cells from the title instead. The 53-cell title floor is
-  therefore not met at 76–79 columns on author-enabled rules. Unresolved; the
-  research flagged it and the spec never re-derived the table.
+  costs 4 cells (it would push the FULL floor to 80). Fixed: `widthTierFor`
+  starts FULL 4 columns later for a rule that shows an author, so the 53-cell
+  title floor holds in both cases.
 - The spec's §7.4 says the scroll offset must be computed in lines. The
-  implementation deliberately anchors to whole units instead — see above.
+  implementation anchors the viewport's bottom edge and clips the top row
+  instead — see above. The spec is wrong, not the code.
 
 **Untested against reality:** whether ~2–4s cold start is tolerable behind a
 spinner in daily use; whether the board reads correctly on a light theme (the

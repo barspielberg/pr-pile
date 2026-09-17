@@ -13,6 +13,11 @@ verify something I say so in §6.
 
 ---
 
+> Note: this study cites `design-research.md` and `design-spec.md`, which have
+> since been consolidated into `DESIGN.md`. The citations are kept as written
+> for provenance; the surviving conclusions live in `DESIGN.md`.
+
+
 ## 1. Recommendation
 
 **Fix the scroll code, not the layout.** The drift is caused by
