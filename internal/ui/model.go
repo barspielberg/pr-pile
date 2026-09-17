@@ -412,49 +412,80 @@ func (m *Model) clampCursor() {
 	}
 }
 
+// lineMeta says which section a rendered line belongs to and where the line
+// sits within it, so the sticky header and the top row's gutter can be resolved
+// after window() has chosen a start. Without it the label would have to be
+// decided before the window is known, which is why every row above a
+// scrolled-off boundary used to go unnamed.
+type lineMeta struct {
+	section  string
+	author   bool // the section's rule shows an author column
+	row      int  // index within the section, -1 for notes and blanks
+	rows     int  // the section's total rows
+	isRow    bool
+	rowIndex int // index into the flattened visible rows, -1 when not a row
+}
+
 // body renders every section and reports the line each row starts on, so the
 // viewport can scroll to the cursor. Every row is exactly one line, but section
-// headers and separators sit between them, so the line is not the row index.
-func (m Model) body(spin string) (lines []string, rowStarts []int) {
+// notes and placeholder blanks sit between them, so the line is not the row
+// index.
+func (m Model) body(spin string) (lines []string, rowStarts []int, meta []lineMeta) {
 	idx := 0
 	filtering := m.query() != ""
+	add := func(line string, mt lineMeta) {
+		lines = append(lines, line)
+		meta = append(meta, mt)
+	}
+	addRow := func(row board.Row, s board.Section, i int) {
+		rowStarts = append(rowStarts, len(lines))
+		gs := sectionContinues
+		if i == 0 {
+			gs = sectionStarts
+		}
+		add(m.renderRow(row, idx == m.cursor, s.Rule.Author, s.Rule.Name, gs),
+			lineMeta{section: s.Rule.Name, author: s.Rule.Author, row: i,
+				rows: len(s.Rows), isRow: true, rowIndex: idx})
+		idx++
+	}
+	note := func(s board.Section, text string) {
+		add(m.renderSectionNote(s.Rule.Name, text),
+			lineMeta{section: s.Rule.Name, row: -1, rows: len(s.Rows), rowIndex: -1})
+	}
 	for _, s := range m.sections() {
 		switch s.State {
 		case board.Pending:
 			// A section that already has rows keeps them, so only the spinner
 			// in the gutter changes while the refetch is in flight.
 			for i, row := range s.Rows {
-				rowStarts = append(rowStarts, len(lines))
-				lines = append(lines, m.renderRow(row, idx == m.cursor, s.Rule.Author, s.Rule.Name, i == 0))
-				idx++
+				addRow(row, s, i)
 			}
 			// On a cold start there is nothing to keep, so hold a placeholder
 			// block instead: without it each section that lands pushes every
 			// section below it down the screen. While filtering the board is
 			// deliberately narrowing, so reserving space fights the point.
 			if len(s.Rows) == 0 && !filtering {
-				lines = append(lines, m.renderSectionNote(s.Rule.Name, spin))
-				lines = append(lines, blanks(m.placeholderRows(s.Rule)-1)...)
+				note(s, spin)
+				for _, b := range blanks(m.placeholderRows(s.Rule) - 1) {
+					add(b, lineMeta{section: s.Rule.Name, row: -1, rowIndex: -1})
+				}
 			}
 		case board.Failed:
-			lines = append(lines, m.renderSectionNote(s.Rule.Name,
-				errorStyle.Render(clip(s.Err.Error(), max(0, m.width-sectionWidth-3)))))
+			note(s, errorStyle.Render(clip(s.Err.Error(), max(0, m.width-sectionWidth-3))))
 		case board.Ready:
 			if len(s.Rows) == 0 {
 				// A resolved empty section collapses to one line: it knows it
 				// has nothing, so holding six blank rows for it would waste
 				// most of a short pane. The shrink is the value changing,
 				// which is the one reason a row is allowed to move.
-				lines = append(lines, m.renderSectionNote(s.Rule.Name, mutedStyle.Render("—")))
+				note(s, mutedStyle.Render("—"))
 			}
 			for i, row := range s.Rows {
-				rowStarts = append(rowStarts, len(lines))
-				lines = append(lines, m.renderRow(row, idx == m.cursor, s.Rule.Author, s.Rule.Name, i == 0))
-				idx++
+				addRow(row, s, i)
 			}
 		}
 	}
-	return lines, rowStarts
+	return lines, rowStarts, meta
 }
 
 func blanks(n int) []string {
@@ -511,12 +542,15 @@ const scrollOff = 2
 // Clamping both edges rather than pinning one means the board does not move at
 // all while the cursor crosses the middle, which is the conventional behaviour
 // (vim's scrolloff, less, fzf).
-func window(lines []string, cursorRow, height int, rowStarts []int) []string {
+// It also reports the index of the top visible line, which the sticky header
+// and the top row's gutter both need: both name the section of the row you are
+// actually looking at, and neither can know that before the slice is chosen.
+func window(lines []string, cursorRow, height int, rowStarts []int) ([]string, int) {
 	if height <= 0 || len(lines) <= height {
-		return lines
+		return lines, 0
 	}
 	if len(rowStarts) == 0 || cursorRow < 0 {
-		return lines[:height]
+		return lines[:height], 0
 	}
 	if cursorRow >= len(rowStarts) {
 		cursorRow = len(rowStarts) - 1
@@ -543,7 +577,7 @@ func window(lines []string, cursorRow, height int, rowStarts []int) []string {
 	if start < 0 {
 		start = 0
 	}
-	return lines[start : start+height]
+	return lines[start : start+height], start
 }
 
 // The footer carries the repo and the spinner, so no global header row is
@@ -594,6 +628,34 @@ func (m Model) footer(spin string) string {
 	return mutedStyle.Render(left + strings.Repeat(" ", gap) + right + "  ")
 }
 
+// stickyHeader names the section of the TOP VISIBLE ROW, never the cursor's.
+// A cursor-bound header lies whenever the cursor has crossed a boundary while
+// rows of the previous section are still on screen: it would name a section
+// that is not the section of the rows directly under it. Bound to the top row
+// it can never contradict the line beneath it, and it agrees by construction
+// with the gutter name that row already carries.
+//
+// The count answers what the gutter cannot: how much of this section is above
+// you. See docs/DESIGN.md §3.5.
+//
+// It is drawn unconditionally, including when the whole board fits. Chrome that
+// appears and disappears is its own kind of jump, and the list height would
+// then change by one as PRs merge.
+func (m Model) stickyHeader(meta []lineMeta, start int) string {
+	if start >= len(meta) {
+		return ""
+	}
+	mt := meta[start]
+	if mt.section == "" {
+		return ""
+	}
+	line := headerStyle.Render("  " + strings.ToUpper(mt.section))
+	if mt.isRow && mt.rows > 0 {
+		line += mutedStyle.Render(fmt.Sprintf("  ·  %d of %d", mt.row+1, mt.rows))
+	}
+	return line
+}
+
 func (m Model) View() string {
 	if m.width > 0 && m.width < minWidth {
 		return mutedStyle.Render(fmt.Sprintf("  terminal too narrow\n  (need %d cols)", minWidth))
@@ -612,22 +674,50 @@ func (m Model) View() string {
 	}
 
 	foot := m.footer(spin)
-	chrome := 1
+	// The sticky header is fixed chrome above the list, exactly like the footer
+	// and the filter prompt: it never enters lines, so the row->line map stays
+	// the identity and one keypress still scrolls one line. See
+	// docs/uniform-rows.md and docs/section-layout.md §11.3.
+	chrome := 2
 	if m.filtering {
-		// The prompt is a second chrome row, so the body has one line less.
+		// The prompt is a third chrome row, so the body has one line less.
 		foot = m.promptLine() + "\n" + foot
-		chrome = 2
+		chrome = 3
 	}
 
-	lines, rowStarts := m.body(spin)
+	lines, rowStarts, meta := m.body(spin)
+	start := 0
 	if m.height > 0 {
 		avail := m.height - chrome
-		lines = window(lines, m.cursor, avail, rowStarts)
+		lines, start = window(lines, m.cursor, avail, rowStarts)
 		// Pad to the full height so the prompt and footer stay pinned to the
 		// bottom edge instead of floating under a short result set.
 		for len(lines) < avail {
 			lines = append(lines, "")
 		}
 	}
-	return strings.Join(lines, "\n") + "\n" + foot
+	lines = m.nameTopSection(lines, meta, start)
+	return m.stickyHeader(meta, start) + "\n" + strings.Join(lines, "\n") + "\n" + foot
+}
+
+// nameTopSection re-renders the top visible line so it carries its section's
+// name even when the section began above the window. It keeps the rule at `│`:
+// `╷` claims a section starts on this row, which is false here, and the two
+// facts are worth keeping apart.
+func (m Model) nameTopSection(lines []string, meta []lineMeta, start int) []string {
+	if len(lines) == 0 || start >= len(meta) {
+		return lines
+	}
+	mt := meta[start]
+	if !mt.isRow || mt.row == 0 {
+		return lines
+	}
+	rows := m.visibleRows()
+	if mt.rowIndex < 0 || mt.rowIndex >= len(rows) {
+		return lines
+	}
+	out := append([]string(nil), lines...)
+	out[0] = m.renderRow(rows[mt.rowIndex], mt.rowIndex == m.cursor,
+		mt.author, mt.section, sectionAbove)
+	return out
 }
