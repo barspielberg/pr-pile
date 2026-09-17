@@ -27,6 +27,17 @@ type Model struct {
 	spinner       int
 	status        string
 	fetching      bool
+	// running is the name of the background action in flight, empty when none.
+	// It is what the footer animates on, and what makes a second press of the
+	// same key a no-op rather than a second process.
+	running string
+	// runSeq numbers action runs so a result that lands after the user started
+	// another one is dropped instead of overwriting the newer status.
+	runSeq int
+	// clearSeq is the run whose status may expire on its own. Only a success
+	// sets it: a failure is the one message the user has to act on, so it
+	// stays until something else takes the line.
+	clearSeq int
 
 	filtering  bool
 	filter     string
@@ -55,6 +66,23 @@ type tickMsg time.Time
 type spinMsg time.Time
 type refreshMsg struct{}
 type statusMsg string
+
+// actionStartMsg and actionDoneMsg bracket a background action. Start carries
+// the name so the footer can say what is running; done carries the same seq so
+// a stale result cannot clobber a newer run's status.
+type actionStartMsg struct {
+	name string
+	seq  int
+}
+type actionDoneMsg struct {
+	name string
+	seq  int
+	err  error
+	// detail is the command's last line of stderr, which is where a script
+	// says what actually went wrong. "action failed: exit status 1" is not
+	// worth showing when the script already said "herdr not running".
+	detail string
+}
 
 var spinFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
@@ -137,10 +165,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinMsg:
-		// The detail overlay's loader is the same spinner, so the tick has to
-		// survive a board that has finished fetching: otherwise the loader is
-		// a frozen glyph, which reads as stuck rather than as working.
-		if !m.fetching && len(m.inflight) == 0 {
+		// The detail overlay's loader and a running action are the same
+		// spinner, so the tick has to survive a board that has finished
+		// fetching: otherwise the loader is a frozen glyph, which reads as
+		// stuck rather than as working.
+		if !m.fetching && len(m.inflight) == 0 && m.running == "" {
 			return m, nil
 		}
 		m.spinner++
@@ -172,6 +201,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 		return m, nil
 
+	case actionStartMsg:
+		m.running, m.status = msg.name, ""
+		// A board that has finished fetching has no live tick, so without this
+		// the running glyph would sit on one frame for the whole run. The
+		// still-fetching board already has its own tick; a second would run
+		// the spinner at double speed.
+		if m.fetching || len(m.inflight) > 0 {
+			return m, nil
+		}
+		return m, spinTick()
+
+	case actionDoneMsg:
+		// A result from a run the user has already superseded says nothing
+		// about what is on screen now.
+		if msg.seq != m.runSeq {
+			return m, nil
+		}
+		m.running = ""
+		m.status = actionResult(msg)
+		if msg.err == nil {
+			// Success has said its piece; leaving it up would have the footer
+			// claim an action is current long after it finished. Failure
+			// persists, because it is the one the user has to act on.
+			m.clearSeq = msg.seq
+			return m, clearStatusIn(statusHold, msg.seq)
+		}
+		return m, nil
+
+	case clearStatusMsg:
+		// Only the run that set it may clear it: anything newer -- another
+		// action, a refresh, a copy -- owns the line now.
+		if int(msg) == m.clearSeq && m.running == "" {
+			m.status = ""
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -184,6 +249,10 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	m.board.Refetch()
 	m.fetching = true
 	m.status = ""
+	// A refresh does not kill the process, but the board it was launched from
+	// is gone; keeping its name on the footer would attribute the fetch
+	// spinner to the action. Its result still lands, keyed by seq.
+	m.running = ""
 	return m, tea.Batch(append(m.fetchAll(), spinTick())...)
 }
 
@@ -370,8 +439,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		// User-configured actions are matched last so they cannot shadow
 		// navigation keys.
-		if cmd, ok := m.actionFor(msg.String()); ok {
-			return m, cmd
+		if next, cmd, ok := m.actionFor(msg.String()); ok {
+			return next, cmd
 		}
 	}
 	return m, nil
@@ -410,39 +479,88 @@ func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) actionFor(key string) (tea.Cmd, bool) {
+func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 	pr, ok := m.selected()
 	if !ok {
-		return nil, false
+		return m, nil, false
 	}
 	for _, a := range m.cfg.Actions {
 		if a.Key != key || strings.TrimSpace(a.Run) == "" {
 			continue
 		}
+		// A second press while one is still out would start a second process
+		// and lose the first's result to the seq check. Saying so is more
+		// useful than silently doing nothing.
+		if m.running != "" {
+			running := m.running
+			return m, func() tea.Msg { return statusMsg(running + " still running") }, true
+		}
 		line, err := m.renderAction(a.Run, pr)
 		if err != nil {
-			return func() tea.Msg { return statusMsg("action: " + err.Error()) }, true
+			return m, func() tea.Msg { return statusMsg("action: " + err.Error()) }, true
 		}
+		m.runSeq++
 		cmd := exec.Command("sh", "-c", line)
 		if a.Mode == "suspend" {
 			// Hand the terminal over for TUI commands (a diff pager, a review
 			// session), then repaint when they exit.
-			return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			name := a.Name
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				if err != nil {
-					return statusMsg("action failed: " + err.Error())
+					return statusMsg(name + " failed: " + err.Error())
 				}
 				return statusMsg("")
 			}), true
 		}
-		return func() tea.Msg {
-			if err := cmd.Start(); err != nil {
-				return statusMsg("action failed: " + err.Error())
-			}
-			go cmd.Wait() // reap, so a background action does not become a zombie
-			return statusMsg(a.Name)
-		}, true
+		// Two messages, not one: the footer has to say "running" the moment
+		// the key is pressed, and the process may take seconds to answer. The
+		// wait happens inside a tea.Cmd so the board stays responsive.
+		seq := m.runSeq
+		return m, tea.Batch(
+			func() tea.Msg { return actionStartMsg{name: a.Name, seq: seq} },
+			runAction(cmd, a.Name, seq),
+		), true
 	}
-	return nil, false
+	return m, nil, false
+}
+
+// statusHold is how long a succeeded action holds the footer. Long enough to
+// read after looking back from whatever the action opened, short enough that
+// the line is not still claiming an action when the user next looks down.
+const statusHold = 4 * time.Second
+
+type clearStatusMsg int
+
+func clearStatusIn(d time.Duration, seq int) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return clearStatusMsg(seq) })
+}
+
+// runAction waits for the process off the UI goroutine and reports how it went.
+// It also reaps, which the fire-and-forget version did only as a side effect of
+// throwing the result away.
+func runAction(cmd *exec.Cmd, name string, seq int) tea.Cmd {
+	// Bounded, because a command that streams to stderr should not be able to
+	// grow the board's memory; the tail is the part that says what failed.
+	var errBuf tailWriter
+	errBuf.limit = 4096
+	cmd.Stderr = &errBuf
+	return func() tea.Msg {
+		err := cmd.Run()
+		return actionDoneMsg{name: name, seq: seq, err: err, detail: errBuf.lastLine()}
+	}
+}
+
+// actionResult is the one line the footer shows when an action ends. A failure
+// prefers what the command said on stderr to Go's exit-status wording, which
+// names the mechanism and not the problem.
+func actionResult(msg actionDoneMsg) string {
+	if msg.err == nil {
+		return msg.name + " ✓"
+	}
+	if d := msg.detail; d != "" {
+		return msg.name + " failed: " + d
+	}
+	return msg.name + " failed: " + msg.err.Error()
 }
 
 func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
@@ -782,6 +900,18 @@ func (m Model) footer(spin string) string {
 	if m.status != "" {
 		left = "  " + m.status
 	}
+	// A running action outranks a status: the status line is history and this
+	// is happening now. The glyph is the board's own spinner rather than a
+	// static marker -- the tick is kept alive for the duration (see the
+	// spinMsg case), so it animates, and an animated glyph is the difference
+	// between "working" and "wedged" on a command that takes seconds.
+	if m.running != "" {
+		left = "  " + string(spinFrames[m.spinner%len(spinFrames)]) + " " + m.running
+	}
+	// One line, clipped not wrapped: a second row would break the board's
+	// one-line-per-row invariant, and stderr from a failing script is
+	// arbitrarily long.
+	left = clip(left, max(0, m.width-2))
 	// The section name takes the right field and the repo yields it: the repo
 	// is a constant the user chose and can read in the window title, while the
 	// section changes under every keypress. The gutter only has 8 cells for it,
@@ -869,4 +999,32 @@ func (m Model) nameTopSection(lines []string, meta []lineMeta, start int) []stri
 	out[0] = m.renderRow(rows[mt.rowIndex], mt.rowIndex == m.cursor,
 		mt.author, mt.section, sectionAbove)
 	return out
+}
+
+// tailWriter keeps the last `limit` bytes written to it. A command's stderr is
+// unbounded and only its end is wanted, so this drops from the front rather
+// than refusing to record once full.
+type tailWriter struct {
+	buf   []byte
+	limit int
+}
+
+func (w *tailWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	if over := len(w.buf) - w.limit; over > 0 {
+		w.buf = w.buf[over:]
+	}
+	return len(p), nil
+}
+
+// lastLine is the final non-blank line, which is where a shell script's
+// diagnostic lands. Anything above it is usually a tool's own progress noise.
+func (w *tailWriter) lastLine() string {
+	lines := strings.Split(strings.TrimRight(string(w.buf), "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }

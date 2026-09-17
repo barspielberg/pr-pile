@@ -77,21 +77,36 @@ repoPath: ~/Repos/owner/name    # {{.RepoPath}} is empty without this
 actions:
   - key: w
     name: worktree
-    run: pr-workspace {{.RepoPath}} {{.Number}}
+    run: $HOME/path/to/pr-workspace {{.RepoPath}} {{.Number}} {{.Branch}}
 ```
+
+Give the script by path rather than by bare name: the action runs through
+`sh -c` with whatever `PATH` the board inherited, which is not necessarily the
+one an interactive shell has.
 
 Two steps, and both are already idempotent, which is what makes this safe to
 bind to a key that will get pressed twice:
 
 ```sh
-p="$(wt switch "pr:$2" --no-cd --format json | jq -r .path)"
+p="$(wt switch "$3" --no-cd --format json | jq -r '.path // empty')"
+[ -n "$p" ] || p="$(wt switch "pr:$2" --no-cd --format json | jq -r '.path // empty')"
 exec herdr worktree open --cwd "$1" --path "$p" --no-focus
 ```
 
-`wt switch pr:<n>` resolves the PR to its branch and returns the *existing*
-worktree if there is one. `herdr worktree open` returns the existing workspace
-id for a path it has already opened — measured at three calls, one workspace —
-so no dedupe logic is needed.
+**Pass the branch and prefer it.** `wt switch pr:<n>` resolves the number
+through the GitHub API on *every* call, even when the worktree already exists —
+7.0s against 0.07s for `wt switch <branch>` on that same worktree. The board
+already knows the head ref, so passing `{{.Branch}}` skips the round trip
+entirely. Keep `pr:<n>` as the fallback: a branch resolves only if it is on
+`origin`, so a PR from a fork still needs the number.
+
+`herdr worktree open` returns the existing workspace id for a path it has
+already opened — measured at three calls, one workspace — so no dedupe logic is
+needed.
+
+A background action reports itself on the status line: a spinner while it runs,
+`worktree ✓` on success (cleared after a few seconds), and `worktree failed:`
+followed by the command's own last line of stderr when it does not.
 
 Use `herdr worktree open` (a **workspace**), not `herdr tab create` (a tab in
 whatever workspace you happen to be in). `tab create` is also not idempotent: it
