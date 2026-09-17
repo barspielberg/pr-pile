@@ -586,7 +586,7 @@ limit above the number of PRs they match.
 | `key` | string | bound key; matched *after* navigation keys so an action cannot shadow `j` |
 | `name` | string | shown in the `?` overlay and as the status message |
 | `run` | string | Go template, run via `sh -c` |
-| `mode` | string | `background` (default) or `suspend` — suspend hands the terminal over for a TUI command and repaints on exit. Background actions are reaped so they do not become zombies. |
+| `mode` | string | `background` (default) or `suspend` — suspend hands the terminal over for a TUI command and repaints on exit. Background actions report their lifecycle on the status line (§4.2) and are reaped rather than left as zombies. |
 
 Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 `{{.Base}}` `{{.URL}}` `{{.Author}}` `{{.Title}}`.
@@ -628,8 +628,88 @@ doing nothing, since a background action reports only its name.
 via `tea.ExecProcess` and repaints on exit, which is right for a pager or a
 review TUI. This command opens a herdr tab over a socket and exits — timed at
 ~4s with no terminal output — so suspending would blank the board to run
-something that never wanted the terminal. Background also puts the action's
-name on the status line, which is the only sign it fired.
+something that never wanted the terminal.
+
+### 4.2 What a background action says while it runs
+
+The first version started the process, put the action's name on the status line
+and threw the result away — `go cmd.Wait()` with no receiver. So the footer said
+`worktree` the instant the key was pressed whether the command took 7 seconds or
+failed outright, and a failure was indistinguishable from a success. That is the
+bug this section replaces.
+
+A background action now reports three states on the status line:
+
+| state | footer |
+|---|---|
+| running | `⠹ worktree`, the board's own spinner |
+| succeeded | `worktree ✓`, cleared after 4s |
+| failed | `worktree failed: <last line of stderr>`, until something replaces it |
+
+**The running glyph animates, and that costs a tick.** `spinMsg` returns early
+on a board that has finished fetching, so reusing it naively gives a frozen
+glyph — which reads as wedged, the opposite of what the indicator is for. The
+detail overlay hit this first and solved it by keeping the tick alive for the
+duration (§7 of `pr-detail.md`); an action does the same, restarting the tick on
+start when no other tick is live and letting it lapse when the run ends. A
+static marker was the alternative and was rejected on the same evidence: the
+complaint being answered is "is this thing doing anything", and a character that
+never changes does not answer it. Measured live across a 6s action: seven
+distinct frames, with `j`/`k` responsive throughout.
+
+**Failure quotes the command, not Go.** `exit status 1` names the mechanism and
+not the problem, while the script already wrote something better — `herdr not
+running (no socket at ...)`. Stderr is captured into a 4KB tail buffer (bounded,
+because a chatty command should not grow the board's memory) and the last
+non-blank line becomes the message. A command that does not exist gets `sh`'s
+own `command not found`, which is likewise more useful than the exit status.
+
+It is **one line, clipped not wrapped**. Stderr is arbitrarily long and a second
+footer row would break the one-line-per-row invariant that `uniform-rows.md`
+establishes.
+
+**Success expires, failure does not.** The status line otherwise persists until
+something replaces it, which would have the footer claiming an action is current
+long after it finished. Four seconds is long enough to read on looking back from
+whatever the action opened. A failure is the one message the user has to act on,
+so it stays. Only the run that set a success may expire it — a newer action, a
+refresh or a copy owns the line by then.
+
+**A second press while one is running is refused**, with `worktree still
+running` rather than silence: starting a second process would orphan the first
+one's result. Runs are numbered, so a result that lands after the user moved on
+is dropped instead of overwriting the newer status, and a refresh drops the
+running *indicator* without pretending the process died.
+
+One failure mode worth knowing: `wt remove` deregisters a worktree but can leave
+the directory on disk (a `node_modules` from a post-start hook is enough), and
+the next `wt switch pr:<n>` then fails with *Directory already exists* instead of
+reusing it. This used to look exactly like the action silently doing nothing;
+the failure line now quotes what `wt` said.
+
+### 4.3 Pass the branch, not just the number
+
+`{{.Branch}}` exists because the board already knows the PR's head ref, and a
+script that resolves the PR *number* pays for what the board could have told it.
+Measured against a worktree that already existed:
+
+| form | time |
+|---|---|
+| `wt switch pr:<n>` | 7.0s — resolves the number through the GitHub API on every call |
+| `wt switch <branch>` | 0.07s — no network at all |
+
+A 100x difference on a key pressed many times a day, and the API round trip buys
+nothing when the worktree is already there. The branch form is not only the
+existing-worktree fast path: it also *creates* one from `origin/<branch>` when
+there is none, measured at 2.8s and still without an API call.
+
+The number is still worth passing as a fallback. A branch resolves only if it is
+on `origin`, so a PR from a fork — whose head lives on the contributor's remote
+— needs `pr:<n>`, which is exactly the case where asking GitHub is the point.
+Try the branch, fall back to the number: first use and forks keep working, and
+the common case stops paying for them. Note when writing such a script that
+`wt switch` on an unknown branch prints its error and still exits 0 when its
+output is piped, so test the resolved path rather than the exit code.
 
 ### Default rules
 
