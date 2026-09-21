@@ -16,29 +16,37 @@ const (
 	partTicket
 )
 
-// Conventional-commit type colours. These are 256-cube tints rather than the
-// 0-15 the status columns own: a type is not a status, and landing `fix` on the
-// same red as a failing CI check would make the row read as broken. The cube
-// tints keep the family association -- fix reads warm, feat reads green -- at a
-// lower saturation than the status glyphs three columns to the left, so the
-// hierarchy of "what is wrong" over "what kind of change" survives.
-//
-// Types that are not release-visible (chore, ci, build, docs, style, test)
-// share one grey-blue: distinguishing them from each other buys nothing, and
-// giving each its own hue would turn the column into confetti.
-var typeStyles = map[string]lipgloss.Style{
-	"fix":      lipgloss.NewStyle().Foreground(lipgloss.Color("173")), // muted terracotta
-	"feat":     lipgloss.NewStyle().Foreground(lipgloss.Color("108")), // sage
-	"refactor": lipgloss.NewStyle().Foreground(lipgloss.Color("110")), // steel blue
-	"perf":     lipgloss.NewStyle().Foreground(lipgloss.Color("139")), // dusty violet
-	"revert":   lipgloss.NewStyle().Foreground(lipgloss.Color("173")),
-	"chore":    lipgloss.NewStyle().Foreground(lipgloss.Color("103")), // grey-blue
-	"ci":       lipgloss.NewStyle().Foreground(lipgloss.Color("103")),
-	"build":    lipgloss.NewStyle().Foreground(lipgloss.Color("103")),
-	"docs":     lipgloss.NewStyle().Foreground(lipgloss.Color("103")),
-	"style":    lipgloss.NewStyle().Foreground(lipgloss.Color("103")),
-	"test":     lipgloss.NewStyle().Foreground(lipgloss.Color("103")),
+// commitTypes is the set of conventional-commit type words that parse as a
+// type. It is a set, not a colour map: every recognised type now shares one
+// hue, so the only thing a lookup answers is whether a leading word is a type
+// at all.
+var commitTypes = map[string]bool{
+	"fix": true, "feat": true, "refactor": true, "perf": true, "revert": true,
+	"chore": true, "ci": true, "build": true, "docs": true, "style": true,
+	"test": true,
 }
+
+// typeStyle is the one colour every recognised type takes.
+//
+// A themed ANSI slot rather than a 256-cube tint. The eleven types used to
+// carry five cube values between them, which put the board's largest block of
+// fixed colour on the field that says least: the type is a category, and
+// categories do not need telling apart by hue when the word itself is right
+// there. Distinguishing feat from fix by colour was decoration on top of a
+// word that already read, and it cost the user's theme five slots to do it.
+//
+// ANSI 4 is the accent the PR number already uses. Sharing the slot is the
+// point rather than a collision: both are the row's structural furniture --
+// the number identifies it, the type classifies it -- and they sit in
+// different columns with different shapes, so position disambiguates them the
+// way it does for the reused checkmarks in the status cluster.
+//
+// Checked on the live board before settling: the number sits at column 14 and
+// the type at 29 with the status cluster's own colours between them, so the
+// two never abut, and `#3265` against `fix` is a different shape as well as a
+// different column. It reads as structure repeating, not as one field bleeding
+// into another. ANSI 6 was the fallback if they had read as confusable.
+var typeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 
 // parseTitle labels each rune of a title with the part it belongs to, or
 // returns nil when the title has no conventional prefix at all. Nil rather
@@ -86,7 +94,7 @@ func scanTypePrefix(r []rune) int {
 	if i == 0 {
 		return 0
 	}
-	if _, ok := typeStyles[string(r[:i])]; !ok {
+	if !commitTypes[string(r[:i])] {
 		return 0
 	}
 	if i < len(r) && r[i] == '(' {
@@ -177,8 +185,8 @@ func isLowerAlpha(r rune) bool { return r >= 'a' && r <= 'z' }
 func titlePartStyle(st lipgloss.Style, p titlePart, typeWord string) lipgloss.Style {
 	switch p {
 	case partType:
-		if ts, ok := typeStyles[typeWord]; ok {
-			return st.Foreground(ts.GetForeground())
+		if commitTypes[typeWord] {
+			return st.Foreground(typeStyle.GetForeground())
 		}
 	case partScope, partTicket:
 		return st.Faint(true)

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"hash/fnv"
 	"strings"
 	"time"
 
@@ -28,146 +27,155 @@ var (
 	accentStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 )
 
-// A dark fill rather than index 8's mid grey. Mid grey is the worst possible
-// backdrop for foreground colours -- only 39 of the 216 cube colours clear 3:1
-// against it -- and it was the real reason the author palette kept collapsing
-// to a handful of entries. 237 is dark enough that colour choice is free again.
+// selBg is the selected-row fill: ANSI 8, so it resolves through the user's
+// own theme like every other colour on the board.
+//
+// It used to be cube 237, chosen because index 8 is nominally "bright black" --
+// a mid grey, and mid grey is the worst possible backdrop for foreground
+// colours (only 39 of the 216 cube colours clear 3:1 against it). That
+// reasoning is sound for a theme where 8 really is mid grey, and wrong for the
+// many themes where it is not: Catppuccin Mocha renders 8 as #585b70, a tinted
+// dark, on a #1e1e2e background.
+//
+// Measured in that theme, every foreground on a selected row over ANSI 8:
+//
+//	title (default fg)        4.62:1
+//	type + number (ANSI 4)    3.17:1
+//	passing / approved (2)    4.49:1
+//	running / required (3)    5.25:1
+//	failing / conflict (1)    2.88:1   <- the floor
+//	muted author / age       ~2.54:1   <- approximate, see below
+//
+// The two below 3:1 are the accepted cost. Both clear 2:1, and status is glyph
+// shape first with colour as reinforcement (DESIGN.md §3.2), so neither is the
+// sole carrier of anything. The muted figure is an estimate: SGR 2 has no
+// specified blend ratio, modelled here as ~55% foreground over the fill.
+//
+// This is theme-dependent by construction, which is the trade. DESIGN.md §3.4
+// has the cross-theme table -- it measures well in Mocha and Tokyo Night and
+// poorly in Gruvbox and Solarized. Check that table before concluding a
+// contrast complaint is a bug in this line.
+//
 // No foreground is forced on the selected row, so it keeps its own.
-var selBg = lipgloss.Color("237")
+var selBg = lipgloss.Color("8")
 
-// hitStyle fills the runes a search matched, the way vim's Search group does
-// (`ctermfg=0 ctermbg=14` -- a background fill, not an underline).
+// hitStyle fills the runes a search matched, the way vim's Search group does --
+// a background fill, not an underline.
 //
 // A fill rather than an underline because a hit has to read the same wherever
 // it lands, and this board spends foreground colour everywhere: an underline
 // under a faint scope, a dim ticket key or a muted draft title is missable,
-// which is the one thing a search highlight may not be. A fill wins over
-// whatever the cell was already saying, so the hit stops depending on the row
-// underneath it.
+// which is the one thing a search highlight may not be.
 //
-// ANSI 5 rather than a fixed cube shade. The cube is for a contrast floor the
-// themed space cannot meet -- that is what buys selBg and the selected accent
-// their exemption -- and a search hit has no such floor. A themed value is
-// also correct on a light terminal by construction rather than by measurement,
-// which is the whole reason the author palette and the commit-type tints came
-// back out of the cube.
+// **It sets BOTH ground and figure, and that is the whole point.** It was
+// `Background(5)` alone, which inherits whatever foreground the run already
+// had -- and a dark theme's ANSI 5 is a light pink BY DESIGN, so every
+// foreground landed light-on-light. Measured in Catppuccin Mocha:
 //
-// 5 because it is the one semantic slot a row does not already use: 1 failing,
-// 2 passing, 3 pending, 4 the number and the type, 6 the section gutter. A hit
-// can therefore never be read as a status, which is the collision that matters
-// -- the type tint sits in 4 precisely so `fix` never looks like a failure, and
-// the same argument applies here.
+//	type / PR number (ANSI 4)   1.38:1
+//	title (default fg)          1.06:1
+//	muted author                1.03:1
 //
-// No foreground is set. The text keeps the terminal's own default, which is
-// guaranteed to contrast with the terminal's background; forcing one would
-// re-introduce the light-theme question a themed value exists to avoid, and
-// 0/7/15 are not available as foregrounds anyway. It is applied standalone
-// rather than layered, so a faint scope cannot leak its dimming onto the fill.
-var hitStyle = lipgloss.NewStyle().Background(lipgloss.Color("5"))
+// against a fill that was itself 10.74:1 on the board. A loud block with
+// invisible contents, which is worse than no highlight: it draws the eye to
+// the one place it cannot read. A highlight that inherits its foreground is
+// broken by construction, not by palette choice.
+//
+// Reverse rather than a chosen pair of slots. The fill takes the theme's
+// foreground and the text takes its background, so the contrast is whatever
+// the theme already guarantees for ordinary text -- by definition its best
+// pairing, and correct on light and dark without measuring either. Across
+// eight themes it is the only candidate clearing 4.5:1 everywhere (worst 4.75
+// on Solarized Dark); every fixed-slot pair collapses to about 2.4:1 on a
+// light theme, where ANSI 5's luminance flips.
+//
+// It also cannot clash with anything. There is no hue to collide with the
+// commit type's ANSI 4 (DESIGN.md §3.3.1) because reverse chooses no colour at
+// all, so hue and hit stay the independent channels §3.3 requires.
+//
+// DESIGN.md §2 rejects reverse for the SELECTED ROW, because swapping a whole
+// row's foreground into its background destroys the status colour on exactly
+// the failing rows that need it. That objection does not reach a hit run, and
+// the reason is structural rather than a judgement call: hitRuns is applied to
+// three cells only -- number, title and author -- and the status glyphs never
+// pass through it, so a hit cannot recolour a status. Those three cells are
+// also already giving up their own styling deliberately (see styleFor below: a
+// hit takes hitStyle whole), so there is no hue left for reverse to destroy.
+//
+// On a selected row the hit does not inherit selBg either, so the fill stays
+// the theme foreground and reads at 4.62:1 against selBg in Mocha -- the
+// highlight is still visible on the cursor line, which is the case most likely
+// to break.
+var hitStyle = lipgloss.NewStyle().Reverse(true)
 
-// authorPalette colours the author column so the same person is the same
-// colour on every row, the way lazygit colours its authors.
+// The section header has NO background fill, which is why there is no headerBg.
 //
-// 256-cube indices rather than the 0-15 the rest of the file uses, chosen for
-// distinctness from each other: the binding constraint used to be selBg, not
-// the hues, and now that the selected row is dark every entry clears 4.6:1 on
-// it. The only rule left is to avoid the exact ANSI 1 and 2 slots, so an author
-// is never literally the failing-red or approved-green pixel; sharing a family
-// with them is fine, since the author cell is its own column and status has its
-// own glyph.
+// It had one, and the fill was the problem rather than the fix. A band has to
+// contrast with the board ground, which is the terminal's own background and
+// therefore unknown, so it was a fixed cube value: 235, then 234. Against
+// Catppuccin Mocha's #1e1e2e those measure 1.08:1 and 1.04:1 -- invisible. The
+// band was simultaneously too faint to separate anything and the only neutral
+// grey on a blue-tinted board, so it read as grafted on.
 //
-// The length is load-bearing, and only the length: buckets are FNV-1a mod len,
-// so the count alone decides who shares a colour, not which colours are in the
-// list. 30-odd authors over 15 entries means sharing regardless -- colour is a
-// grouping hint and the initials stay the identity -- but 15 spreads the real
-// set better than 16, which piles six people onto one entry. Re-run the check
-// over the live logins before changing the count.
-var authorPalette = []lipgloss.Color{
-	"44",  // teal
-	"50",  // aqua
-	"78",  // spring green
-	"108", // sage
-	"118", // lime
-	"147", // periwinkle
-	"148", // olive
-	"153", // pale sky
-	"178", // gold
-	"186", // khaki
-	"208", // orange
-	"213", // orchid
-	"217", // salmon
-	"226", // yellow
-	"229", // cream
-}
+// The label carries the header without it, on three channels that need no
+// fill: indentation (the name starts at column 2, PR rows at column 4), weight
+// (bold, and nothing else on the board is bold), and hue (headerStyle's ANSI 6,
+// the only bold teal on the board, 11.01:1 against Mocha's background).
+//
+// A selected header still takes selBg, so the cursor is never invisible. That
+// also removes the old problem of a header band and a selection fill being two
+// near-identical greys -- 234 against 237 was 1.50:1 -- because there is now
+// only one fill on the board.
 
-// authorStyle maps a login to its palette entry. FNV-1a keeps it stable across
-// runs and machines -- a map's iteration order or anything seeded would repaint
-// people on every launch, which defeats the point of recognising them by colour.
-func authorStyle(login string) lipgloss.Style {
-	if login == "" {
-		return mutedStyle
+// sectionHeader draws a section's full-width header row: the rule name at the
+// left, the row count right-aligned two cells from the edge.
+//
+// A header is a real entry in the cursor's address space, not a line the
+// cursor skips. That is the whole point of this layout: if every line on the
+// board is selectable, one keypress moves the cursor one line by construction,
+// and the scroll deltas that killed the earlier inline-header attempts cannot
+// arise. See docs/uniform-rows.md §4.1.
+//
+// It is deliberately NOT sticky -- a pinned line was built and reverted
+// (DESIGN.md §3.5.1); scrolling with the content is what avoids that.
+func (m Model) sectionHeader(name, count string, selected bool) string {
+	w := max(0, m.width)
+	label := "  " + name
+	right := ""
+	if count != "" {
+		right = count + "  "
 	}
-	h := fnv.New32a()
-	h.Write([]byte(login))
-	return lipgloss.NewStyle().Foreground(authorPalette[h.Sum32()%uint32(len(authorPalette))])
-}
-
-// sectionWidth is the left gutter carrying the section name. Sections are a
-// gutter rather than a header band so that every line on the board is a row:
-// a header line makes one keypress scroll two lines whenever it crosses the
-// top edge, which is the jump five attempts at the viewport math could not fix.
-// See docs/uniform-rows.md.
-//
-// 8 cells fits MINE, REVIEW and ALL OPEN, and clips longer rule names the same
-// way the title column clips.
-const sectionWidth = 8
-
-// gutterState is a row's relationship to its section, which the gutter and the
-// rule glyph both read. It is three states rather than a bool because "the
-// section starts here" and "the section started above the window" are different
-// facts: the first draws the rule broken, the second draws it continuing and
-// still names the section, so the top visible row is never anonymous.
-type gutterState int
-
-const (
-	sectionContinues gutterState = iota
-	sectionStarts
-	sectionAbove
-)
-
-// sectionGutter draws the gutter: the name on a section's first visible row,
-// blank on the rest.
-func sectionGutter(name string, st gutterState) string {
-	label := ""
-	if st != sectionContinues {
-		label = strings.ToUpper(name)
+	label = clip(label, max(0, w-lipgloss.Width(right)))
+	gap := w - lipgloss.Width(label) - lipgloss.Width(right)
+	if gap < 0 {
+		gap = 0
 	}
-	return pad(clip(label, sectionWidth), sectionWidth)
-}
-
-// sectionRule draws the one-cell rule beside the gutter. `╷` at a section's
-// first row makes the rule visibly start rather than continue, so a boundary
-// reads even when the name is clipped to all 8 cells and cannot signal it.
-func sectionRule(st gutterState) string {
-	if st == sectionStarts {
-		return " ╷"
+	body := label + strings.Repeat(" ", gap) + right
+	if !selected {
+		// No fill: the label separates the header on its own (see selBg).
+		return headerStyle.Render(body)
 	}
-	return " │"
+	// Selected: the mark goes in column 0 where nothing else ever draws, so a
+	// header carries the same cursor affordance a row does.
+	r := []rune(body)
+	return accentStyle.Background(selBg).Render("▌") +
+		headerStyle.Background(selBg).Render(string(r[1:]))
 }
 
 // Width tiers. Exactly one column flexes (title), so the status cluster stays
 // pinned at the same screen offset at every width.
 const (
-	fixedFull   = 23 + sectionWidth + 2 // mark+gut+tree+number+gut+status(7)+gut+gut+age
-	fixedMid    = 19 + sectionWidth + 2 // age dropped
-	fixedNarrow = 15 + sectionWidth + 2 // review glyph dropped, status compressed to 3
+	fixedFull   = 23 // mark+gut+tree+number+gut+status(7)+gut+gut+age
+	fixedMid    = 19 // age dropped
+	fixedNarrow = 15 // review glyph dropped, status compressed to 3
 
-	// Each tier starts sectionWidth+2 later than it did before the gutter, so
-	// the title keeps the same readable floor at every tier.
-	minWidth    = 40 + sectionWidth + 2
-	narrowUntil = 48 + sectionWidth + 2
-	midUntil    = 60 + sectionWidth + 2
-	fullFrom    = 76 + sectionWidth + 2
+	// The section name moved out of a per-row gutter and into its own header
+	// row, so the 10 cells it took are back in the title at every tier and
+	// every breakpoint drops by the same 10.
+	minWidth    = 40
+	narrowUntil = 48
+	midUntil    = 60
+	fullFrom    = 76
 )
 
 type tier int
@@ -275,6 +283,12 @@ const numberWidth = 6
 // authorWidth is deliberately narrow: lazygit, tig and neomutt all collapse to
 // initials in their dense views rather than showing a name, and the point of
 // this column is to be readable without being loud.
+//
+// The column is muted, like age. It carried a 15-entry hue palette so the same
+// person was the same colour on every row; that was a grouping hint costing 15
+// fixed cube values that overrode the user's theme, to decorate a fact the
+// initials already carried. Colour is a budget (DESIGN-GUIDE.md §1) and who
+// wrote a PR does not compete with whether it is broken.
 const authorWidth = 3
 
 // initials shortens a GitHub login to fit authorWidth. Collisions are possible
@@ -371,7 +385,7 @@ func padLeft(s string, w int) string {
 
 // renderRow draws one PR. Every sub-slot is always emitted, blank when absent,
 // so no field ever shifts as state changes.
-func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string, gs gutterState) string {
+func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	t := widthTierFor(m.width, showAuthor)
 	tw := m.searchTitleWidth(showAuthor)
 
@@ -404,16 +418,26 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 		titleStyle = titleStyle.Bold(true)
 	}
 
-	// ANSI 4 measures 1.21 against selBg, so on the selected row the cursor bar
-	// and the PR number would be the least readable things on it. 75 rather
-	// than bright-blue 12 because 4 and 12 are themeable slots with no fixed
-	// relationship -- Catppuccin, Tokyo Night and Dracula all define 12 as 4,
-	// so brightening to it would change nothing there. 75 is a fixed cube
-	// colour: 4.91 on selBg, and outside the author palette.
+	// The accent does NOT change on a selected row. It used to brighten to cube
+	// 75, justified by a comment claiming "ANSI 4 measures 1.21 against selBg".
+	// That figure was computed against a nominal ANSI 4 rather than any real
+	// theme's, and it is wrong everywhere it matters. Measured against
+	// Catppuccin Mocha's actual palette (ANSI 4 #89b4fa):
+	//
+	//	                       ANSI 4    cube 75
+	//	on old selBg 237        5.40:1    4.91:1
+	//	on selBg ANSI 8         3.17:1    2.88:1
+	//	unselected, on bg       7.79:1    7.08:1
+	//
+	// ANSI 4 beats 75 on every fill, so 75 was buying nothing and costing a
+	// fixed value that ignored the user's palette.
+	//
+	// These ratios are THEME-DEPENDENT: both ANSI 4 and ANSI 8 resolve through
+	// the user's theme, so the numbers above describe Mocha and not a universal
+	// truth. Do not recompute them against a nominal ANSI 4 and "fix" this back
+	// to a cube colour -- that is the mistake the old comment enshrined.
+	// DESIGN.md §3.4 has the cross-theme table.
 	accent := accentStyle
-	if selected {
-		accent = accent.Foreground(lipgloss.Color("75"))
-	}
 
 	mark := " "
 	if selected {
@@ -421,11 +445,6 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	}
 
 	var b strings.Builder
-	// The section gutter sits outside the selection fill: it belongs to the
-	// board, not to the row, and highlighting it would make the band look like
-	// part of the selected PR.
-	b.WriteString(headerStyle.Render(sectionGutter(section, gs)))
-	b.WriteString(mutedStyle.Render(sectionRule(gs)))
 	b.WriteString(paint(accent).Render(mark))
 	b.WriteString(paint(fgStyle).Render(" "))
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
@@ -444,8 +463,10 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	if t == tierFull {
 		if showAuthor {
 			b.WriteString(paint(fgStyle).Render(" "))
+			// Muted like age, and still searchable: hitRuns fills the runes
+			// a query matched, so losing the hue did not lose the highlight.
 			b.WriteString(hitRuns(padLeft(initials(r.PR.Author), authorWidth),
-				cellHits(spans, cells.author), authorStyle(r.PR.Author), paint))
+				cellHits(spans, cells.author), mutedStyle, paint))
 		}
 		b.WriteString(paint(fgStyle).Render(" "))
 		b.WriteString(paint(mutedStyle).Render(padLeft(clip(age(r.PR.UpdatedAt), 3), 3)))
@@ -590,9 +611,8 @@ func stripSGR(s string) string {
 }
 
 // renderSectionNote draws a section that has no rows to show -- still loading,
-// resolved empty, or failed. It reuses the row's gutter so the board keeps one
-// left edge, and occupies exactly one line like everything else.
-func (m Model) renderSectionNote(name, note string) string {
-	return headerStyle.Render(sectionGutter(name, sectionStarts)) +
-		mutedStyle.Render(sectionRule(sectionStarts)+" ") + note
+// resolved empty, or failed. It sits under the section's header and occupies
+// exactly one line like everything else.
+func renderSectionNote(note string) string {
+	return "   " + note
 }

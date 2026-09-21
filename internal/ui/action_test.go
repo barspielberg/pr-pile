@@ -30,6 +30,8 @@ func actionBoard(t *testing.T, run string) Model {
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m.fetching = false
+	// Slot 0 is the section header, so land on the PR itself.
+	m.cursor = m.firstRowSlot()
 	return m
 }
 
