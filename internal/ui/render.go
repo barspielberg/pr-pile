@@ -35,6 +35,36 @@ var (
 // No foreground is forced on the selected row, so it keeps its own.
 var selBg = lipgloss.Color("237")
 
+// hitStyle fills the runes a search matched, the way vim's Search group does
+// (`ctermfg=0 ctermbg=14` -- a background fill, not an underline).
+//
+// A fill rather than an underline because a hit has to read the same wherever
+// it lands, and this board spends foreground colour everywhere: an underline
+// under a faint scope, a dim ticket key or a muted draft title is missable,
+// which is the one thing a search highlight may not be. A fill wins over
+// whatever the cell was already saying, so the hit stops depending on the row
+// underneath it.
+//
+// ANSI 5 rather than a fixed cube shade. The cube is for a contrast floor the
+// themed space cannot meet -- that is what buys selBg and the selected accent
+// their exemption -- and a search hit has no such floor. A themed value is
+// also correct on a light terminal by construction rather than by measurement,
+// which is the whole reason the author palette and the commit-type tints came
+// back out of the cube.
+//
+// 5 because it is the one semantic slot a row does not already use: 1 failing,
+// 2 passing, 3 pending, 4 the number and the type, 6 the section gutter. A hit
+// can therefore never be read as a status, which is the collision that matters
+// -- the type tint sits in 4 precisely so `fix` never looks like a failure, and
+// the same argument applies here.
+//
+// No foreground is set. The text keeps the terminal's own default, which is
+// guaranteed to contrast with the terminal's background; forcing one would
+// re-introduce the light-theme question a themed value exists to avoid, and
+// 0/7/15 are not available as foregrounds anyway. It is applied standalone
+// rather than layered, so a faint scope cannot leak its dimming onto the fill.
+var hitStyle = lipgloss.NewStyle().Background(lipgloss.Color("5"))
+
 // authorPalette colours the author column so the same person is the same
 // colour on every row, the way lazygit colours its authors.
 //
@@ -238,14 +268,21 @@ func blockerCell(pr github.PR) (string, lipgloss.Style) {
 	}
 }
 
+// numberWidth fits "#99999" and is named because the search has to reproduce
+// the cell exactly to attribute a match back to it.
+const numberWidth = 6
+
 // authorWidth is deliberately narrow: lazygit, tig and neomutt all collapse to
 // initials in their dense views rather than showing a name, and the point of
 // this column is to be readable without being loud.
 const authorWidth = 3
 
 // initials shortens a GitHub login to fit authorWidth. Collisions are possible
-// and tolerable -- the column answers "is this mine or someone else's", and the
-// fuzzy filter matches the full login for anything more precise.
+// and tolerable -- the column answers "is this mine or someone else's".
+//
+// These three characters are also the whole of what an author search matches,
+// since they are the whole of what is drawn: two logins sharing a prefix share
+// a cell and so share a match, which the row shows rather than hides.
 func initials(login string) string {
 	if login == "" {
 		return ""
@@ -300,8 +337,8 @@ func clip(s string, w int) string {
 	return b.String() + "…"
 }
 
-// clipLeft drops from the front, keeping the tail visible. The filter query
-// grows at its end, so that is the end worth keeping on screen.
+// clipLeft drops from the front, keeping the tail visible. The query grows at
+// its end, so that is the end worth keeping on screen.
 func clipLeft(s string, w int) string {
 	if w <= 0 {
 		return ""
@@ -336,10 +373,13 @@ func padLeft(s string, w int) string {
 // so no field ever shifts as state changes.
 func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string, gs gutterState) string {
 	t := widthTierFor(m.width, showAuthor)
-	tw := titleWidth(m.width, t)
-	if showAuthor && t == tierFull {
-		tw -= authorWidth + 1
-	}
+	tw := m.searchTitleWidth(showAuthor)
+
+	// One set of spans feeds every cell: the search ran on the row's own drawn
+	// text, so each cell fills the part of the hit that falls inside it, at the
+	// rune extents searchText recorded as it laid them down.
+	spans := m.matchSpans(r, showAuthor, m.query)
+	_, cells := m.searchText(r, showAuthor)
 
 	ci, ciStyle := ciCell(r.PR)
 	rev, revStyle := reviewCell(r.PR)
@@ -389,7 +429,8 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	b.WriteString(paint(accent).Render(mark))
 	b.WriteString(paint(fgStyle).Render(" "))
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
-	b.WriteString(paint(accent).Render(pad("#"+fmt.Sprint(r.PR.Number), 6)))
+	b.WriteString(hitRuns(pad("#"+fmt.Sprint(r.PR.Number), numberWidth),
+		cellHits(spans, cells.number), accent, paint))
 	b.WriteString(paint(fgStyle).Render(" "))
 	b.WriteString(paint(ciStyle).Render(ci))
 	if t > tierNarrow {
@@ -399,11 +440,12 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	}
 	b.WriteString(paint(blockerStyle).Render(blocker))
 	b.WriteString(paint(fgStyle).Render(" "))
-	b.WriteString(m.renderTitle(r, titleStyle, paint, tw))
+	b.WriteString(m.renderTitle(r, titleStyle, paint, tw, cellHits(spans, cells.title)))
 	if t == tierFull {
 		if showAuthor {
 			b.WriteString(paint(fgStyle).Render(" "))
-			b.WriteString(paint(authorStyle(r.PR.Author)).Render(padLeft(initials(r.PR.Author), authorWidth)))
+			b.WriteString(hitRuns(padLeft(initials(r.PR.Author), authorWidth),
+				cellHits(spans, cells.author), authorStyle(r.PR.Author), paint))
 		}
 		b.WriteString(paint(fgStyle).Render(" "))
 		b.WriteString(paint(mutedStyle).Render(padLeft(clip(age(r.PR.UpdatedAt), 3), 3)))
@@ -423,22 +465,72 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool, section string,
 	return line
 }
 
-// renderTitle draws the title: the conventional-commit prefix coloured by
-// part, and the characters the active filter matched underlined.
+// hitRuns renders text in the given style, filling the runes the query hit and
+// coalescing adjacent runes of the same hit state into one run.
 //
-// The two are independent channels on purpose. Hue says what kind of change
-// this is, underline says where the query hit, and a query that lands inside a
-// scope has to keep both -- losing either one would make filtering and reading
-// fight over the same column. Runs are therefore coalesced on the pair
-// (part, hit) rather than on hit alone.
+// It splits the *padded* cell rather than styling the value and padding after:
+// a fill that ran on under the padding would read as a wider match than it is,
+// and on a fixed-width cell it would look like a column of different sizes.
+// Both cells it serves must stay exactly their width; the status cluster's
+// screen offset depends on it.
+//
+// A hit run takes hitStyle whole and does not go through paint: the fill is
+// what makes it visible, so letting the selection background compose over it
+// would undo the point on exactly the row the cursor is on.
+//
+// renderTitle keeps its own richer loop: it coalesces on (part, hit), a second
+// dimension neither of these cells has.
+func hitRuns(text string, hits map[int]bool, st lipgloss.Style,
+	paint func(lipgloss.Style) lipgloss.Style) string {
+	if len(hits) == 0 {
+		return paint(st).Render(text)
+	}
+	var b, run strings.Builder
+	runHit := false
+	flush := func() {
+		if run.Len() == 0 {
+			return
+		}
+		if runHit {
+			b.WriteString(hitStyle.Render(run.String()))
+		} else {
+			b.WriteString(paint(st).Render(run.String()))
+		}
+		run.Reset()
+	}
+	for i, ch := range []rune(text) {
+		if h := hits[i]; h != runHit {
+			flush()
+			runHit = h
+		}
+		run.WriteRune(ch)
+	}
+	flush()
+	return b.String()
+}
+
+// renderTitle draws the title: the conventional-commit prefix coloured by
+// part, and the characters the query matched filled.
+//
+// Hue says what kind of change this is; the fill says where the query hit, and
+// it wins outright over the hue for the runes it covers. That is deliberate and
+// it is a change from the underline this used to draw: a scope and a ticket key
+// are faint, a draft title is faint, and an underline under any of them was
+// missable -- which is the one thing a search highlight may not be. The hue is
+// still there on every rune the query did not hit, which is almost all of them,
+// so the column still reads as a conventional-commit title at a glance.
+//
+// Runs are still coalesced on the pair (part, hit): a hit run is one
+// appearance, but the unhit runs on either side of it keep their own parts.
 //
 // Parsing runs on the clipped-and-padded string rather than the raw title, so
 // the part boundaries are the ones actually on screen. A narrow terminal that
 // cuts through a scope degrades to a half-coloured prefix, which is honest
-// about the clipping rather than drifting out of alignment with it.
-func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.Style) lipgloss.Style, tw int) string {
+// about the clipping rather than drifting out of alignment with it. The hits
+// are indexes into that same string -- the search matched it -- so there is
+// nothing to clamp and no ellipsis to guard against.
+func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.Style) lipgloss.Style, tw int, hits map[int]bool) string {
 	text := pad(clip(r.PR.Title, tw), tw)
-	hits := matchedTitleIndexes(r, m.query())
 	parts := parseTitle(text)
 	if len(hits) == 0 && parts == nil {
 		return paint(st).Render(text)
@@ -446,11 +538,13 @@ func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.S
 
 	typeWord := leadingType(text, parts)
 	styleFor := func(p titlePart, hit bool) lipgloss.Style {
-		s := titlePartStyle(st, p, typeWord)
+		// A hit takes hitStyle whole: neither the part's hue nor the
+		// selection background composes over it, or the fill would come out a
+		// different colour in each of the four parts and on the cursor row.
 		if hit {
-			s = s.Underline(true)
+			return hitStyle
 		}
-		return paint(s)
+		return paint(titlePartStyle(st, p, typeWord))
 	}
 
 	var b strings.Builder

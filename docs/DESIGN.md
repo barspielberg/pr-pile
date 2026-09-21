@@ -57,11 +57,11 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | No column header row | Our sub-slots are 1–2 cells — no word fits, so the only renderable header over `✗2 ○ !` is more symbols. gh-dash has a header row and its status headers *are* glyphs. Evidence: one uncommented legend request in five years across three trackers, versus repeated multi-user complaints about chrome rows. The legend lives in the `?` overlay instead, rendered from the same helpers the rows use so it cannot drift. |
 | No global header row | Its three payloads were the app name (you just pressed a key), the repo (constant in a single-repo tool) and the spinner. Repo and spinner moved to the footer, which was already being paid for. One row back in a 20-row pane. (gh-dash #671: a 2-line logo drew "wasting space", "attention hogging".) |
 | Plain Unicode BMP glyphs, not Nerd Font PUA | gh-dash #290: icons vanished on Nerd Font 3.0.2 — codepoints moved between font versions. Having "a Nerd Font" does not guarantee a specific glyph. No legibility gain at single-cell size. |
-| Author is per-rule (`author: true`), not global | A rule like `author:@me` is all one person, so the column is dead weight there. This is what gh-dash #464 asks for and what neomutt has done for decades. Author is in the fuzzy haystack regardless of whether the column is shown. |
+| Author is per-rule (`author: true`), not global | A rule like `author:@me` is all one person, so the column is dead weight there. This is what gh-dash #464 asks for and what neomutt has done for decades. The search matches the initials only when the column is drawn, since it matches what is drawn. |
 | Draft split out of the review slot | Draft is a lifecycle state, review is an outcome, and a draft PR has both. Showing draft in the review slot hid whether it was already approved. |
 | `-review:approved` on "Needs my review" | Drops PRs somebody else already signed off, which is what makes it an action queue rather than a status list. Changes-requested PRs stay — those still want you. Note GitHub already drops a PR from `review-requested:@me` once *you* approve it. |
-| Numeric filter queries are exact, not fuzzy | Fuzzy treated `3248` as a subsequence, so it also hit titles containing 3…2…4…8 scattered across them. Bare numbers now match PR numbers by prefix. |
-| `sahilm/fuzzy`, not fzf's matcher | fzf ranks better but drags in tcell, go-colorful and a shellwords parser for one function. `bubbles/textinput` was also rejected: it pulls an OS clipboard shell-out for a paste binding this prompt does not need. |
+| `/` searches rather than filters | Filtering answered "which PRs match?" and lost the rows around the answer, which are most of why you were looking. Worse, it made highlighting impossible for anything it hid. The board now holds still and matches are filled where they sit. Fuzzy matching, ranking and the numeric special case all go with it: one substring rule over the row's own drawn text. `bubbles/textinput` stays rejected — it pulls an OS clipboard shell-out for a paste binding this prompt does not need. |
+| The search matches only what is drawn | Every match has to be visibly highlighted, or the board marks a row and shows no reason. So the haystack is the rendered row: the padded number, the title as clipped to this width, the three author initials. The consequences are real and accepted — a full login matches nothing, a word past the clip point matches nothing, and the match set changes with the terminal width. |
 | The checks overlay names failures and pending, counts passes | 47% of check contexts on the live board are skipped and 45% pass, against 4% failing — listing passes buries 7 signal lines under 24 on the worst PR. Pending checks are named instead of counted because they are 1–3 per PR and say *what* you are waiting on. The overlay also stopped dead-ending: 47% of PRs are in PENDING rollup with nothing failing, where it used to say "no failing checks". `checks-page.md` has the measurements. |
 | Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `d` overlay and section names to a left gutter, so every line on the board is a row and one keypress scrolls at most one line — unconditionally, not by argument. `uniform-rows.md` has the measurements; `view-restructure.md` is the earlier study this overturned. |
 | No chrome line above the list | A pinned section line with a `N of M` count was built and reverted. Bound to the top visible row it could not name the wrong section — but on a pane tall enough to show the whole board nothing scrolls, so it froze on the first section and read `MINE · 1 of 5` while the cursor was three sections away. It also restated the gutter label directly beneath it, since both resolved from the same `meta[start]`. The full name and the per-section count are not on the board; `l`/`h` jumps between sections. `section-layout.md` §13 has the reproduction and what I got wrong. |
@@ -171,12 +171,21 @@ render site (`internal/ui/render.go`).
 | `attention` | 3 | `◐` running, `○` review required |
 | `ok` | 2 | `✓` passing, `✓` approved |
 | `header` | 6 + bold | section name and `━` rule |
-| `accent` | 4 | PR number, selection bar `▌`, filter prompt |
+| `accent` | 4 | PR number, selection bar `▌`, search prompt |
+| `hit` | 5, **background only** | the runes a search query matched |
 | `muted` | unset fg + `Faint(true)` | tree glyphs, age, author, continuation lines, draft titles, `·`, counts, footer |
 | `selBg` | 8, **background only** | selected-row fill |
 
 `error` uses **1, not 9**: index 9 is "bright red", often a pale low-contrast
 pink on light themes. Indices 7, 15 and 0 are never foregrounds.
+
+`hit` takes **5** because it is the one semantic slot a row does not already
+spend: 1 failing, 2 passing, 3 pending, 4 the number and the commit type, 6 the
+section gutter. A search hit can therefore never be misread as a status, which
+is the same argument that keeps the type tint out of red. It sets no
+foreground, so the matched text keeps the terminal's own default and the fill
+is correct on a light theme by construction rather than by measurement — the
+reason it is themed rather than a fixed cube shade.
 
 **Loud** (`error`, `attention`) is failing CI, changes requested, conflicts,
 review required. **Quiet** (`ok`) is passing and approved — settled states need
@@ -260,7 +269,7 @@ changes the list height as you scroll, which is the bug class
 
 So the full name and the per-section count are **not on the board**. The gutter
 answers which section a row is in; `l`/`h` jumps between sections. Chrome is one
-line — the footer — and two while filtering.
+line — the footer — and two while the search prompt is open.
 
 Sections are a gutter rather than a full-width header band because **a header
 line is not a row**: whenever one crossed the top edge, a single keypress moved
@@ -433,9 +442,8 @@ treatment (always faint; selection is a filled block, no tree glyph is filled).
 A chain is one PR targeting another's head branch, emitted contiguously
 root-first. An unset base ref must not match an unset head ref, or every PR looks
 stacked on every other and none is emitted as a root. A base/head cycle is
-guarded with a seen set. **Filtered rows lose their tree glyphs**: a chain is
-almost never contiguous once filtered, and a dangling `╰╴` would draw a spine to
-a row no longer above it.
+guarded with a seen set. Tree glyphs are now never disturbed: the search does not
+reorder or hide rows, so a chain stays contiguous and no `╰╴` can dangle.
 
 ### 3.8 Responsive tiers
 
@@ -485,9 +493,9 @@ frozen at the first section forever, which is exactly how the reverted sticky
 line failed. `section-layout.md` §14 has the walk that verifies it changes on
 every keypress. When the two fields do not both fit the keys clip and the name
 survives whole. A status message *replaces* the keybinding text rather than
-adding a row — the keybindings are the least urgent thing on the board. While
-filtering, the prompt is a second chrome row between the list and the footer and
-the body loses one more line. The body is padded to the full viewport height so
+adding a row — the keybindings are the least urgent thing on the board. While the
+search prompt is open it is a second chrome row between the list and the footer
+and the body loses one more line. The body is padded to the full viewport height so
 the prompt and footer stay pinned to the bottom edge instead of floating under a
 short result set.
 
@@ -732,25 +740,39 @@ output is piped, so test the resolved path rather than the exit code.
 | `enter` `o` | open in browser (reuses an existing Arc tab) |
 | `y` | copy the selected PR's url to the clipboard. `y` because the board already speaks vim (`j`/`k`, `g`/`G`, `l`/`h`), so yank is the key those fingers already reach for. A clipboard write is invisible, so it is acknowledged on the status line |
 | `r` | reload |
-| `/` | filter |
+| `/` | search |
+| `n` `N` | next / previous match, wrapping |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus the state block (any key closes; a movement key closes *and* moves) |
 | `?` | help and the glyph legend. It scrolls (`j`/`k`, arrows, `ctrl+d`/`ctrl+u`, page keys, `g`/`G`); `esc`, `q` and `?` close it, as does any key that is not a scroll key |
 | `q` `esc` `ctrl+c` | quit |
 
-**Filtering.** `/` opens a fuzzy prompt over number, author and title. Rows rank
-by match score, so the board's newest-first order does not hold while filtering;
-matched characters are underlined (weight, not hue — the title already spends
-colour on draft and may sit on the selection fill); sections with no matches are
-hidden gutter and all. A bare number matches PR numbers by prefix, not fuzzily.
+**Searching.** `/` is vim's `/`. The board does not move — no row hidden, no
+section hidden, nothing reordered, no stack glyph changed — and matches are
+filled where they sit -- a background block, the way vim's `Search` group works.
+A fill rather than an underline because the board spends foreground colour
+everywhere, and an underline under a faint scope or a muted draft title was
+missable, which is the one thing a search highlight may not be. The cursor previews the match as you
+type (`incsearch`), `enter` keeps the query and the highlights (`hlsearch`),
+`n`/`N` step through the matches with a wrap message, and `esc` on the board
+clears them (`:noh`).
 
-Every printable key is query text while filtering, so navigation moves to chords:
+The query is a case-insensitive substring of the row's **rendered** text: the
+padded number, the title as clipped to this width, and the author initials when
+that column is drawn. The age cell is the one deliberate exclusion — it is
+computed from the clock, so a match on it would expire with no input from the
+user, and a bare digit would collide with the PR number.
+
+`?` stays the help key, so there is no backwards-open and therefore no direction
+flag: `n` is always forward, `N` always backward.
+
+Every printable key is query text while typing, so navigation moves to chords:
 
 | key | action |
 |---|---|
-| `ctrl+n` `ctrl+p` / `ctrl+j` `ctrl+k` / `↓` `↑` | move |
-| `enter` | open and leave the filter |
+| `ctrl+n` `ctrl+p` / `ctrl+j` `ctrl+k` / `↓` `↑` | next / previous match |
+| `enter` | keep the query and the highlights, close the prompt |
 | `backspace` / `ctrl+u` | edit / clear the query |
-| `esc` | leave, restoring the full board |
+| `esc` | cancel, restoring the cursor to where `/` was pressed |
 | `ctrl+c` | quit |
 
 From either overlay, **only `ctrl+c` quits** — `esc` and `q` mean "back to the
@@ -851,8 +873,8 @@ user).
   blanking the cells in your own section. The implementation is simpler: the
   first 3 lowercase characters of the login, shown only on rules with
   `author: true`. Collisions are possible and tolerated — the column answers "is
-  this mine or someone else's", and the filter matches the full login for
-  anything more precise.
+  this mine or someone else's". Those three characters are also the whole of
+  what an author search can match, since they are the whole of what is drawn.
 - The research also proposed a **cursor-seeded author filter** key
   (lazygit-style, filter to the author of the row under the cursor). Not built.
 - The spec's drop order was age → review glyph; adding the author column made it
