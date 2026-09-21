@@ -434,34 +434,6 @@ func TestUnresolvedLineAgreesWithItsCount(t *testing.T) {
 	}
 }
 
-// The display name is searchable, not just the login: the row shows three
-// initials of a login like `cdiaz88`, so "Carol" is what a person would
-// actually type to find it.
-func TestFilterMatchesTheAuthorsDisplayName(t *testing.T) {
-	m := New(testCfg(), nil)
-	m.width, m.height = 120, 24
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "unit numbers", Author: "cdiaz88",
-			AuthorName: "Carol Diaz", UpdatedAt: time.Unix(9000, 0)},
-		{Number: 2, Title: "something else", Author: "dependabot",
-			UpdatedAt: time.Unix(8000, 0)},
-	}})
-	m.board.Apply(board.Result{Index: 1})
-
-	m = typeQuery(m, "Carol")
-	rows := m.visibleRows()
-	if len(rows) != 1 || rows[0].PR.Number != 1 {
-		t.Fatalf("display name did not match: got %d rows", len(rows))
-	}
-
-	// The login still matches, and so does an author with no display name.
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
-	m = typeQuery(m, "dependabot")
-	if rows := m.visibleRows(); len(rows) != 1 || rows[0].PR.Number != 2 {
-		t.Fatalf("login-only author stopped matching: got %d rows", len(rows))
-	}
-}
-
 // The page says it is still loading, and it says so where the answer will
 // land: the skeleton line stands in the on-demand lines' own position, so the
 // common case -- one of the two lines arriving -- resolves in place and nothing

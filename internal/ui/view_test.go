@@ -459,15 +459,15 @@ func TestFooterStaysPinnedToTheBottom(t *testing.T) {
 			t.Errorf("%d rows: first line is not the first row: %q", n, first)
 		}
 
-		// And the same while filtering, where the prompt is a second chrome row.
-		m.filtering = true
-		m.filter = "pr"
+		// And the same while searching, where the prompt is a second chrome row.
+		m.searching = true
+		m.query = "pr"
 		flines := strings.Split(m.View(), "\n")
 		if len(flines) != m.height {
-			t.Errorf("%d rows filtered: view is %d lines, want %d", n, len(flines), m.height)
+			t.Errorf("%d rows searching: view is %d lines, want %d", n, len(flines), m.height)
 		}
 		if got := stripANSI(flines[len(flines)-2]); !strings.Contains(got, "/") {
-			t.Errorf("%d rows filtered: prompt not directly above the footer: %q", n, got)
+			t.Errorf("%d rows searching: prompt not directly above the footer: %q", n, got)
 		}
 	}
 }
@@ -525,23 +525,33 @@ func TestAuthorColumnDoesNotOverflow(t *testing.T) {
 	}
 }
 
-// Author must be searchable, and a row surviving on an author match must not
-// render with nothing marked.
-func TestFilterMatchesAuthor(t *testing.T) {
-	rows := []board.Row{
-		{PR: github.PR{Number: 1, Title: "fix the thing", Author: "octocat"}},
-		{PR: github.PR{Number: 2, Title: "unrelated work", Author: "someoneelse"}},
+// The author cell is three initials, and those three are exactly what is
+// searchable: a match always highlights characters the user can see. Typing a
+// whole login finds nothing, because the rest of it is not on the row.
+func TestSearchMatchesAuthorInitials(t *testing.T) {
+	m := loaded(t, 120, 24, []github.PR{
+		{Number: 1, Title: "fix the thing", Author: "immanuel", UpdatedAt: time.Unix(900, 0)},
+		{Number: 2, Title: "unrelated work", Author: "someoneelse", UpdatedAt: time.Unix(800, 0)},
+	}, nil)
+	rows := m.board.Sections()[0].Rows
+
+	if !m.rowMatches(rows[0], true, "imm") {
+		txt, _ := m.searchText(rows[0], true)
+		t.Errorf("author initials should match: %q", txt)
 	}
-	got := filterSection(rows, "octocat")
-	if len(got) == 0 || got[0].PR.Number != 1 {
-		t.Fatalf("author query should match #1, got %v", numbersOf(got))
+	if m.rowMatches(rows[1], true, "imm") {
+		t.Error("the other author should not match imm")
 	}
-	// The highlighter maps matches back into title indexes; an author-only hit
-	// must not claim positions inside the title.
-	for i := range matchedTitleIndexes(rows[0], "octocat") {
-		if i >= len([]rune(rows[0].PR.Title)) {
-			t.Errorf("highlight index %d is outside the title", i)
-		}
+	// Characters 4+ of the login are not drawn, so they are not searchable.
+	if m.rowMatches(rows[0], true, "immanuel") {
+		t.Error("a full login matched though only three characters are on screen")
+	}
+
+	// And the hit lands inside the author cell, not the title.
+	_, cells := m.searchText(rows[0], true)
+	hits := cellHits(m.matchSpans(rows[0], true, "imm"), cells.author)
+	if len(hits) != 3 {
+		t.Errorf("want all three initials marked, got %v", hits)
 	}
 }
 
@@ -1548,7 +1558,7 @@ func TestGGGoesToTheTop(t *testing.T) {
 	}
 }
 
-// The help page lists every key the board and the filter actually handle. It
+// The help page lists every key the board and the search actually handle. It
 // drifted once already: the arrows, home/end, o and the two extra quit keys
 // were all live and undocumented.
 func TestHelpListsEveryKeyThatIsHandled(t *testing.T) {
@@ -1559,7 +1569,7 @@ func TestHelpListsEveryKeyThatIsHandled(t *testing.T) {
 	for _, k := range []string{
 		"j / k", "↓ ↑", "l / h", "→ ←", "g / G", "home", "end",
 		"enter", "o ", "d ", "/ ", "r ", "? ", "q ", "esc", "ctrl+c",
-		"ctrl+n/p", "ctrl+j/k", "backspace", "ctrl+u",
+		"ctrl+n/p", "ctrl+j/k", "backspace", "ctrl+u", "n / N",
 	} {
 		if !strings.Contains(out, k) {
 			t.Errorf("help does not mention %q:\n%s", k, out)
@@ -1614,7 +1624,7 @@ func TestHelpFitsEveryPane(t *testing.T) {
 				if strings.Contains(out, fmt.Sprintf("of %d", full)) {
 					t.Errorf("%dx%d: a page that fits still drew a position:\n%s", w, h, out)
 				}
-				for _, want := range []string{"FILTER", "CI", "REVIEW", "BLOCKERS", "ROWS", "config:"} {
+				for _, want := range []string{"SEARCH", "CI", "REVIEW", "BLOCKERS", "ROWS", "config:"} {
 					if !strings.Contains(out, want) {
 						t.Errorf("%dx%d: help lost %s though it fits:\n%s", w, h, want, out)
 					}
@@ -1863,8 +1873,9 @@ func TestYCopiesTheRowUnderTheCursor(t *testing.T) {
 	}
 }
 
-// Nothing selected is a real state -- an empty board, or a filter that matched
-// nothing -- and it must not reach for a PR that is not there.
+// Nothing selected is a real state -- an empty board -- and it must not reach
+// for a PR that is not there. A search cannot produce it: nothing is hidden,
+// so a query matching nothing still leaves a row under the cursor.
 func TestYWithNothingSelectedDoesNotCrash(t *testing.T) {
 	got := withClipboard(t, nil)
 
@@ -1880,27 +1891,30 @@ func TestYWithNothingSelectedDoesNotCrash(t *testing.T) {
 	}
 }
 
-// Filtering to zero matches is the same no-selection state by another route.
-func TestYWithAFilterMatchingNothingDoesNotCrash(t *testing.T) {
+// A query that matches nothing hides nothing, so the cursor is still on a real
+// row and y copies it. The empty-board case above is the only no-selection
+// state left.
+func TestYWithASearchMatchingNothingStillCopies(t *testing.T) {
 	got := withClipboard(t, nil)
 
 	mine, review := samplePRs()
 	mine[0].URL = "https://github.com/o/r/pull/3248"
 	m := typeQuery(loaded(t, 120, 20, mine, review), "zzzznotathing")
-	if n := len(m.visibleRows()); n != 0 {
-		t.Fatalf("expected the query to match nothing, got %d rows", n)
+	if n := len(m.matchIndexes()); n != 0 {
+		t.Fatalf("expected the query to match nothing, got %d", n)
+	}
+	if n := len(m.visibleRows()); n != 3 {
+		t.Fatalf("the board lost rows to a query: %d of 3 left", n)
 	}
 
-	// y is query text while filtering, so the copy is reached the way the user
-	// would: leave the filter first.
+	// y is query text while searching, so the copy is reached the way the user
+	// would: leave the search first.
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
-	m.board.Apply(board.Result{Index: 0, PRs: nil})
-	m.board.Apply(board.Result{Index: 1, PRs: nil})
 	_, cmd := m.handleKey(runeKey('y'))
 	runCmd(t, cmd)
 
-	if *got != "" {
-		t.Errorf("copied %q with nothing selected, want nothing", *got)
+	if *got != mine[0].URL {
+		t.Errorf("copied %q, want the cursor row's url", *got)
 	}
 }
 

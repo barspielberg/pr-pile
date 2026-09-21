@@ -39,10 +39,13 @@ type Model struct {
 	// stays until something else takes the line.
 	clearSeq int
 
-	filtering  bool
-	filter     string
-	showHelp   bool
-	showChecks bool
+	searching bool
+	query     string
+	// searchOrigin is where the cursor was when / was pressed, so esc can put
+	// it back after incsearch has walked it across the board.
+	searchOrigin int
+	showHelp     bool
+	showChecks   bool
 	// helpScroll is the help page's top line. The legend outgrows a short pane
 	// and the reader needs all of it, so that page scrolls rather than clips.
 	helpScroll int
@@ -256,53 +259,134 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(append(m.fetchAll(), spinTick())...)
 }
 
-// In filter mode every printable key belongs to the query, so navigation has to
-// move to chords. ctrl+n/p is what the user asked for; ctrl+j/k and the arrows
-// are the same motions under the other two conventions.
-func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// While searching every printable key belongs to the query, so navigation has
+// to move to chords. ctrl+n/p is what the user asked for; ctrl+j/k and the
+// arrows are the same motions under the other two conventions.
+func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		return m.exitFilter(), nil
+		return m.cancelSearch(), nil
 	case "ctrl+n", "ctrl+j", "down":
-		m.cursor++
+		m.cursor = m.matchAfter(m.cursor)
 		m.clampCursor()
 		return m, nil
 	case "ctrl+p", "ctrl+k", "up":
-		m.cursor--
+		m.cursor = m.matchBefore(m.cursor)
 		m.clampCursor()
 		return m, nil
 	case "enter":
-		cmd := m.openSelected()
-		return m.exitFilter(), cmd
+		return m.acceptSearch(), nil
 	case "ctrl+u":
-		m.filter = ""
+		m.query = ""
 	case "backspace":
-		if r := []rune(m.filter); len(r) > 0 {
-			m.filter = string(r[:len(r)-1])
+		if r := []rune(m.query); len(r) > 0 {
+			m.query = string(r[:len(r)-1])
 		}
 	default:
 		// Space arrives as its own key type with no runes attached, so it has
 		// to be spelled out or multi-word queries would silently drop it.
 		switch {
 		case msg.Type == tea.KeySpace:
-			m.filter += " "
+			m.query += " "
 		case msg.Type == tea.KeyRunes && len(msg.Runes) > 0:
-			m.filter += string(msg.Runes)
+			m.query += string(msg.Runes)
 		default:
 			return m, nil
 		}
 	}
-	// The match set shrinks as the query grows, so the cursor can fall off the
-	// end between keystrokes.
 	m.clampCursor()
+	m.previewMatch()
 	return m, nil
 }
 
-func (m Model) exitFilter() Model {
-	m.filtering = false
-	m.filter = ""
+// previewMatch is incsearch: the cursor walks to the match as the query is
+// typed, so the answer is on screen before the user stops typing.
+//
+// It stays put when the row it is on still matches -- otherwise typing the
+// middle of a word would jitter the cursor off a row it had already found --
+// and when nothing matches at all, since a query on its way to matching should
+// not throw away where the user was.
+func (m *Model) previewMatch() {
+	// An empty query is the state the prompt opened in, so the cursor belongs
+	// where it opened. Deleting back to nothing otherwise stranded it wherever
+	// the last near-miss walked it -- a move the user never asked for, and one
+	// esc would have undone.
+	if m.query == "" {
+		m.cursor = m.searchOrigin
+		return
+	}
+	matches := m.matchIndexes()
+	if len(matches) == 0 {
+		return
+	}
+	for _, idx := range matches {
+		if idx == m.cursor {
+			return
+		}
+	}
+	// From where the search opened rather than from the cursor: backspacing to
+	// a wider query has to be able to walk back up, not only further down.
+	for _, idx := range matches {
+		if idx >= m.searchOrigin {
+			m.cursor = idx
+			return
+		}
+	}
+	m.cursor = matches[0]
+}
+
+// matchAfter is the first match below i, wrapping to the top. With no query,
+// or no match, it is the next row -- so the chords still move on an empty
+// prompt rather than doing nothing.
+func (m Model) matchAfter(i int) int {
+	matches := m.matchIndexes()
+	if len(matches) == 0 {
+		return i + 1
+	}
+	for _, idx := range matches {
+		if idx > i {
+			return idx
+		}
+	}
+	return matches[0]
+}
+
+// matchBefore is the first match above i, wrapping to the bottom.
+func (m Model) matchBefore(i int) int {
+	matches := m.matchIndexes()
+	if len(matches) == 0 {
+		return i - 1
+	}
+	for j := len(matches) - 1; j >= 0; j-- {
+		if matches[j] < i {
+			return matches[j]
+		}
+	}
+	return matches[len(matches)-1]
+}
+
+// cancelSearch is esc in the prompt: the search is abandoned, so the cursor
+// goes back to where / was pressed. incsearch walked it while the query was
+// being typed, and leaving it wherever the last near-miss happened to be would
+// be a move the user never asked for.
+func (m Model) cancelSearch() Model {
+	m.searching = false
+	m.query = ""
+	m.cursor = m.searchOrigin
+	m.clampCursor()
+	return m
+}
+
+// acceptSearch is enter: the prompt closes and everything else stays -- the
+// cursor on its match, the query live, the highlights on the board. That is
+// vim's hlsearch, and it is what gives n and N something to walk.
+//
+// It no longer opens the PR. <CR> accepts a search everywhere else this model
+// comes from, and enter or o is still one keypress away.
+func (m Model) acceptSearch() Model {
+	m.searching = false
 	m.clampCursor()
 	return m
 }
@@ -322,8 +406,8 @@ var copyToClipboard = func(s string) error {
 }
 
 // copySelected yanks the selected PR's URL. With nothing selected -- an empty
-// board, or a filter that matches nothing -- there is no URL to copy and
-// saying so is better than a silent no-op.
+// board -- there is no URL to copy and saying so is better than a silent
+// no-op.
 func (m Model) copySelected() tea.Cmd {
 	pr, ok := m.selected()
 	if !ok {
@@ -374,14 +458,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.handleHelpKey(msg)
 	}
-	if m.filtering {
-		return m.handleFilterKey(msg)
+	if m.searching {
+		return m.handleSearchKey(msg)
 	}
 	switch msg.String() {
-	case "q", "ctrl+c", "esc":
+	case "esc":
+		// The :noh of this board. Strictly vim keeps the pattern for a later
+		// n; here it goes entirely, because a board with no visible highlights
+		// where n still jumps would be a mode with nothing on screen to say so.
+		if m.query != "" {
+			m.query = ""
+			return m, nil
+		}
+		return m, tea.Quit
+	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "/":
-		m.filtering = true
+		m.searching = true
+		m.searchOrigin = m.cursor
 		return m, nil
 	case "?":
 		m.showHelp = true
@@ -406,6 +500,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, tea.Batch(cmd, spinTick())
+	case "n":
+		return m.stepMatch(true)
+	case "N":
+		return m.stepMatch(false)
 	case "j", "down":
 		m.cursor++
 		m.clampCursor()
@@ -444,6 +542,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// stepMatch is n and N: the next or previous match, wrapping like vim's
+// wrapscan. There is no opening direction to be relative to -- ? is the help
+// key, so there is no backwards-open -- which makes n always forward and N
+// always backward, vim's own post-/ rule with the unreachable half removed.
+//
+// The wrap is announced, in less's wording. A silent wrap is indistinguishable
+// from being stuck on the last match.
+func (m Model) stepMatch(forward bool) (tea.Model, tea.Cmd) {
+	matches := m.matchIndexes()
+	if len(matches) == 0 {
+		if strings.TrimSpace(m.query) == "" {
+			return m, nil
+		}
+		return m, func() tea.Msg { return statusMsg("no matches") }
+	}
+
+	var next int
+	var wrapped bool
+	if forward {
+		next = m.matchAfter(m.cursor)
+		wrapped = next <= m.cursor
+	} else {
+		next = m.matchBefore(m.cursor)
+		wrapped = next >= m.cursor
+	}
+	m.cursor = next
+	m.clampCursor()
+	if !wrapped {
+		m.status = ""
+		return m, nil
+	}
+	msg := "search hit BOTTOM, continuing at TOP"
+	if !forward {
+		msg = "search hit TOP, continuing at BOTTOM"
+	}
+	return m, func() tea.Msg { return statusMsg(msg) }
 }
 
 // handleHelpKey scrolls the help page or closes it. The page used to close on
@@ -577,30 +713,31 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	return b.String(), err
 }
 
-// query is the active filter, empty when not filtering. Reading it in one place
-// keeps visibleRows and body from ever disagreeing about what is on screen.
-func (m Model) query() string {
-	if !m.filtering {
-		return ""
-	}
-	return m.filter
+// sections is the board's own sections, unconditionally. A search marks rows
+// where they are rather than collecting them: you usually care about the rows
+// around the one you are looking for, and a board that reshuffles under the
+// query cannot highlight what it hid.
+func (m Model) sections() []board.Section {
+	return m.board.Sections()
 }
 
-// sections applies the filter to the board's own sections. A section whose rows
-// all fail the query is dropped entirely, header included: while filtering the
-// point is to narrow, and an empty header is noise.
-func (m Model) sections() []board.Section {
-	q := m.query()
-	if q == "" {
-		return m.board.Sections()
+// matchIndexes is every matching row's index into the flattened visible rows.
+// It is recomputed rather than cached: the board refreshes under the query and
+// the width changes what is drawn, so a stored match set would go stale
+// silently -- and a stale highlight is the one thing this design cannot show.
+func (m Model) matchIndexes() []int {
+	if strings.TrimSpace(m.query) == "" {
+		return nil
 	}
-	var out []board.Section
-	for _, s := range m.board.Sections() {
-		s.Rows = filterSection(s.Rows, q)
-		if len(s.Rows) == 0 {
-			continue
+	var out []int
+	idx := 0
+	for _, s := range m.sections() {
+		for _, r := range s.Rows {
+			if m.rowMatches(r, s.Rule.Author, m.query) {
+				out = append(out, idx)
+			}
+			idx++
 		}
-		out = append(out, s)
 	}
 	return out
 }
@@ -665,19 +802,27 @@ func (m Model) selected() (github.PR, bool) {
 }
 
 // Sections resolve progressively, so the row under the cursor can disappear
-// between frames.
+// between frames. searchOrigin is clamped alongside it: a refresh can reorder
+// the board while the prompt is open, and esc landing a row or two off is
+// acceptable where an out-of-range index is not.
 func (m *Model) clampCursor() {
 	n := len(m.visibleRows())
 	if n == 0 {
-		m.cursor = 0
+		m.cursor, m.searchOrigin = 0, 0
 		return
 	}
-	if m.cursor >= n {
-		m.cursor = n - 1
+	m.cursor = clampIndex(m.cursor, n)
+	m.searchOrigin = clampIndex(m.searchOrigin, n)
+}
+
+func clampIndex(i, n int) int {
+	if i >= n {
+		return n - 1
 	}
-	if m.cursor < 0 {
-		m.cursor = 0
+	if i < 0 {
+		return 0
 	}
+	return i
 }
 
 // lineMeta says which section a rendered line belongs to and where the line
@@ -699,7 +844,6 @@ type lineMeta struct {
 // index.
 func (m Model) body(spin string) (lines []string, rowStarts []int, meta []lineMeta) {
 	idx := 0
-	filtering := m.query() != ""
 	add := func(line string, mt lineMeta) {
 		lines = append(lines, line)
 		meta = append(meta, mt)
@@ -729,9 +873,8 @@ func (m Model) body(spin string) (lines []string, rowStarts []int, meta []lineMe
 			}
 			// On a cold start there is nothing to keep, so hold a placeholder
 			// block instead: without it each section that lands pushes every
-			// section below it down the screen. While filtering the board is
-			// deliberately narrowing, so reserving space fights the point.
-			if len(s.Rows) == 0 && !filtering {
+			// section below it down the screen.
+			if len(s.Rows) == 0 {
 				note(s, spin)
 				for _, b := range blanks(m.placeholderRows(s.Rule) - 1) {
 					add(b, lineMeta{section: s.Rule.Name, row: -1, rowIndex: -1})
@@ -849,30 +992,49 @@ func window(lines []string, cursorRow, height int, rowStarts []int) ([]string, i
 
 // The footer carries the repo and the spinner, so no global header row is
 // needed: in a 20-row pane every chrome row costs a PR.
-// promptLine is the filter's own row, drawn directly above the footer. The
-// match count sits on the right where the footer already puts its right-hand
+// promptLine is the search's own row, drawn directly above the footer. The
+// position sits on the right where the footer already puts its right-hand
 // field, so the two chrome rows share one alignment.
+//
+// The board cannot change to say a query found nothing, so the query text
+// itself turns red -- vim's own answer, and the only affordance left when
+// nothing on screen is allowed to move. It reverts the moment a match exists,
+// which is what makes backspacing back to a match legible.
 func (m Model) promptLine() string {
-	n := len(m.visibleRows())
-	right := fmt.Sprintf("%d matches", n)
-	if n == 1 {
-		right = "1 match"
+	matches := m.matchIndexes()
+	right := ""
+	queryStyle := fgStyle
+	switch {
+	case strings.TrimSpace(m.query) == "":
+	case len(matches) == 0:
+		right, queryStyle = "no matches", errorStyle
+	default:
+		right = fmt.Sprintf("%d matches", len(matches))
+		if len(matches) == 1 {
+			right = "1 match"
+		}
+		for i, idx := range matches {
+			if idx == m.cursor {
+				right = fmt.Sprintf("%d of %d", i+1, len(matches))
+				break
+			}
+		}
 	}
 
 	const prefix = "  / "
 	// The query keeps the tail rather than the head: while typing, the end of
 	// what you just entered is the part you are looking at.
-	field := m.filter + "▏"
+	field := m.query + "▏"
 	budget := m.width - lipgloss.Width(prefix) - lipgloss.Width(right) - 2
 	if budget < 1 {
-		// No honest room for the count at this width, so drop it.
+		// No honest room for the position at this width, so drop it.
 		return accentStyle.Render(prefix) +
-			fgStyle.Render(clipLeft(field, max(0, m.width-lipgloss.Width(prefix))))
+			queryStyle.Render(clipLeft(field, max(0, m.width-lipgloss.Width(prefix))))
 	}
 	field = clipLeft(field, budget)
 
 	gap := budget - lipgloss.Width(field)
-	return accentStyle.Render(prefix) + fgStyle.Render(field) +
+	return accentStyle.Render(prefix) + queryStyle.Render(field) +
 		strings.Repeat(" ", gap) + mutedStyle.Render(right+"  ")
 }
 
@@ -893,9 +1055,14 @@ func (m Model) cursorSection() (name string, pos, total int) {
 }
 
 func (m Model) footer(spin string) string {
-	left := "  j/k move · l/h section · enter open · d detail · y copy · / filter · ? help · q quit"
-	if m.filtering {
-		left = "  ctrl+n/p move · enter open · esc clear"
+	left := "  j/k move · l/h section · enter open · d detail · y copy · / search · ? help · q quit"
+	switch {
+	case m.searching:
+		left = "  ctrl+n/p next · enter keep · esc cancel"
+	case m.query != "":
+		// The query outlives the prompt, so the legend has to say what the two
+		// keys that only work now actually do.
+		left = "  j/k move · l/h section · enter open · d detail · y copy · n/N next match · esc clear"
 	}
 	if m.status != "" {
 		left = "  " + m.status
@@ -958,7 +1125,7 @@ func (m Model) View() string {
 
 	foot := m.footer(spin)
 	chrome := 1
-	if m.filtering {
+	if m.searching {
 		// The prompt is a second chrome row, so the body has one line less.
 		foot = m.promptLine() + "\n" + foot
 		chrome = 2

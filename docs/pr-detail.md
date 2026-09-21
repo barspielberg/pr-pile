@@ -849,10 +849,11 @@ order from §6.2 removed head branch, age, and size — in that order.
   `checks-page.md` §6 flagged for `contexts(first: 100)`. Max observed is 9
   unresolved (and the connection returns all threads, not just unresolved, so the
   real ceiling is total threads). Not worth paging; worth knowing.
-- **Where the filter interacts.** `DESIGN.md` says author is in the fuzzy
-  haystack regardless of column visibility. If `author.name` is now fetched,
-  should the filter match on it? It is a one-line change and arguably a free win
-  — `Carol` currently does not match `cdiaz88`. Not specified here.
+- **Where the search interacts.** Settled since: search matches only what the
+  row draws, which is the three-character initials cell. `author.name` is
+  deliberately not matched — a hidden term no column shows cannot be
+  highlighted, and an unhighlightable match reads as a bug. `DESIGN.md` records
+  the rule.
 - **Whether `aheadBy` is worth rendering.** The `compare` call returns it for
   free. I left it out: "3 commits ahead" is not a question anyone asks. Available
   if it proves otherwise.

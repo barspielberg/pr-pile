@@ -436,13 +436,17 @@ placeholder-block blanks emitted by `body()` for a pending section render as
 empty lines with no rule, which is already true today and this design does not
 alter it.
 
-### 6.4 Filtering
+### 6.4 Searching
 
-`sections()` drops a section whose rows all fail the query, so a filtered board
-has fewer sections and every visible one still has a genuine first row.
-Window-relative labelling composes with this without a special case: it operates
-on whatever `body()` produced. The footer name follows the cursor, which
-`clampCursor` keeps in range.
+`sections()` returns the board unchanged while searching: `/` marks rows where
+they sit rather than collecting them, so the section set and every section's
+first row are the same as they are at rest. Window-relative labelling composes
+with this without a special case: it operates on whatever `body()` produced.
+The footer name follows the cursor, which `clampCursor` keeps in range.
+
+Superseded: this section previously described `sections()` dropping a section
+whose rows all failed the query. `DESIGN.md` records why filtering became a
+search.
 
 ---
 

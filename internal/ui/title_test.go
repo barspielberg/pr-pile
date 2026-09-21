@@ -125,7 +125,7 @@ func TestTitlesWithoutAPrefixRenderUntouched(t *testing.T) {
 		m.cursor = -1
 		r := board.Row{PR: m.board.Sections()[0].Rows[0].PR}
 
-		got := m.renderTitle(r, fgStyle, func(s lipgloss.Style) lipgloss.Style { return s }, 40)
+		got := m.renderTitle(r, fgStyle, func(s lipgloss.Style) lipgloss.Style { return s }, 40, nil)
 		want := fgStyle.Render(pad(clip(title, 40), 40))
 		if got != want {
 			t.Errorf("%q rendered differently:\n got %q\nwant %q", title, got, want)
@@ -133,10 +133,11 @@ func TestTitlesWithoutAPrefixRenderUntouched(t *testing.T) {
 	}
 }
 
-// Hue and underline are independent channels: a query landing inside a scope
-// or a subject has to keep the part's own colour and gain the underline. If
-// either one wins outright, filtering and reading are fighting over the column.
-func TestFilterUnderlineComposesWithPrefixColour(t *testing.T) {
+// The fill wins over the part hue on the runes it covers, and the hue is
+// untouched everywhere else. Both halves matter: the first is what makes a hit
+// readable inside a faint scope, and the second is what keeps the column
+// readable as a conventional-commit title while a query is live.
+func TestSearchFillWinsOverPrefixColour(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
@@ -144,51 +145,61 @@ func TestFilterUnderlineComposesWithPrefixColour(t *testing.T) {
 	mine := []github.PR{{
 		Number: 3248, Title: title, CIState: "SUCCESS", UpdatedAt: time.Now(),
 	}}
+	fill := hitFill()
 
-	// "ordering" is entirely inside the scope; "wizard" entirely inside the
-	// subject. Both must underline, and the scope must stay faint while it does.
+	// "ordering" is entirely inside the scope, which is the faint part -- the
+	// case an underline used to be missable in.
 	m := typeQuery(loaded(t, 120, 20, mine, nil), "ordering")
 	rows := m.board.Sections()[0].Rows
 	if len(rows) == 0 {
 		t.Fatal("query should have matched the row")
 	}
-	scopeRun := m.renderTitle(rows[0], fgStyle, func(s lipgloss.Style) lipgloss.Style { return s }, 60)
+	scopeRun := renderedTitle(m, rows[0])
 
 	if got := stripANSI(scopeRun); !strings.Contains(got, title) {
 		t.Fatalf("title did not render intact: %q", got)
 	}
-	// Faint is the scope's channel, underline is the filter's, and both SGR
-	// parameters have to land on the same run. lipgloss emits underline one
-	// rune at a time, so the run is asked for by a single matched character.
-	seg := runAt(t, scopeRun, strings.Index(title, "ordering"))
-	if !hasSGRParam(seg, "2") {
-		t.Errorf("scope lost its faint under a filter match: %q", seg)
+	seg := segmentAround(t, scopeRun, "ordering")
+	if !strings.Contains(seg, fill) {
+		t.Errorf("the matched scope is not filled: %q", seg)
 	}
-	if !hasSGRParam(seg, "4") {
-		t.Errorf("matched scope is not underlined: %q", seg)
+	if hasSGRParam(seg, "2") {
+		t.Errorf("the fill kept the scope's faint under it: %q", seg)
 	}
 
-	// The type keeps its own colour when the match is elsewhere, so colouring
-	// did not get switched off by filtering.
+	// The type keeps its own colour when the match is elsewhere, so the hue is
+	// only overridden where the query actually landed.
 	m2 := typeQuery(loaded(t, 120, 20, mine, nil), "wizard")
 	rows2 := m2.board.Sections()[0].Rows
-	subjRun := m2.renderTitle(rows2[0], fgStyle, func(s lipgloss.Style) lipgloss.Style { return s }, 60)
+	subjRun := renderedTitle(m2, rows2[0])
+
 	fixSeg := segmentAround(t, subjRun, "fix")
 	if !strings.Contains(fixSeg, "38;5;173") {
-		t.Errorf("type lost its colour while a filter was active: %q", fixSeg)
+		t.Errorf("type lost its colour while a query was active: %q", fixSeg)
 	}
-	wizSeg := runAt(t, subjRun, strings.Index(title, "wizard"))
-	if !hasSGRParam(wizSeg, "4") {
-		t.Errorf("matched subject is not underlined: %q", wizSeg)
+	if strings.Contains(fixSeg, fill) {
+		t.Errorf("an unmatched part was filled: %q", fixSeg)
 	}
-	if hasSGRParam(wizSeg, "2") {
-		t.Errorf("subject picked up the scope's faint: %q", wizSeg)
+	wizSeg := segmentAround(t, subjRun, "wizard")
+	if !strings.Contains(wizSeg, fill) {
+		t.Errorf("the matched subject is not filled: %q", wizSeg)
 	}
 
-	// Filtering must not change the column's width.
-	if got := lipgloss.Width(stripANSI(scopeRun)); got != 60 {
-		t.Errorf("filtered title is %d cells, want 60", got)
+	// Searching must not change the column's width.
+	if want := m.searchTitleWidth(false); lipgloss.Width(stripANSI(scopeRun)) != want {
+		t.Errorf("searched title is %d cells, want %d",
+			lipgloss.Width(stripANSI(scopeRun)), want)
 	}
+}
+
+// renderedTitle draws the title cell the way renderRow does, at the model's
+// own width and with the row's own hits, so a test never has to keep the two
+// in step by hand.
+func renderedTitle(m Model, r board.Row) string {
+	_, cells := m.searchText(r, false)
+	tw := m.searchTitleWidth(false)
+	return m.renderTitle(r, fgStyle, func(s lipgloss.Style) lipgloss.Style { return s }, tw,
+		cellHits(m.matchSpans(r, false, m.query), cells.title))
 }
 
 // runAt returns the SGR-introduced run covering the rune at index i of the
@@ -255,7 +266,7 @@ func TestPrefixColourLayersOntoTheRowStyle(t *testing.T) {
 	m.cursor = -1
 	r := m.board.Sections()[0].Rows[0]
 
-	out := m.renderTitle(r, mutedStyle, func(s lipgloss.Style) lipgloss.Style { return s }, 60)
+	out := m.renderTitle(r, mutedStyle, func(s lipgloss.Style) lipgloss.Style { return s }, 60, nil)
 	// The subject of a draft carries no colour of its own, so it is the run
 	// that proves the row's own faint survived.
 	if seg := segmentAround(t, out, "add the thing"); !strings.Contains(seg, "2m") {

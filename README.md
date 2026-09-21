@@ -6,7 +6,7 @@ Run it as `prs`. See [docs/DESIGN.md](docs/DESIGN.md) for the design, the decisi
 
 ## Status
 
-Scaffolding. The board fetches, buckets, renders, filters and opens PRs. Not yet: review progress.
+Scaffolding. The board fetches, buckets, renders, searches and opens PRs. Not yet: review progress.
 
 ## Build
 
@@ -149,7 +149,8 @@ authors.
 | `enter` / `o` | open in browser (reuses an existing Arc tab) |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus conflict, unresolved comments, author, reviewer, size and branches |
 | `y` | copy the PR url to the clipboard (`pbcopy`) |
-| `/` | filter |
+| `/` | search |
+| `n` / `N` | next / previous match |
 | `r` | reload |
 | `?` | help and the glyph legend |
 | `q` / `esc` / `ctrl+c` | quit |
@@ -169,22 +170,42 @@ The footer's right field names the section the cursor is in and where it sits
 inside it — `NEEDS MY REVIEW · 3 of 10`. The gutter only has 8 cells, so this is
 the only place the full rule name and the count are legible.
 
-### Filtering
+### Searching
 
-`/` opens a fuzzy filter over the board. The query matches the PR title and the
-PR number together, so `3248` finds `#3248` and `apisvc` finds
-`feat(api-service): …`. Matches are ranked best-first and the matched characters
-are underlined; sections with no matches are hidden entirely.
+`/` searches the board without moving it. Nothing is hidden, nothing is
+reordered, no stack glyph changes — matches are **filled where they sit**,
+the cursor walks to the first one as you type, and `n` / `N` step through the
+rest, wrapping at the ends.
 
-While filtering, every printable key is query text, so navigation moves to chords:
+The query is a plain case-insensitive substring of **what the row draws**: the
+PR number, the title as it appears at this width, and the three author initials.
+Nothing else, on purpose — matching text that is not on screen would mark a row
+with nothing visibly marked on it.
+
+Three things follow from that, and they are the design rather than caveats:
+
+- **Author search is the three characters you can see.** `imm` matches and
+  highlights the initials; `immanuel` matches nothing, because characters four
+  onward are not drawn.
+- **A title match past the clip point does not exist.** Widen the pane and it
+  appears; narrow it and it goes. In a narrow pane the author and age columns
+  are not drawn at all, so they are not searchable either.
+- **The age column is never searchable**, even though it is drawn: it is
+  computed from the clock, so a match on it would expire on its own.
+
+`enter` keeps the query and its highlights and closes the prompt — that is what
+`n` / `N` run on afterwards. `esc` in the prompt cancels and puts the cursor
+back where `/` was pressed; `esc` on the board clears the highlights.
+
+While typing, every printable key is query text, so navigation moves to chords:
 
 | key | action |
 |---|---|
-| `ctrl+n` / `ctrl+p` | move down / up |
+| `ctrl+n` / `ctrl+p` | next / previous match |
 | `ctrl+j` / `ctrl+k` | same, other convention |
 | `↓` / `↑` | same |
-| `enter` | open the selected PR and leave the filter |
+| `enter` | keep the query and the highlights, close the prompt |
 | `backspace` | edit the query |
 | `ctrl+u` | clear the query |
-| `esc` | leave the filter, restoring the full board |
+| `esc` | cancel, restoring the cursor |
 | `ctrl+c` | quit |
