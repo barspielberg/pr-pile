@@ -9,7 +9,7 @@ counts are real measurements from the board this was developed against, taken
 section swallows the one below it. They will drift; treat them as illustrative
 proportions rather than numbers to reproduce.
 
-Copy this into `~/.config/prs-mng/config.yml`, editing `repo`, `repoPath` and
+Copy this into `~/.config/pile/config.yml`, editing `repo`, `repoPath` and
 the logins.
 
 ```yaml

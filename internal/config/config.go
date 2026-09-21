@@ -47,7 +47,7 @@ type Config struct {
 // near the top stalls everything under it. Cheap, high-value rules go first.
 //
 // No repo is set here: it is the one value that cannot be guessed, so it comes
-// from the config file or the PRS_MNG_REPO env var.
+// from the config file or the PILE_REPO env var.
 func Default() Config {
 	return Config{
 		Refresh: 3 * time.Minute,
@@ -63,7 +63,7 @@ func Default() Config {
 // starterConfig is written on first run so there is something to edit rather
 // than a bare error. Rules mirror Default() so the file is the single source of
 // truth from then on.
-const starterConfig = `# prs-mng configuration.
+const starterConfig = `# pile configuration.
 # Rules are an ordered list: a PR is shown under the FIRST rule that matches it,
 # so ordering is the configuration. Queries are GitHub search syntax, scoped to
 # the repo and to open PRs automatically.
@@ -122,7 +122,7 @@ rules:
 // returns ~/Library/Application Support -- not where a terminal tool's config
 // belongs, and not where the rest of this user's tooling lives.
 func Path() string {
-	if p := os.Getenv("PRS_MNG_CONFIG"); p != "" {
+	if p := os.Getenv("PILE_CONFIG"); p != "" {
 		return p
 	}
 	dir := os.Getenv("XDG_CONFIG_HOME")
@@ -133,7 +133,7 @@ func Path() string {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "prs-mng", "config.yml")
+	return filepath.Join(dir, "pile", "config.yml")
 }
 
 // Load reads the config file, writing a starter one if none exists. The repo
@@ -167,7 +167,7 @@ func Load() (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if env := os.Getenv("PRS_MNG_REPO"); env != "" {
+	if env := os.Getenv("PILE_REPO"); env != "" {
 		cfg.Repo = env
 	}
 	return cfg, cfg.Validate()
@@ -187,12 +187,12 @@ func writeStarter(path, repo string) error {
 // detectRepo asks gh for the current directory's repo, so first run in a
 // checkout needs no arguments.
 func detectRepo() (string, error) {
-	if env := os.Getenv("PRS_MNG_REPO"); env != "" {
+	if env := os.Getenv("PILE_REPO"); env != "" {
 		return env, nil
 	}
 	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
 	if err != nil {
-		return "", fmt.Errorf("run prs from a GitHub checkout, or set PRS_MNG_REPO=owner/name")
+		return "", fmt.Errorf("run pile from a GitHub checkout, or set PILE_REPO=owner/name")
 	}
 	repo := strings.TrimSpace(string(out))
 	if repo == "" {

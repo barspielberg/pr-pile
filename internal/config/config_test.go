@@ -9,7 +9,7 @@ import (
 
 func withConfigPath(t *testing.T, path string) {
 	t.Helper()
-	t.Setenv("PRS_MNG_CONFIG", path)
+	t.Setenv("PILE_CONFIG", path)
 }
 
 // No repo is baked into the binary, so a bare Default is not usable on its own.
@@ -54,7 +54,7 @@ func TestFirstRunWritesStarterConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "config.yml")
 	withConfigPath(t, path)
-	t.Setenv("PRS_MNG_REPO", "inferred/repo")
+	t.Setenv("PILE_REPO", "inferred/repo")
 
 	cfg, err := Load()
 	if err != nil {
@@ -81,7 +81,7 @@ func TestRepoEnvOverridesFile(t *testing.T) {
 	path := filepath.Join(dir, "config.yml")
 	os.WriteFile(path, []byte("repo: from/file\nrules:\n  - name: m\n    query: author:@me\n"), 0o644)
 	withConfigPath(t, path)
-	t.Setenv("PRS_MNG_REPO", "from/env")
+	t.Setenv("PILE_REPO", "from/env")
 
 	cfg, err := Load()
 	if err != nil {

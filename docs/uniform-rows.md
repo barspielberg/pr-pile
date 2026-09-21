@@ -1,4 +1,4 @@
-# prs-mng — the uniform-row restructure
+# pile — the uniform-row restructure
 
 Research and implementation record, written in response to:
 

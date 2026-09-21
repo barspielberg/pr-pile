@@ -1,4 +1,4 @@
-module github.com/barspielberg/prs-mng
+module github.com/barspielberg/pr-pile
 
 go 1.24.2
 

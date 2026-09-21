@@ -5,8 +5,8 @@ package board
 import (
 	"sort"
 
-	"github.com/barspielberg/prs-mng/internal/config"
-	"github.com/barspielberg/prs-mng/internal/github"
+	"github.com/barspielberg/pr-pile/internal/config"
+	"github.com/barspielberg/pr-pile/internal/github"
 )
 
 type State int

@@ -1,4 +1,4 @@
-# prs-mng — what belongs on the checks page
+# pile — what belongs on the checks page
 
 Research and implementation record, written in response to:
 

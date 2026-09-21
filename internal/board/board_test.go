@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barspielberg/prs-mng/internal/config"
-	"github.com/barspielberg/prs-mng/internal/github"
+	"github.com/barspielberg/pr-pile/internal/config"
+	"github.com/barspielberg/pr-pile/internal/github"
 )
 
 func cfg(names ...string) config.Config {

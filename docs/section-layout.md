@@ -1,4 +1,4 @@
-# prs-mng — making sections read clearly without spending a line
+# pile — making sections read clearly without spending a line
 
 Design study, written in response to:
 

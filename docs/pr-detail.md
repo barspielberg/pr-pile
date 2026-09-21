@@ -1,4 +1,4 @@
-# prs-mng — what belongs on the PR detail overlay
+# pile — what belongs on the PR detail overlay
 
 Research and specification, written in response to:
 

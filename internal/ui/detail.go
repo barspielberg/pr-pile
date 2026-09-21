@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/barspielberg/prs-mng/internal/github"
+	"github.com/barspielberg/pr-pile/internal/github"
 )
 
 // stateLines is the state block: what is true about the PR rather than about

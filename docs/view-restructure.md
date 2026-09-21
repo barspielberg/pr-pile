@@ -1,4 +1,4 @@
-# prs-mng — should the view be restructured?
+# pile — should the view be restructured?
 
 Research and recommendation, written in response to:
 
@@ -6,7 +6,7 @@ Research and recommendation, written in response to:
 > take the same space and header and errors would be somewhere else"*
 
 Researched: 2026-09-17. Builds on the three rounds of design research and the
-design spec since consolidated into `DESIGN.md`. Claims about `prs-mng`'s own behaviour are from a
+design spec since consolidated into `DESIGN.md`. Claims about `pile`'s own behaviour are from a
 transcription of the shipped `window()` into a simulator and exhaustive search
 over its state space; claims about other tools are cited. Where I could not
 verify something I say so in §6.
@@ -253,7 +253,7 @@ gh-dash ships a preview sidebar, and the numbers are worse than they look:
   (`internal/tui/components/table/table.go:55-61`: `ShowSeparator: true` and
   `Compact: false` by default).
 
-So a default gh-dash at 40 rows shows about 12 PRs. `prs-mng` at 20 rows shows
+So a default gh-dash at 40 rows shows about 12 PRs. `pile` at 20 rows shows
 14. We are already 2x denser than the tool we would be borrowing from, and the
 pane is the main reason.
 
@@ -276,7 +276,7 @@ Worth noting for honesty: I found **no gh-dash issue complaining the preview is
 on by default or wastes space**. The space complaints are aimed at the logo
 (#671). Users ask for *more* preview (#107, #594 want a bottom position for
 narrow terminals). So the pane is not disliked — it is simply expensive, and
-expensive in the dimension `prs-mng` has spent three rounds of research
+expensive in the dimension `pile` has spent three rounds of research
 protecting.
 
 ### 3.2 Option 2 — expand the selected row on demand. **Rejected — this is the trap.**
@@ -430,7 +430,7 @@ gh-dash does exactly this, and I confirmed the mechanics:
 sections are a **carousel** of tabs with exactly one active
 (`internal/tui/components/tabs/tabs.go`; `CurrSectionId()` is literally
 `m.carousel.Cursor()`), switched with `right`/`l` and `left`/`h`
-(`internal/tui/keys/keys.go`) — the same keys `prs-mng` already uses. The tab bar
+(`internal/tui/keys/keys.go`) — the same keys `pile` already uses. The tab bar
 costs **3 lines** (`internal/tui/common/styles.go`: `TabsHeight =
 TabsBorderHeight + TabsContentHeight = 3`).
 
@@ -573,7 +573,7 @@ we have hit precisely the bug class it refuses to support it *because of*.
 
 Three reasons, in order of weight:
 
-1. **We are not using those primitives.** `prs-mng` renders to a `[]string` and
+1. **We are not using those primitives.** `pile` renders to a `[]string` and
    windows it by hand. The frameworks' constraint is an artifact of their
    pagination and hit-testing designs (`PerPage = height/itemHeight`,
    `index /= 2`); our `window()` is a stateless clamp over a line list, which has
@@ -594,7 +594,7 @@ Three reasons, in order of weight:
 ### 6.3 What this changes
 
 It raises §3.3 (fold gate names into the row) from "defensible" to "the right
-second step". If `prs-mng` ever adopts `bubbles/list` or `bubbles/table`, or
+second step". If `pile` ever adopts `bubbles/list` or `bubbles/table`, or
 grows mouse support, uniform rows stop being a preference and become a
 requirement. Doing it now would be reasonable. Doing it *to fix scrolling* would
 still be misattributing the bug.
