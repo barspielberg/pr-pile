@@ -80,25 +80,38 @@ func (m Model) showsAuthor(showAuthor bool) bool {
 // cell's padding so the offsets line up with the screen, which would otherwise
 // make a query of spaces match every row and highlight nothing the user meant.
 func (m Model) rowMatches(r board.Row, showAuthor bool, query string) bool {
+	txt, _ := m.searchText(r, showAuthor)
+	return textMatches(txt, query)
+}
+
+// textMatches is the one matching rule, for any drawn line: a
+// case-insensitive substring of what is on screen.
+func textMatches(text, query string) bool {
 	if strings.TrimSpace(query) == "" {
 		return false
 	}
-	txt, _ := m.searchText(r, showAuthor)
-	return strings.Contains(strings.ToLower(txt), strings.ToLower(query))
+	return strings.Contains(strings.ToLower(text), strings.ToLower(query))
 }
 
 // matchSpans returns every [start,end) rune span of the query within
 // searchText, so each cell can highlight the part of it that is on screen.
+func (m Model) matchSpans(r board.Row, showAuthor bool, query string) [][2]int {
+	txt, _ := m.searchText(r, showAuthor)
+	return textSpans(txt, query)
+}
+
+// textSpans is every [start,end) rune span of the query within one drawn
+// line. The board projects these onto its cells; the help page highlights the
+// line directly.
 //
 // Byte offsets from strings.Index are converted to rune indexes here, at the
-// boundary: every consumer indexes by rune, and the search string carries both
+// boundary: every consumer indexes by rune, and the searched text carries both
 // non-ASCII titles and clip's own multi-byte ellipsis.
-func (m Model) matchSpans(r board.Row, showAuthor bool, query string) [][2]int {
+func textSpans(text, query string) [][2]int {
 	if strings.TrimSpace(query) == "" {
 		return nil
 	}
-	txt, _ := m.searchText(r, showAuthor)
-	hay := strings.ToLower(txt)
+	hay := strings.ToLower(text)
 	needle := strings.ToLower(query)
 
 	var spans [][2]int
