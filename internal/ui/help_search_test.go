@@ -273,6 +273,10 @@ func TestHelpMatchesAreHighlighted(t *testing.T) {
 
 // Highlighting must not move a character: the key column is padded to a fixed
 // width, and a fill that changed the width would shear the descriptions.
+//
+// Trailing spaces are excluded, the way the board's own tests exclude them: the
+// current match is padded to the pane's right edge so its band reads as one
+// row, and blank cells after the text move nothing.
 func TestHelpHighlightKeepsTheLineIntact(t *testing.T) {
 	plain := openHelp(t)
 	searched := typeHelpQuery(t, openHelp(t), "reload")
@@ -281,9 +285,10 @@ func TestHelpHighlightKeepsTheLineIntact(t *testing.T) {
 		t.Fatalf("the query changed the page length: %d -> %d", len(before), len(after))
 	}
 	for i := range before {
-		if stripANSI(before[i]) != stripANSI(after[i]) {
-			t.Errorf("line %d moved under the highlight:\n got %q\nwant %q",
-				i, stripANSI(after[i]), stripANSI(before[i]))
+		b := strings.TrimRight(stripANSI(before[i]), " ")
+		a := strings.TrimRight(stripANSI(after[i]), " ")
+		if b != a {
+			t.Errorf("line %d moved under the highlight:\n got %q\nwant %q", i, a, b)
 		}
 	}
 }
@@ -476,5 +481,141 @@ func TestLegendLayoutIsPinned(t *testing.T) {
 	if len(m.helpMatches()) != 1 {
 		t.Errorf("the indent is not searchable: %q matched %d lines",
 			m.helpQuery, len(m.helpMatches()))
+	}
+}
+
+// bandedLine is the index of the line carrying the selected-row fill, or -1.
+// selBg is ANSI 8, which lipgloss emits as the SGR bright-black background
+// 100 rather than a cube index -- the same marker view_test.go looks for.
+func bandedLine(t *testing.T, m Model) int {
+	t.Helper()
+	at := -1
+	for i, l := range m.helpLines() {
+		if !strings.Contains(l, "100m") {
+			continue
+		}
+		if at >= 0 {
+			t.Fatalf("two lines are banded at once: %d and %d", at, i)
+		}
+		at = i
+	}
+	return at
+}
+
+// The bug this fixes: every match was filled identically, so the page did not
+// change by a single byte between "1 of 4" and "2 of 4" -- the count asserted a
+// position the page then refused to show. Stepping must move something visible.
+func TestHelpBandMovesWithTheMatch(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	m := typeHelpQuery(t, openHelp(t), "next")
+	if len(m.helpMatches()) < 3 {
+		t.Fatalf("want >=3 matches to step through, got %d", len(m.helpMatches()))
+	}
+
+	first := bandedLine(t, m)
+	if first < 0 {
+		t.Fatal("no line carries the band while a search is live")
+	}
+	if first != m.helpMatch {
+		t.Errorf("the band is on line %d but the current match is %d", first, m.helpMatch)
+	}
+
+	m = press(m, keyOf("enter"))
+	next, _ := m.stepHelpMatch(true)
+	m = next.(Model)
+	second := bandedLine(t, m)
+	if second == first {
+		t.Errorf("n did not move the band: still on line %d", first)
+	}
+	if second != m.helpMatch {
+		t.Errorf("the band is on line %d but the current match is %d", second, m.helpMatch)
+	}
+
+	back, _ := m.stepHelpMatch(false)
+	if got := bandedLine(t, back.(Model)); got != first {
+		t.Errorf("N did not return the band to line %d, got %d", first, got)
+	}
+}
+
+// Only the current match is banded. The fill says where the query landed; the
+// band says which one you are on, and they have to stay separate channels.
+func TestHelpBandMarksOnlyTheCurrentMatch(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	m := typeHelpQuery(t, openHelp(t), "next")
+	matches := m.helpMatches()
+	if len(matches) < 2 {
+		t.Fatalf("want >=2 matches, got %d", len(matches))
+	}
+	lines := m.helpLines()
+	for _, i := range matches {
+		if i == m.helpMatch {
+			continue
+		}
+		if strings.Contains(lines[i], "100m") {
+			t.Errorf("a match that is not current is banded, line %d:\n%q", i, lines[i])
+		}
+		// It is still a match, so it keeps the fill.
+		if !strings.Contains(lines[i], hitStyle.Render("next")) {
+			t.Errorf("a non-current match lost its fill, line %d:\n%q", i, lines[i])
+		}
+	}
+}
+
+// The hit must stay readable on the band. render.go measures the reverse fill
+// at 4.62:1 against selBg by having the hit bypass the paint hook entirely --
+// if it ever composed selBg in, the highlight would wash out on exactly the
+// line the reader is on.
+func TestHelpHitDoesNotInheritTheBand(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	m := typeHelpQuery(t, openHelp(t), "next")
+	line := m.helpLines()[m.helpMatch]
+	if !strings.Contains(line, "100m") {
+		t.Fatalf("the current match is not banded:\n%q", line)
+	}
+	if !strings.Contains(line, hitStyle.Render("next")) {
+		t.Errorf("the hit is not rendered with the plain fill on a banded line:\n%q", line)
+	}
+}
+
+// A page nobody has searched has no cursor. helpMatch is an int whose zero
+// value is a valid line index, so an ungated band put a cursor on KEYS.
+func TestHelpHasNoBandWithoutAQuery(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	fresh := New(testCfg(), nil)
+	fresh.width, fresh.height = 100, 14
+	if got := bandedLine(t, fresh); got >= 0 {
+		t.Errorf("an unsearched page bands line %d", got)
+	}
+
+	// And the band goes when the query is cleared rather than lingering.
+	m := typeHelpQuery(t, openHelp(t), "next")
+	m = press(m, keyOf("enter"))
+	m = press(m, keyOf("esc"))
+	if got := bandedLine(t, m); got >= 0 {
+		t.Errorf("the band survived esc on line %d", got)
+	}
+}
+
+// The band is the pane's full width, so it reads as one row rather than
+// stopping at the end of a short legend line.
+func TestHelpBandReachesTheRightEdge(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	m := typeHelpQuery(t, openHelp(t), "reload")
+	line := m.helpLines()[m.helpMatch]
+	if got := lipgloss.Width(line); got != m.width {
+		t.Errorf("the banded line is %d wide, want the full %d", got, m.width)
+	}
+	if stripANSI(line) == strings.TrimRight(stripANSI(line), " ") {
+		t.Error("the banded line was not padded at all")
 	}
 }

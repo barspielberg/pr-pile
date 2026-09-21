@@ -178,8 +178,13 @@ func (m Model) helpPage() []helpLine {
 func (m Model) helpLines() []string {
 	page := m.helpPage()
 	out := make([]string, len(page))
+	// The band belongs to a live search, so it is gated on the query rather
+	// than on helpMatch alone. A zero helpMatch is indistinguishable from
+	// "line 0 is current", and New() leaves it at Go's zero value -- which put
+	// a cursor on KEYS on a page nobody had searched.
+	searching := strings.TrimSpace(m.helpQuery) != ""
 	for i, l := range page {
-		out[i] = l.render(textSpans(l.text, m.helpQuery))
+		out[i] = l.render(textSpans(l.text, m.helpQuery), searching && i == m.helpMatch, m.width)
 	}
 	return out
 }
@@ -187,19 +192,43 @@ func (m Model) helpLines() []string {
 // render draws one line, filling the runes the spans cover. Each segment is
 // given the slice of the spans that falls inside it, so a match spanning the
 // key and its description highlights across both.
-func (l helpLine) render(spans [][2]int) string {
+//
+// The current match takes the board's selected-row fill. Every match is filled
+// the same, so the fill alone cannot say which one `n` is on -- the page did
+// not change by a single byte between "1 of 4" and "2 of 4", which made the
+// count assert a position the page then refused to show. The band is the same
+// answer vim reaches for with hl-CurSearch and fzf with `hl+`: the current
+// match gets a second channel, not a louder version of the first.
+func (l helpLine) render(spans [][2]int, current bool, width int) string {
+	paint := keepStyle
+	if current {
+		paint = func(st lipgloss.Style) lipgloss.Style { return st.Background(selBg) }
+	}
+
 	var b strings.Builder
 	at := 0
 	for _, sg := range l.segs {
 		n := utf8.RuneCountInString(sg.text)
-		b.WriteString(hitRuns(sg.text, cellHits(spans, [2]int{at, at + n}), sg.style, keepStyle))
+		b.WriteString(hitRuns(sg.text, cellHits(spans, [2]int{at, at + n}), sg.style, paint))
 		at += n
 	}
-	return b.String()
+
+	line := b.String()
+	if current {
+		// Fill to the right edge so the band reads as one row, the way the
+		// board's selected row does. A legend line is as long as its text, so
+		// without this the band stops mid-pane and reads as a ragged stub
+		// rather than a cursor.
+		if gap := width - lipgloss.Width(line); gap > 0 {
+			line += paint(fgStyle).Render(strings.Repeat(" ", gap))
+		}
+	}
+	return line
 }
 
-// keepStyle is hitRuns' paint hook where there is no selection to compose: the
-// legend has no cursor row, so a segment keeps the style it was given.
+// keepStyle is hitRuns' paint hook for a line the cursor is not on: the segment
+// keeps the style it was given. The current match composes selBg over it
+// instead, so the legend does have a cursor row now -- it just is not this one.
 func keepStyle(st lipgloss.Style) lipgloss.Style { return st }
 
 // helpMatches is every line the query matches, as indexes into helpPage. Like
