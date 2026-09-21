@@ -3,9 +3,11 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/barspielberg/prs-mng/internal/config"
 	"github.com/barspielberg/prs-mng/internal/github"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -51,7 +53,7 @@ func (m Model) helpBlocks() []helpBlock {
 		// justify -- it is the only section the reader can already see.
 		{"OVERLAYS", [][2]string{
 			{"d page", "any key closes it; j k l h close it and move"},
-			{"? page", "scrolls; see its bottom row"},
+			{"? page", "scrolls and searches; see its bottom row"},
 		}},
 		{"SEARCH", [][2]string{
 			{"/", "search; the board does not move"},
@@ -63,6 +65,7 @@ func (m Model) helpBlocks() []helpBlock {
 			{"ctrl+u", "clear the query"},
 			{"text", "matches what you can see: number, title, author initials"},
 			{"", "the author cell is 3 letters, so type those three"},
+			{"", "this page searches the same way, over its own lines"},
 		}},
 		{"CI", [][2]string{
 			{okStyle.Render("✓"), "passing"},
@@ -87,21 +90,295 @@ func (m Model) helpBlocks() []helpBlock {
 	}
 }
 
-// helpLines is the whole page as one column, top to bottom, with the config
-// path as its last line. It is rendered in full and windowed afterwards, so the
-// scroll position is an index into a list that does not depend on it.
-func (m Model) helpLines() []string {
-	var out []string
+// helpSegment is one styled run of a legend line. A line is a list of them
+// because the glyph keys carry their own colour -- the ✗ in the CI block is
+// the legend for a red ✗ on the board -- while the text around them is muted.
+type helpSegment struct {
+	text  string
+	style lipgloss.Style
+}
+
+// helpLine is one line of the page: its segments in draw order, and the plain
+// text they spell. The two are built together so the search can match what is
+// on screen and the highlight can land on the right runes -- the same contract
+// searchText gives the board.
+type helpLine struct {
+	segs []helpSegment
+	text string
+}
+
+// helpPage is the whole legend, top to bottom, with the config path as its
+// last line.
+func (m Model) helpPage() []helpLine {
+	var out []helpLine
+	line := func(segs ...helpSegment) {
+		var b strings.Builder
+		for _, sg := range segs {
+			b.WriteString(sg.text)
+		}
+		out = append(out, helpLine{segs: segs, text: b.String()})
+	}
 	for i, blk := range m.helpBlocks() {
 		if i > 0 {
-			out = append(out, "")
+			line()
 		}
-		out = append(out, headerStyle.Render("  "+blk.title))
+		line(helpSegment{"  " + blk.title, headerStyle})
 		for _, r := range blk.rows {
-			out = append(out, "  "+mutedStyle.Render(pad(r[0], 10))+mutedStyle.Render(r[1]))
+			// The key is padded on its plain text: the glyph keys arrive
+			// already styled, so padding the styled string would count the
+			// escape sequence as width and shear the description column.
+			// pad, not a width-based repeat, because it is what the rest of
+			// the board pads with -- a key whose rune count and display width
+			// differ must land in the same column here as everywhere else.
+			key := stripSGR(r[0])
+			line(
+				// The indent is its own segment rather than part of the key's:
+				// it is searchable either way, but a glyph key's colour is the
+				// legend for that glyph, and stretching it over two leading
+				// spaces makes it the legend for the margin as well.
+				helpSegment{"  ", mutedStyle},
+				helpSegment{key, keyStyleFor(r[0])},
+				helpSegment{strings.TrimPrefix(pad(key, 10), key), mutedStyle},
+				helpSegment{r[1], mutedStyle},
+			)
 		}
 	}
-	return append(out, "", mutedStyle.Render(fmt.Sprintf("  config: %s", config.Path())))
+	line()
+	line(helpSegment{fmt.Sprintf("  config: %s", config.Path()), mutedStyle})
+	return out
+}
+
+// keyStyleFor recovers the style a glyph key was rendered with, so a legend
+// row keeps the colour it is the legend for. helpBlocks hands these over
+// pre-rendered, and a segment needs the style rather than the escape codes:
+// the highlight has to be able to replace it on the runes the query hit.
+func keyStyleFor(key string) lipgloss.Style {
+	for _, st := range []lipgloss.Style{okStyle, errorStyle, attentionStyle} {
+		if st.Render(stripSGR(key)) == key {
+			return st
+		}
+	}
+	return mutedStyle
+}
+
+// helpLines is the page as drawn: each line's segments rendered, with the runes
+// the query matched filled by the same hitStyle the board uses. It is rendered
+// in full and windowed afterwards, so the scroll position is an index into a
+// list that does not depend on it.
+func (m Model) helpLines() []string {
+	page := m.helpPage()
+	out := make([]string, len(page))
+	for i, l := range page {
+		out[i] = l.render(textSpans(l.text, m.helpQuery))
+	}
+	return out
+}
+
+// render draws one line, filling the runes the spans cover. Each segment is
+// given the slice of the spans that falls inside it, so a match spanning the
+// key and its description highlights across both.
+func (l helpLine) render(spans [][2]int) string {
+	var b strings.Builder
+	at := 0
+	for _, sg := range l.segs {
+		n := utf8.RuneCountInString(sg.text)
+		b.WriteString(hitRuns(sg.text, cellHits(spans, [2]int{at, at + n}), sg.style, keepStyle))
+		at += n
+	}
+	return b.String()
+}
+
+// keepStyle is hitRuns' paint hook where there is no selection to compose: the
+// legend has no cursor row, so a segment keeps the style it was given.
+func keepStyle(st lipgloss.Style) lipgloss.Style { return st }
+
+// helpMatches is every line the query matches, as indexes into helpPage. Like
+// the board's matchIndexes it is recomputed rather than cached: the legend
+// grows with the configured actions and the page is rebuilt every frame, so a
+// stored match set could go stale under a highlight that says otherwise.
+func (m Model) helpMatches() []int {
+	if strings.TrimSpace(m.helpQuery) == "" {
+		return nil
+	}
+	var out []int
+	for i, l := range m.helpPage() {
+		if textMatches(l.text, m.helpQuery) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// helpPreview is the legend's incsearch: the page scrolls to the first match at
+// or below where the search opened, as the query is typed.
+//
+// It stays put when the line it is already on still matches, so typing the
+// middle of a word does not walk the page off a hit it had already found, and
+// it leaves the page alone when nothing matches -- a query on its way to
+// matching should not throw away where the reader was.
+func (m *Model) helpPreview() {
+	if m.helpQuery == "" {
+		m.helpMatch, m.helpScroll = -1, m.helpOrigin
+		return
+	}
+	matches := m.helpMatches()
+	if len(matches) == 0 {
+		m.helpMatch = -1
+		return
+	}
+	for _, i := range matches {
+		if i == m.helpMatch {
+			return
+		}
+	}
+	// From where the search opened rather than from the current match:
+	// backspacing to a wider query has to be able to walk back up the page,
+	// not only further down.
+	m.helpMatch = matches[0]
+	for _, i := range matches {
+		if i >= m.helpOrigin {
+			m.helpMatch = i
+			break
+		}
+	}
+	m.scrollToHelpMatch()
+}
+
+// scrollToHelpMatch brings the current match into the window, and does nothing
+// when it is already there. A match the reader can see should not jump the page
+// under them; one they cannot see is the whole reason they typed.
+func (m *Model) scrollToHelpMatch() {
+	if m.helpMatch < 0 {
+		return
+	}
+	body := m.helpBody(len(m.helpPage()))
+	switch {
+	case m.helpMatch < m.helpScroll:
+		m.helpScroll = m.helpMatch
+	case m.helpMatch >= m.helpScroll+body:
+		m.helpScroll = m.helpMatch - body + 1
+	}
+}
+
+// helpBody is how many legend lines the pane shows: everything but the hint
+// row, and the prompt row too while the search is open.
+//
+// The floor is 0, not 1. A 2-row pane with the prompt open has no room for a
+// legend line at all, and floored at 1 the overlay came out three rows tall in
+// a two-row pane -- which scrolls its own top off, the failure the height
+// arithmetic exists to prevent. At that size the prompt and the hint are the
+// whole page, which is the honest answer: they are what the reader is typing
+// into and how they leave.
+func (m Model) helpBody(total int) int {
+	if m.height <= 1 {
+		return total
+	}
+	body := m.height - 1
+	if m.helpSearching {
+		body--
+	}
+	if body > total {
+		body = total
+	}
+	return max(0, body)
+}
+
+// stepHelpMatch is n and N on the legend: the next or previous match, wrapping
+// like the board's. The wrap is announced in the same words, on the page's own
+// hint row -- a silent wrap is indistinguishable from being stuck.
+func (m Model) stepHelpMatch(forward bool) (tea.Model, tea.Cmd) {
+	matches := m.helpMatches()
+	if len(matches) == 0 {
+		if strings.TrimSpace(m.helpQuery) == "" {
+			return m, nil
+		}
+		m.helpStatus = "no matches"
+		return m, nil
+	}
+
+	next, wrapped := matches[0], true
+	if forward {
+		for _, i := range matches {
+			if i > m.helpMatch {
+				next, wrapped = i, false
+				break
+			}
+		}
+	} else {
+		next, wrapped = matches[len(matches)-1], true
+		for j := len(matches) - 1; j >= 0; j-- {
+			if matches[j] < m.helpMatch {
+				next, wrapped = matches[j], false
+				break
+			}
+		}
+	}
+	m.helpMatch = next
+	m.scrollToHelpMatch()
+	if !wrapped {
+		m.helpStatus = ""
+		return m, nil
+	}
+	m.helpStatus = "search hit BOTTOM, continuing at TOP"
+	if !forward {
+		m.helpStatus = "search hit TOP, continuing at BOTTOM"
+	}
+	return m, nil
+}
+
+// handleHelpSearchKey is the legend's prompt. It is the board's prompt with the
+// cursor swapped for the scroll position: the same keys edit the query, the
+// same chords step matches while typing, enter keeps the query and its
+// highlights, and esc abandons the search and puts the page back.
+func (m Model) handleHelpSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.helpSearching, m.helpQuery, m.helpMatch = false, "", -1
+		m.helpScroll = m.helpOrigin
+		return m, nil
+	// An empty query is not a search, so these scroll the page instead --
+	// which is what j and k do here, so the two motions agree.
+	case "ctrl+n", "ctrl+j", "down":
+		if strings.TrimSpace(m.helpQuery) == "" {
+			m.helpScroll++
+			break
+		}
+		return m.stepHelpMatch(true)
+	case "ctrl+p", "ctrl+k", "up":
+		if strings.TrimSpace(m.helpQuery) == "" {
+			m.helpScroll--
+			break
+		}
+		return m.stepHelpMatch(false)
+	case "enter":
+		m.helpSearching = false
+		return m, nil
+	default:
+		q, ok := editQuery(m.helpQuery, msg)
+		if !ok {
+			return m, nil
+		}
+		m.helpQuery = q
+		m.helpPreview()
+	}
+	m.clampHelpScroll()
+	return m, nil
+}
+
+// helpPrompt is the legend's prompt row, drawn above the hint row. It is the
+// board's prompt, counting lines instead of rows.
+func (m Model) helpPrompt() string {
+	matches := m.helpMatches()
+	at := -1
+	for i, idx := range matches {
+		if idx == m.helpMatch {
+			at = i
+			break
+		}
+	}
+	return m.renderPrompt(m.helpQuery, len(matches), at)
 }
 
 // helpOverlay draws the legend as one scrolling column. It clipped from the top
@@ -120,17 +397,20 @@ func (m Model) helpLines() []string {
 // no-op that still swallowed the key. That is indistinguishable from "scrolling
 // is broken", and it is at the heights a full-screen terminal actually reports.
 // One shape at every height is worth the row.
+// The prompt is a second chrome row while the search is open, so the legend
+// gives up one line for it -- the same trade the board's view makes.
 func (m Model) helpOverlay() string {
 	lines := m.helpLines()
 	if m.height <= 1 {
 		return strings.Join(lines, "\n")
 	}
-	body := m.height - 1
-	if body > len(lines) {
-		body = len(lines)
-	}
+	body := m.helpBody(len(lines))
 	top := m.helpTop(len(lines), body)
-	return strings.Join(append(lines[top:top+body], m.helpHint(top, len(lines), body)), "\n")
+	out := append(lines[top:top+body:top+body], m.helpHint(top, len(lines), body))
+	if m.helpSearching {
+		out = append(out[:body:body], m.helpPrompt(), out[body])
+	}
+	return strings.Join(out, "\n")
 }
 
 // helpTop clamps the stored scroll offset to what the page can actually show.
@@ -147,22 +427,54 @@ func (m Model) helpTop(total, body int) int {
 	return top
 }
 
+// clampHelpScroll pins the stored offset to what the page can actually show.
+// It is clamped on the keypress as well as at render: render-time clamping
+// alone lets the offset drift past the end while j is held, and then the first
+// k only walks that invisible surplus back down -- the page sits still for as
+// many presses as it overshot, which reads as k being broken.
+func (m *Model) clampHelpScroll() {
+	total := len(m.helpPage())
+	m.helpScroll = m.helpTop(total, m.helpBody(total))
+}
+
 // helpHint is the page's bottom row: which keys close it, and where you are.
 // Both halves are load-bearing -- the keys because scrolling took `any key`
 // away, the position because the whole point of this change is that the page no
 // longer pretends it is showing everything.
 func (m Model) helpHint(top, total, body int) string {
-	left := "  esc q ? close · j/k scroll"
+	left := "  esc q ? close · j/k scroll · / search"
 	right := fmt.Sprintf("%d-%d of %d  ", top+1, top+body, total)
 	switch {
 	case body >= total:
 		// The whole legend is on screen, so a range would be noise. The closing
 		// keys still are not: they are why this row exists at every height.
-		left = "  esc q ? close"
+		left = "  esc q ? close · / search"
 		right = fmt.Sprintf("all %d  ", total)
 	case top+body >= total:
 		right = fmt.Sprintf("%d-%d of %d · end  ", top+1, total, total)
 	}
+	// The query outlives the prompt here too, so the row has to say what the
+	// keys that only work now actually do.
+	switch {
+	case m.helpSearching:
+		left = "  ctrl+n/p next · enter keep · esc cancel"
+	case m.helpQuery != "":
+		left = "  j/k scroll · n/N next match · esc clear · q ? close"
+	}
+	// The legend's own message, and only ever its own: the board's status line
+	// is about the board, and routing these through it put every action failure
+	// on this row.
+	//
+	// The message takes the row but the closing keys stay pinned to the front
+	// of it. Substituting the whole row is what broke this before -- a page
+	// whose only stated way out has been replaced by a transient reads as
+	// stuck, which is the failure the comment above this function is about.
+	// Appending instead just pushed the message off the right edge at 100
+	// columns, so the verbose middle of the legend is what yields.
+	if m.helpStatus != "" {
+		left = "  esc q ? close · " + m.helpStatus
+	}
+	left = clip(left, max(0, m.width-lipgloss.Width(right)))
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		return mutedStyle.Render(clip(left, m.width))

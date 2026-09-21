@@ -49,6 +49,24 @@ type Model struct {
 	// helpScroll is the help page's top line. The legend outgrows a short pane
 	// and the reader needs all of it, so that page scrolls rather than clips.
 	helpScroll int
+	// The help page carries its own search rather than sharing the board's:
+	// the two pages are open one at a time, and a query typed at the legend
+	// has nothing to say about the PRs behind it.
+	helpSearching bool
+	helpQuery     string
+	// helpOrigin is the scroll position when / was pressed, so esc can put the
+	// page back after incsearch has walked it.
+	helpOrigin int
+	// helpMatch is the line the page is currently sitting on, in helpLines
+	// space, or -1 when the query matches nothing. It is what n and N walk and
+	// what the prompt counts from.
+	helpMatch int
+	// helpStatus is the legend's own message line -- the wrap announcement and
+	// "no matches". It is separate from status rather than sharing it: status
+	// belongs to the board, and routing the legend's messages through it put
+	// every action failure and copy confirmation on the legend's bottom row,
+	// displacing the closing keys that row exists to carry at every height.
+	helpStatus string
 
 	// detail holds what the on-demand request returned, keyed by PR number.
 	// The key is what makes stale responses harmless: one that lands after the
@@ -297,23 +315,12 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.acceptSearch(), nil
-	case "ctrl+u":
-		m.query = ""
-	case "backspace":
-		if r := []rune(m.query); len(r) > 0 {
-			m.query = string(r[:len(r)-1])
-		}
 	default:
-		// Space arrives as its own key type with no runes attached, so it has
-		// to be spelled out or multi-word queries would silently drop it.
-		switch {
-		case msg.Type == tea.KeySpace:
-			m.query += " "
-		case msg.Type == tea.KeyRunes && len(msg.Runes) > 0:
-			m.query += string(msg.Runes)
-		default:
+		q, ok := editQuery(m.query, msg)
+		if !ok {
 			return m, nil
 		}
+		m.query = q
 	}
 	// No re-seating on every keystroke: a search does not narrow the board, so
 	// the cursor's slot still means what it meant. previewMatch below walks it
@@ -394,6 +401,30 @@ func (m Model) matchBefore(i int) int {
 		}
 	}
 	return matches[len(matches)-1]
+}
+
+// editQuery applies one keystroke to the query, and reports whether the key
+// belonged to it at all. Both search prompts type into it, so the editing
+// rules cannot drift apart between the board and the help page.
+func editQuery(query string, msg tea.KeyMsg) (string, bool) {
+	switch msg.String() {
+	case "ctrl+u":
+		return "", true
+	case "backspace":
+		if r := []rune(query); len(r) > 0 {
+			return string(r[:len(r)-1]), true
+		}
+		return query, true
+	}
+	// Space arrives as its own key type with no runes attached, so it has to be
+	// spelled out or multi-word queries would silently drop it.
+	switch {
+	case msg.Type == tea.KeySpace:
+		return query + " ", true
+	case msg.Type == tea.KeyRunes && len(msg.Runes) > 0:
+		return query + string(msg.Runes), true
+	}
+	return query, false
 }
 
 // cancelSearch is esc in the prompt: the search is abandoned, so the cursor
@@ -512,6 +543,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.showHelp = true
 		m.helpScroll = 0
+		// The page opens clean. A query left over from the last time `?` was
+		// pressed would highlight lines the reader never asked about, and n
+		// would jump a page they have only just opened.
+		m.helpQuery, m.helpMatch, m.helpSearching = "", -1, false
+		m.helpStatus = ""
 		return m, nil
 	case "d":
 		pr, ok := m.selected()
@@ -624,7 +660,15 @@ func (m Model) stepMatch(forward bool) (tea.Model, tea.Cmd) {
 // reader guesses at still leaves the page, which is what keeps this from being
 // somewhere you can get stuck -- and the page says so on its bottom row, since
 // the old contract is no longer true.
+//
+// The search keys are the fourth exception to that rule, after the scroll
+// keys. `/` opens the prompt, `n` and `N` walk the matches, and `esc` clears
+// the highlights before it closes the page -- the board's own bindings, doing
+// the board's own thing, so the legend is searched the way the list is.
 func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.helpSearching {
+		return m.handleHelpSearchKey(msg)
+	}
 	page := max(1, m.height-2)
 	switch msg.String() {
 	case "j", "down":
@@ -639,16 +683,41 @@ func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpScroll = 0
 	case "G", "end":
 		m.helpScroll = len(m.helpLines())
-	default:
-		m.showHelp = false
+	case "/":
+		m.helpSearching, m.helpQuery, m.helpMatch = true, "", -1
+		// The page stays where it is: a search does not reflow the legend, so
+		// there is nothing to jump to yet, and helpOrigin is what esc restores
+		// after incsearch has scrolled it away.
+		m.helpOrigin = m.helpScroll
 		return m, nil
+	case "n":
+		return m.stepHelpMatch(true)
+	case "N":
+		return m.stepHelpMatch(false)
+	case "esc":
+		// The :noh of the legend, same as the board's: a page with no visible
+		// highlights where n still jumps would be a mode with nothing on
+		// screen to say so. With no query there is nothing to clear, so esc
+		// means what it always did and closes the page.
+		if m.helpQuery != "" {
+			m.helpQuery, m.helpMatch, m.helpStatus = "", -1, ""
+			return m, nil
+		}
+		return m.closeHelp(), nil
+	default:
+		return m.closeHelp(), nil
 	}
-	// Clamped here as well as at render. Render-time clamping alone lets the
-	// stored offset drift past the end while j is held, and then the first k
-	// only walks that invisible surplus back down -- the page sits still for as
-	// many presses as it overshot, which reads as k being broken.
-	m.helpScroll = m.helpTop(len(m.helpLines()), max(1, m.height-1))
+	m.clampHelpScroll()
 	return m, nil
+}
+
+// closeHelp leaves the legend and takes its search with it. The wrap
+// announcement in particular is about a page that is no longer on screen, and
+// the board's own footer is where it would otherwise be read.
+func (m Model) closeHelp() Model {
+	m.showHelp, m.helpSearching = false, false
+	m.helpQuery, m.helpMatch, m.helpStatus = "", -1, ""
+	return m
 }
 
 func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
@@ -1194,33 +1263,42 @@ func window(lines []string, cursorRow, height int, rowStarts []int) ([]string, i
 // which is what makes backspacing back to a match legible.
 func (m Model) promptLine() string {
 	matches := m.matchIndexes()
+	// matchIndexes is in row space and the cursor addresses slots, so the
+	// comparison is made in row space: comparing the two directly reports
+	// "3 matches" while the cursor sits on one of them.
+	cur := m.cursorRow()
+	at := -1
+	for i, idx := range matches {
+		if idx == cur {
+			at = i
+			break
+		}
+	}
+	return m.renderPrompt(m.query, len(matches), at)
+}
+
+// renderPrompt draws the prompt row for any searchable page: the query, and
+// where the cursor sits in the match set. at is the cursor's index into the
+// matches, or -1 when it is not on one.
+func (m Model) renderPrompt(query string, total, at int) string {
 	right := ""
 	queryStyle := fgStyle
 	switch {
-	case strings.TrimSpace(m.query) == "":
-	case len(matches) == 0:
+	case strings.TrimSpace(query) == "":
+	case total == 0:
 		right, queryStyle = "no matches", errorStyle
+	case at >= 0:
+		right = fmt.Sprintf("%d of %d", at+1, total)
+	case total == 1:
+		right = "1 match"
 	default:
-		right = fmt.Sprintf("%d matches", len(matches))
-		if len(matches) == 1 {
-			right = "1 match"
-		}
-		// matchIndexes is in row space and the cursor addresses slots, so the
-		// comparison is made in row space: comparing the two directly reports
-		// "3 matches" while the cursor sits on one of them.
-		cur := m.cursorRow()
-		for i, idx := range matches {
-			if idx == cur {
-				right = fmt.Sprintf("%d of %d", i+1, len(matches))
-				break
-			}
-		}
+		right = fmt.Sprintf("%d matches", total)
 	}
 
 	const prefix = "  / "
 	// The query keeps the tail rather than the head: while typing, the end of
 	// what you just entered is the part you are looking at.
-	field := m.query + "▏"
+	field := query + "▏"
 	budget := m.width - lipgloss.Width(prefix) - lipgloss.Width(right) - 2
 	if budget < 1 {
 		// No honest room for the position at this width, so drop it.

@@ -727,11 +727,11 @@ func TestHelpOverlayClosesWithoutQuitting(t *testing.T) {
 	}
 }
 
-// Everything that is not a scroll key closes the page. A reader who guesses
-// wrong still gets out, which is what keeps a scrolling overlay from being
-// somewhere you can be trapped.
+// Everything that is not a scroll or search key closes the page. A reader who
+// guesses wrong still gets out, which is what keeps a scrolling overlay from
+// being somewhere you can be trapped.
 func TestAnyUnknownKeyStillClosesTheHelp(t *testing.T) {
-	for _, key := range []string{"x", "z", "1", "/", "enter", "r", "o"} {
+	for _, key := range []string{"x", "z", "1", "enter", "r", "o"} {
 		m := New(testCfg(), nil)
 		m.width, m.height = 100, 14
 		m.showHelp = true
