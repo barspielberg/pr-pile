@@ -800,19 +800,50 @@ func TestHelpScrolls(t *testing.T) {
 		t.Error("the page scrolled past its own end")
 	}
 
-	// g returns to the top, and ctrl+d/ctrl+u move by a page.
+	// g returns to the top, and ctrl+d/ctrl+u move by half a page.
 	m = press(m, runeKey('g'))
 	if first(m) != top {
 		t.Errorf("g did not return to the top: %q", first(m))
 	}
 	m = press(m, keyOf("ctrl+d"))
-	paged := first(m)
-	if paged == top {
-		t.Error("ctrl+d did not page down")
+	half := m.helpScroll
+	if half != halfPage(m.height) {
+		t.Errorf("ctrl+d moved %d lines, want half a page (%d)", half, halfPage(m.height))
 	}
 	m = press(m, keyOf("ctrl+u"))
 	if first(m) != top {
-		t.Errorf("ctrl+u did not page back: %q", first(m))
+		t.Errorf("ctrl+u did not come back: %q", first(m))
+	}
+
+	// pgdn/pgup are the full page, and are no longer the same key as ctrl+d/u.
+	// The separation is the whole point: half that equalled full would be a
+	// rename, not a feature.
+	m = press(m, keyOf("pgdown"))
+	if m.helpScroll != fullPage(m.height) {
+		t.Errorf("pgdn moved %d lines, want a full page (%d)", m.helpScroll, fullPage(m.height))
+	}
+	if m.helpScroll == half {
+		t.Errorf("pgdn and ctrl+d both moved %d lines; they should differ at h=%d", half, m.height)
+	}
+	m = press(m, keyOf("pgup"))
+	if first(m) != top {
+		t.Errorf("pgup did not come back: %q", first(m))
+	}
+}
+
+// Half a page floors at one line. The arithmetic rounds to zero below four
+// rows, and a key that moves nothing is indistinguishable from a broken one.
+func TestHalfPageNeverRoundsToZero(t *testing.T) {
+	for h := 0; h <= 6; h++ {
+		if got := halfPage(h); got < 1 {
+			t.Errorf("halfPage(%d) = %d, want at least 1", h, got)
+		}
+		if got := fullPage(h); got < 1 {
+			t.Errorf("fullPage(%d) = %d, want at least 1", h, got)
+		}
+	}
+	if got := halfPage(42); got != 20 {
+		t.Errorf("halfPage(42) = %d, want 20", got)
 	}
 }
 
@@ -833,12 +864,75 @@ func TestHelpReopensAtTheTop(t *testing.T) {
 	}
 }
 
+// The board has no viewport to scroll, so a page key moves the cursor -- by
+// half for ctrl+d/u and by a whole one for pgdn/pgup, the same split the help
+// page uses. Both ends stop rather than wrap, like j and k.
+func TestBoardPageScrolling(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 24
+
+	var prs []github.PR
+	for i := 0; i < 60; i++ {
+		prs = append(prs, github.PR{Number: 100 + i, Title: "t", UpdatedAt: time.Unix(int64(9000-i), 0)})
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: prs})
+	m.board.Apply(board.Result{Index: 1, PRs: nil})
+
+	m.cursor = 0
+	m = press(m, keyOf("ctrl+d"))
+	if m.cursor != halfPage(m.height) {
+		t.Errorf("ctrl+d moved to %d, want half a page (%d)", m.cursor, halfPage(m.height))
+	}
+	m = press(m, keyOf("ctrl+u"))
+	if m.cursor != 0 {
+		t.Errorf("ctrl+u moved to %d, want back at the top", m.cursor)
+	}
+
+	m = press(m, keyOf("pgdown"))
+	if m.cursor != fullPage(m.height) {
+		t.Errorf("pgdn moved to %d, want a full page (%d)", m.cursor, fullPage(m.height))
+	}
+	if m.cursor == halfPage(m.height) {
+		t.Error("pgdn and ctrl+d moved the same distance; they should differ")
+	}
+	m = press(m, keyOf("pgup"))
+	if m.cursor != 0 {
+		t.Errorf("pgup moved to %d, want back at the top", m.cursor)
+	}
+
+	// Neither end runs off: holding a page key stops at the last slot and at 0
+	// rather than wrapping or going out of range.
+	for i := 0; i < 20; i++ {
+		m = press(m, keyOf("ctrl+d"))
+	}
+	if want := len(m.slots()) - 1; m.cursor != want {
+		t.Errorf("ctrl+d ran to %d, want it stopped at the last slot %d", m.cursor, want)
+	}
+	for i := 0; i < 20; i++ {
+		m = press(m, keyOf("pgup"))
+	}
+	if m.cursor != 0 {
+		t.Errorf("pgup ran to %d, want it stopped at 0", m.cursor)
+	}
+}
+
+// The chords are spelled as their own key types rather than as runes. A runes
+// message happens to stringify to the same "ctrl+d", so the wrong one passes a
+// test while nothing like it can arrive from a real terminal.
 func keyOf(s string) tea.KeyMsg {
 	switch s {
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case "ctrl+c":
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	case "ctrl+d":
+		return tea.KeyMsg{Type: tea.KeyCtrlD}
+	case "ctrl+u":
+		return tea.KeyMsg{Type: tea.KeyCtrlU}
+	case "pgdown":
+		return tea.KeyMsg{Type: tea.KeyPgDown}
+	case "pgup":
+		return tea.KeyMsg{Type: tea.KeyPgUp}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -1603,11 +1697,19 @@ func TestHelpListsEveryKeyThatIsHandled(t *testing.T) {
 	for _, k := range []string{
 		"j / k", "↓ ↑", "l / h", "→ ←", "g / G", "home", "end",
 		"enter", "o ", "d ", "/ ", "r ", "? ", "q ", "esc", "ctrl+c",
-		"ctrl+n/p", "ctrl+j/k", "backspace", "ctrl+u", "n / N",
+		"ctrl+n/p", "ctrl+j/k", "backspace", "n / N",
+		"ctrl+d/u", "pgdn/pgup",
 	} {
 		if !strings.Contains(out, k) {
 			t.Errorf("help does not mention %q:\n%s", k, out)
 		}
+	}
+
+	// The legend advertised ctrl+u as clearing the query long after the binding
+	// existed to do it. A key that means half a page must not be documented as
+	// meaning something else on the one page that explains the keys.
+	if strings.Contains(out, "clear the query") {
+		t.Errorf("help still advertises a query-clearing key that no longer exists:\n%s", out)
 	}
 
 	// This page's own keys are on its bottom row rather than in the list, so

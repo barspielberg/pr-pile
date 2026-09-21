@@ -108,6 +108,22 @@ func TestHelpEmptyQueryReturnsToOrigin(t *testing.T) {
 	}
 }
 
+// Both prompts type through editQuery, so dropping ctrl+u from it has to leave
+// the legend's search alone as well -- a chord that still cleared here would be
+// the same split, moved one page over.
+func TestCtrlUDoesNotClearTheHelpQuery(t *testing.T) {
+	m := openHelp(t)
+	m = typeHelpQuery(t, m, "merge conflicts")
+	m = press(m, keyOf("ctrl+u"))
+
+	if m.helpQuery != "merge conflicts" {
+		t.Errorf("query is %q, want it untouched at %q", m.helpQuery, "merge conflicts")
+	}
+	if !m.helpSearching {
+		t.Error("ctrl+u closed the legend's prompt")
+	}
+}
+
 // esc in the prompt abandons the search: the query goes, and so does the
 // scrolling incsearch did on the way.
 func TestEscInHelpPromptRestoresThePage(t *testing.T) {
@@ -433,6 +449,8 @@ func TestLegendLayoutIsPinned(t *testing.T) {
 	want := []string{
 		"  KEYS",
 		"  j / k     move ( ↓ ↑ )",
+		"  ctrl+d/u  half a page down / up",
+		"  pgdn/pgup a full page down / up",
 		"  l / h     next / previous section ( → ← )",
 	}
 	got := m.helpLines()

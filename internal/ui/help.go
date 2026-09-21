@@ -54,6 +54,8 @@ func (m Model) helpBlocks() []helpBlock {
 	// "move" answer it worse than one.
 	keys := helpBlock{"KEYS", []helpRow{
 		row("j / k", "move ( ↓ ↑ )"),
+		row("ctrl+d/u", "half a page down / up"),
+		row("pgdn/pgup", "a full page down / up"),
 		row("l / h", "next / previous section ( → ← )"),
 		row("g / G", "top / bottom ( home / end )"),
 		row("enter", "open in browser ( o )"),
@@ -87,7 +89,6 @@ func (m Model) helpBlocks() []helpBlock {
 			row("enter", "keep the query and the highlights"),
 			row("esc", "cancel, or clear the highlights from the board"),
 			row("backspace", "edit the query"),
-			row("ctrl+u", "clear the query"),
 			row("text", "matches what you can see: number, title, author initials"),
 			row("", "the author cell is 3 letters, so type those three"),
 			row("", "this page searches the same way, over its own lines"),
