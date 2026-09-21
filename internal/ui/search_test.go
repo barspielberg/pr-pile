@@ -48,6 +48,17 @@ func onRow(t *testing.T, m Model, n int) Model {
 	return m
 }
 
+// prAt is the PR at a slot index, and whether that slot is a PR row at all.
+// matchIndexes is in slot space, so a match can be a section header, which has
+// no PR of its own.
+func prAt(m Model, slot int) (github.PR, bool) {
+	s, ok := m.slotAt(slot)
+	if !ok || !s.isRow() {
+		return github.PR{}, false
+	}
+	return s.row.PR, true
+}
+
 // onHeader seats the cursor on the nth section's header.
 func onHeader(t *testing.T, m Model, n int) Model {
 	t.Helper()
@@ -160,20 +171,20 @@ func TestCtrlNAndCtrlPMoveWithinMatches(t *testing.T) {
 	down := tea.KeyMsg{Type: tea.KeyCtrlN}
 	up := tea.KeyMsg{Type: tea.KeyCtrlP}
 
-	// matchIndexes is in row space; the cursor addresses slots, which include
-	// section headers and notes. rowSlot is the conversion.
+	// matchIndexes is in slot space, which is the space the cursor addresses,
+	// so a match index is a cursor position already.
 	for i := 1; i < len(matches); i++ {
 		m = press(m, down)
-		if want := m.rowSlot(matches[i]); m.cursor != want {
-			t.Fatalf("ctrl+n: cursor %d, want match %d (row %d) at slot %d",
-				m.cursor, i, matches[i], want)
+		if m.cursor != matches[i] {
+			t.Fatalf("ctrl+n: cursor %d, want match %d at slot %d",
+				m.cursor, i, matches[i])
 		}
 	}
 	for i := len(matches) - 2; i >= 0; i-- {
 		m = press(m, up)
-		if want := m.rowSlot(matches[i]); m.cursor != want {
-			t.Fatalf("ctrl+p: cursor %d, want match %d (row %d) at slot %d",
-				m.cursor, i, matches[i], want)
+		if m.cursor != matches[i] {
+			t.Fatalf("ctrl+p: cursor %d, want match %d at slot %d",
+				m.cursor, i, matches[i])
 		}
 	}
 
@@ -426,7 +437,7 @@ func TestPromptStopsBeingRedWhenAMatchAppears(t *testing.T) {
 }
 
 // The count on the prompt must agree with what n and N will actually visit.
-func TestPromptCountMatchesMatchingRows(t *testing.T) {
+func TestPromptCountMatchesWhatNVisits(t *testing.T) {
 	mine, review := samplePRs()
 	for _, q := range []string{"", "o", "api-serv", "3248", "zzz"} {
 		m := typeQuery(loaded(t, 120, 40, mine, review), q)
@@ -440,7 +451,7 @@ func TestPromptCountMatchesMatchingRows(t *testing.T) {
 			want = "no matches"
 		default:
 			for i, idx := range matches {
-				if idx == m.cursorRow() {
+				if idx == m.cursor {
 					want = fmt.Sprintf("%d of %d", i+1, len(matches))
 				}
 			}
@@ -535,8 +546,8 @@ func TestSpaceIsTypedIntoTheQuery(t *testing.T) {
 		t.Fatalf("query is %q, want %q", m.query, "order plan")
 	}
 	matches := m.matchIndexes()
-	rows := m.visibleRows()
-	if len(matches) != 1 || rows[matches[0]].PR.Number != 3248 {
+	pr, ok := prAt(m, matches[0])
+	if len(matches) != 1 || !ok || pr.Number != 3248 {
 		t.Errorf("query %q should find #3248, got %d matches", m.query, len(matches))
 	}
 }
@@ -860,9 +871,9 @@ func rowFor(t *testing.T, m Model, number string) string {
 	return ""
 }
 
-// Invariant A, as an executable assertion: a row the search accepts always
-// carries a filled run on screen. A matched row with nothing marked on it is
-// the one state this design must never produce.
+// Invariant A, as an executable assertion: anything the search accepts -- a PR
+// row or a section header -- always carries a filled run on screen. A match
+// with nothing marked on it is the one state this design must never produce.
 func TestEveryMatchIsVisiblyHighlighted(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
@@ -892,12 +903,15 @@ func TestEveryMatchIsVisiblyHighlighted(t *testing.T) {
 		"修复", "订单", "🚀", "被拒绝", "计划"} {
 		for _, w := range []int{100, 147, 200} {
 			m := typeQuery(loaded(t, w, 40, mine, review), q)
-			rows := m.visibleRows()
+			// Read the line straight off the slot the match names, rather than
+			// hunting the view for a PR number: a header match has no number to
+			// hunt for, and body() already reports where each slot drew.
+			lines, starts := m.body("")
 			for _, idx := range m.matchIndexes() {
-				line := rowFor(t, m, fmt.Sprintf("#%d", rows[idx].PR.Number))
+				line := lines[starts[idx]]
 				if len(hitRunsOf(line)) == 0 {
-					t.Errorf("w=%d q=%q: #%d matches but draws no highlight:\n%q",
-						w, q, rows[idx].PR.Number, line)
+					t.Errorf("w=%d q=%q: slot %d matches but draws no highlight:\n%q",
+						w, q, idx, line)
 				}
 			}
 		}
@@ -1057,9 +1071,8 @@ func TestTypingWalksTheCursorToTheFirstMatch(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("want 1 match, got %d", len(matches))
 	}
-	if want := m.rowSlot(matches[0]); m.cursor != want {
-		t.Errorf("cursor is %d, want the match (row %d) at slot %d",
-			m.cursor, matches[0], want)
+	if m.cursor != matches[0] {
+		t.Errorf("cursor is %d, want the match at slot %d", m.cursor, matches[0])
 	}
 }
 
@@ -1154,9 +1167,10 @@ func searched(t *testing.T, m Model, q string) Model {
 }
 
 // n walks every match in order and N walks back, both crossing section
-// boundaries. The cursor can stop on a section header when moving with j/k,
-// but n/N move between MATCHES, and a header is never one -- so a boundary is
-// still not a thing these two stop at.
+// boundaries. The query here matches no section name, so the two matches are
+// rows in different sections and nothing sits between them -- the boundary
+// itself is what is being crossed. A header that DOES match is a match like any
+// other; TestNStopsOnAMatchingHeader covers that.
 func TestNCrossesSectionBoundaries(t *testing.T) {
 	mine := []github.PR{
 		{Number: 3248, Title: "feat(ordering): refuse order plan writes",
@@ -1174,19 +1188,18 @@ func TestNCrossesSectionBoundaries(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("want 2 matches in different sections, got %d", len(matches))
 	}
-	if want := m.rowSlot(matches[0]); m.cursor != want {
-		t.Fatalf("the search left the cursor at %d, want row %d at slot %d",
-			m.cursor, matches[0], want)
+	if m.cursor != matches[0] {
+		t.Fatalf("the search left the cursor at %d, want slot %d", m.cursor, matches[0])
 	}
 
 	m = press(m, runeKey('n'))
-	if want := m.rowSlot(matches[1]); m.cursor != want {
-		t.Errorf("n stopped at %d, want the next section's match (row %d) at slot %d",
-			m.cursor, matches[1], want)
+	if m.cursor != matches[1] {
+		t.Errorf("n stopped at %d, want the next section's match at slot %d",
+			m.cursor, matches[1])
 	}
 	m = press(m, runeKey('N'))
-	if want := m.rowSlot(matches[0]); m.cursor != want {
-		t.Errorf("N stopped at %d, want row %d at slot %d", m.cursor, matches[0], want)
+	if m.cursor != matches[0] {
+		t.Errorf("N stopped at %d, want slot %d", m.cursor, matches[0])
 	}
 }
 
@@ -1200,14 +1213,13 @@ func TestNWrapsAtTheEnds(t *testing.T) {
 		t.Fatalf("want several matches, got %d", len(matches))
 	}
 
-	// Walk to the last one, then one more. Matches are row indices; the cursor
-	// addresses slots, so seat it through rowSlot.
-	m.cursor = m.rowSlot(matches[len(matches)-1])
+	// Walk to the last one, then one more.
+	m.cursor = matches[len(matches)-1]
 	next, cmd := m.handleKey(runeKey('n'))
 	m = next.(Model)
-	if want := m.rowSlot(matches[0]); m.cursor != want {
-		t.Errorf("n at the end landed on %d, want the first match (row %d) at slot %d",
-			m.cursor, matches[0], want)
+	if m.cursor != matches[0] {
+		t.Errorf("n at the end landed on %d, want the first match at slot %d",
+			m.cursor, matches[0])
 	}
 	if got := runCmd(t, cmd); got != statusMsg("search hit BOTTOM, continuing at TOP") {
 		t.Errorf("n did not announce the wrap, got %v", got)
@@ -1215,9 +1227,9 @@ func TestNWrapsAtTheEnds(t *testing.T) {
 
 	next, cmd = m.handleKey(runeKey('N'))
 	m = next.(Model)
-	if want := m.rowSlot(matches[len(matches)-1]); m.cursor != want {
-		t.Errorf("N at the top landed on %d, want row %d at slot %d",
-			m.cursor, matches[len(matches)-1], want)
+	if m.cursor != matches[len(matches)-1] {
+		t.Errorf("N at the top landed on %d, want slot %d",
+			m.cursor, matches[len(matches)-1])
 	}
 	if got := runCmd(t, cmd); got != statusMsg("search hit TOP, continuing at BOTTOM") {
 		t.Errorf("N did not announce the wrap, got %v", got)
@@ -1518,5 +1530,337 @@ func TestHitDoesNotInheritWhatItLandsOn(t *testing.T) {
 					want, selected, seg)
 			}
 		}
+	}
+}
+
+// headerLine is the drawn line of the nth section's header, read off the slot
+// rather than hunted for in the view: the name can be clipped, so matching on
+// the name would be the very thing under test.
+func headerLine(t *testing.T, m Model, n int) string {
+	t.Helper()
+	i := m.headerSlot(n)
+	if i < 0 {
+		t.Fatalf("no section header %d on this board", n)
+	}
+	lines, starts := m.body("")
+	return lines[starts[i]]
+}
+
+// A query matches a section by its title, not only the rows under it. The
+// header is furniture the cursor already lands on, so there is nowhere for a
+// match on it to hide.
+func TestSearchMatchesSectionTitles(t *testing.T) {
+	mine, review := samplePRs()
+	m := typeQuery(loaded(t, 147, 40, mine, review), "review")
+
+	matches := m.matchIndexes()
+	if len(matches) != 1 {
+		t.Fatalf("want 1 match on the %q header, got %d", "Review requested", len(matches))
+	}
+	s, ok := m.slotAt(matches[0])
+	if !ok || !s.isHeader() || s.section != "Review requested" {
+		t.Errorf("the match is not the Review requested header: %+v", s)
+	}
+}
+
+// The match rule is the row's rule applied to a header: a case-insensitive
+// substring of what is drawn.
+func TestSectionTitleMatchIsCaseInsensitive(t *testing.T) {
+	mine, review := samplePRs()
+	m := loaded(t, 147, 40, mine, review)
+	for _, q := range []string{"mine", "MINE", "MiNe", "ine"} {
+		if !m.headerMatches("Mine", "2", q) {
+			t.Errorf("%q should match the Mine header", q)
+		}
+	}
+	if m.headerMatches("Mine", "2", "zzz") {
+		t.Error("zzz should not match the Mine header")
+	}
+}
+
+// The count is not searchable, for the reason the age cell is not: it is
+// derived state, so a match on it would appear and expire as the board
+// refreshes without the user typing anything.
+func TestSectionCountIsNotSearchable(t *testing.T) {
+	mine, review := samplePRs()
+	m := loaded(t, 147, 40, mine, review)
+	// "Mine" holds 2 rows, so its header draws a 2 on the right.
+	if !strings.Contains(stripANSI(headerLine(t, m, 0)), "2") {
+		t.Fatal("the Mine header draws no count, so this test proves nothing")
+	}
+	for _, idx := range typeQuery(m, "2").matchIndexes() {
+		if s, _ := m.slotAt(idx); s.isHeader() {
+			t.Errorf("a query of %q matched the %q header on its count", "2", s.section)
+		}
+	}
+}
+
+// A header is assembled from three separately-clipped segments now that the
+// name is drawn through hitRuns, so the width invariant needs asserting
+// directly: the single "indent+name" clip it replaced could not overflow, and
+// segment-wise drawing can. The board refuses to run below minWidth, but a
+// header that draws wider than its pane is wrong at any width.
+func TestSectionHeaderNeverOverflowsItsWidth(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	names := []string{"Mine", "All ordering", "My team needs review",
+		"A section name far too long to fit in any of these panes",
+		"修复订单计划", "🚀 rocket"}
+	for _, q := range []string{"", "a", "Mine", "订单", "🚀"} {
+		for _, count := range []string{"", "2", "19", "100"} {
+			for _, selected := range []bool{false, true} {
+				for w := 0; w <= 60; w++ {
+					m := New(testCfg(), nil)
+					m.width, m.query = w, q
+					for _, name := range names {
+						got := m.sectionHeader(name, count, selected)
+						if lipgloss.Width(got) > w {
+							t.Fatalf("w=%d name=%q count=%q selected=%v q=%q: header is %d wide\n%q",
+								w, name, count, selected, q, lipgloss.Width(got), got)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// Only a header draws a count, so only a header carries one. A row or a note
+// holding one would be dead data that reads as though it meant something.
+func TestOnlyHeaderSlotsCarryACount(t *testing.T) {
+	mine, review := samplePRs()
+	m := loaded(t, 147, 40, mine, review)
+	withCount := 0
+	for i, s := range m.slots() {
+		switch {
+		case s.isHeader() && s.count != "":
+			withCount++
+		case !s.isHeader() && s.count != "":
+			t.Errorf("slot %d is not a header but carries count %q", i, s.count)
+		}
+	}
+	if withCount == 0 {
+		t.Error("no header carried a count, so this test proves nothing")
+	}
+}
+
+// A matched header fills the runes the query hit, exactly as a matched row's
+// number and author cells do. A match with nothing marked on it is the state
+// this design must never produce -- headers included.
+func TestMatchedSectionTitleIsHighlighted(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	mine, review := samplePRs()
+	m := typeQuery(loaded(t, 147, 40, mine, review), "quest")
+
+	got := hitRunsOf(headerLine(t, m, 1))
+	if len(got) != 1 || got[0] != "quest" {
+		t.Errorf("want the header to fill %q, got %v", "quest", got)
+	}
+	// And the section that did not match stays unfilled.
+	if got := hitRunsOf(headerLine(t, m, 0)); len(got) != 0 {
+		t.Errorf("the unmatched header drew a highlight: %v", got)
+	}
+}
+
+// One matching rule, two pages. A section header and a legend line go through
+// the same textMatches, so given the same drawn text and query they must agree
+// -- otherwise "the board and the legend search the same way" is a claim the
+// help page makes on its own legend and the code does not keep.
+func TestHeaderAndSharedMatcherAgree(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width = 200 // wide enough that clipping is not in play
+	texts := []string{"Mine", "All ordering", "Review requested",
+		"  j / k     move ( ↓ ↑ )", "修复订单计划", "🚀 rocket", ""}
+	queries := []string{"", " ", "  ", "mine", "MINE", "ord", "ORD",
+		"订单", "🚀", "j / k", "zzz"}
+	for _, txt := range texts {
+		for _, q := range queries {
+			if got, want := m.headerMatches(txt, "", q), textMatches(txt, q); got != want {
+				t.Errorf("txt=%q q=%q: headerMatches=%v, shared textMatches=%v",
+					txt, q, got, want)
+			}
+		}
+	}
+}
+
+// The hit bypasses hitRuns' paint hook, so a fill never inherits a background
+// -- not the board's selected header, and not the help page's banded current
+// match. Both pages get that from the same hitRuns, and a fill washed out by
+// the very band meant to locate it is the one state neither may produce.
+func TestHitNeverInheritsBackgroundOnEitherPage(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	// A background is not only 48;5;N: lipgloss emits ANSI 0-15 as the short
+	// 40-47/100-107 codes, which is exactly what selBg renders as. Matching
+	// only the extended form makes this test pass while the bug is present --
+	// it did, before this comment existed.
+	hasBackground := func(params string) bool {
+		for _, f := range strings.Split(params, ";") {
+			if n, err := strconv.Atoi(f); err == nil &&
+				((n >= 40 && n <= 47) || (n >= 100 && n <= 107) || n == 49) {
+				return true
+			}
+		}
+		return strings.Contains(params, "48;5;") || strings.Contains(params, "48;2;")
+	}
+
+	filledParams := func(line string) []string {
+		var out []string
+		for _, seg := range strings.Split(line, "\x1b[")[1:] {
+			i := strings.Index(seg, "m")
+			if i < 0 || !strings.Contains(seg[:i], hitFill()) {
+				continue
+			}
+			out = append(out, seg[:i])
+		}
+		return out
+	}
+
+	m := New(testCfg(), nil)
+	m.width, m.query = 120, "Mine"
+	board := filledParams(m.sectionHeader("Mine", "2", true))
+	if len(board) == 0 {
+		t.Fatal("the selected header carries no hit, so this test proves nothing")
+	}
+	for _, p := range board {
+		if hasBackground(p) {
+			t.Errorf("selected header: the hit composed a background: %q", p)
+		}
+	}
+
+	h := New(testCfg(), nil)
+	h.width, h.height = 120, 40
+	h.showHelp, h.helpQuery = true, "search"
+	matches := h.helpMatches()
+	if len(matches) == 0 {
+		t.Fatal("no help matches, so this test proves nothing")
+	}
+	h.helpMatch = matches[0]
+	banded := filledParams(h.helpLines()[h.helpMatch])
+	if len(banded) == 0 {
+		t.Fatal("the banded line carries no hit, so this test proves nothing")
+	}
+	for _, p := range banded {
+		if hasBackground(p) {
+			t.Errorf("help band: the hit composed a background: %q", p)
+		}
+	}
+}
+
+// A matched header counts on the prompt and steps like any other match.
+// Counting it but refusing to step to it would report a match the user cannot
+// reach; stepping to it without counting it would lose the position.
+func TestSectionTitleMatchesAreCounted(t *testing.T) {
+	mine := []github.PR{
+		{Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
+			UpdatedAt: time.Unix(300, 0)},
+	}
+	m := loaded(t, 147, 40, mine, nil)
+	m.cursor = 0
+	m = typeQuery(m, "mine")
+
+	// The header and the row: two matches, and the cursor opens on the first.
+	if got := stripANSI(m.promptLine()); !strings.Contains(got, "1 of 2") {
+		t.Errorf("the prompt does not count the header match: %q", got)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	if got := stripANSI(m.promptLine()); !strings.Contains(got, "2 of 2") {
+		t.Errorf("the position did not advance off the header: %q", got)
+	}
+}
+
+// n and N stop on a matched header. It is addressable but not actionable
+// (docs/uniform-rows.md §4.1), so landing there is a position this layout
+// already supports -- and skipping it would strand a counted match.
+func TestNStopsOnAMatchingHeader(t *testing.T) {
+	mine := []github.PR{
+		{Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
+			UpdatedAt: time.Unix(300, 0)},
+	}
+	m := loaded(t, 147, 40, mine, nil)
+	// Open the search from the top so incsearch's "first match at or after the
+	// origin" rule is not what puts the cursor past the header.
+	m.cursor = 0
+	m = searched(t, m, "mine")
+
+	matches := m.matchIndexes()
+	if len(matches) != 2 {
+		t.Fatalf("want the Mine header and the row, got %d matches", len(matches))
+	}
+	header, ok := m.slotAt(matches[0])
+	if !ok || !header.isHeader() {
+		t.Fatalf("the first match should be the Mine header, got %+v", header)
+	}
+	if m.cursor != matches[0] {
+		t.Errorf("the search did not land on the header at %d, cursor is %d",
+			matches[0], m.cursor)
+	}
+	// And the row is still reachable from there.
+	m = press(m, runeKey('n'))
+	if m.cursor != matches[1] {
+		t.Errorf("n from the header landed on %d, want the row at %d", m.cursor, matches[1])
+	}
+}
+
+// A header carries no PR, so every key that acts on one is a silent no-op
+// there. Landing the search on a header must not change that.
+func TestActionsOnAMatchedHeaderStayNoOps(t *testing.T) {
+	mine := []github.PR{
+		{Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
+			UpdatedAt: time.Unix(300, 0)},
+	}
+	m := loaded(t, 147, 40, mine, nil)
+	m.cursor = 0
+	m = searched(t, m, "mine")
+	if s, _ := m.slotAt(m.cursor); !s.isHeader() {
+		t.Fatalf("the cursor is not on a header, so this test proves nothing: %+v", s)
+	}
+	if _, ok := m.selected(); ok {
+		t.Error("a header reported a selected PR")
+	}
+}
+
+// ctrl+n from the prompt reaches a matched header too: the chords and n/N walk
+// the same match set, and two motion keys disagreeing about it is exactly the
+// kind of thing that gets noticed in use.
+func TestCtrlNStopsOnAMatchingHeader(t *testing.T) {
+	mine := []github.PR{
+		{Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
+			UpdatedAt: time.Unix(300, 0)},
+	}
+	m := typeQuery(loaded(t, 147, 40, mine, nil), "mine")
+	matches := m.matchIndexes()
+
+	m.cursor = matches[len(matches)-1]
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	if m.cursor != matches[0] {
+		t.Errorf("ctrl+n wrapped to %d, want the header at %d", m.cursor, matches[0])
+	}
+}
+
+// A name clipped by the width is clipped for the search too: a match on runes
+// that are not drawn could not be highlighted, which is the one thing this
+// design may not do.
+func TestSectionTitleMatchesOnlyWhatIsDrawn(t *testing.T) {
+	cfg := testCfg()
+	cfg.Rules[0].Name = "Mine and a very long tail that will not fit"
+	m := New(cfg, nil)
+	m.width, m.height = 40, 20
+	m.board.Apply(board.Result{Index: 0, PRs: nil})
+	m.board.Apply(board.Result{Index: 1, PRs: nil})
+
+	drawn := stripANSI(headerLine(t, m, 0))
+	if strings.Contains(drawn, "not fit") {
+		t.Fatalf("the name was not clipped at this width, so this test proves nothing: %q", drawn)
+	}
+	if m.headerMatches(cfg.Rules[0].Name, "0", "not fit") {
+		t.Error("the header matched on runes it does not draw")
+	}
+	if !m.headerMatches(cfg.Rules[0].Name, "0", "Mine") {
+		t.Error("the header stopped matching the part it does draw")
 	}
 }

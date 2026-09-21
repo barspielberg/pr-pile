@@ -138,28 +138,49 @@ var hitStyle = lipgloss.NewStyle().Reverse(true)
 //
 // It is deliberately NOT sticky -- a pinned line was built and reverted
 // (DESIGN.md §3.5.1); scrolling with the content is what avoids that.
+//
+// The name is drawn through hitRuns so a query that matched this section fills
+// the runes it hit, exactly as it does in a row's number and author cells. The
+// indent and the count are outside that call: the hits index the name alone, so
+// the name has to be its own segment for them to land on the right runes.
 func (m Model) sectionHeader(name, count string, selected bool) string {
-	w := max(0, m.width)
-	label := "  " + name
-	right := ""
-	if count != "" {
-		right = count + "  "
+	indent, right, _ := m.headerParts(count)
+	hits := m.headerHits(name, count, m.query)
+	// Through headerText, not a clip of its own: the drawn name has to be the
+	// searched name rune for rune, or a hit index lands on the wrong character.
+	name = m.headerText(name, count)
+	gap := max(0, m.width-lipgloss.Width(indent)-lipgloss.Width(name)-lipgloss.Width(right))
+
+	// No fill when unselected: the label separates the header on its own (see
+	// selBg).
+	st, lead := headerStyle, headerStyle.Render(indent)
+	paint := func(s lipgloss.Style) lipgloss.Style { return s }
+	if selected && indent != "" {
+		// Selected: the mark goes in column 0 where nothing else ever draws, so
+		// a header carries the same cursor affordance a row does. It replaces
+		// the first cell of the indent rather than adding one, or the name
+		// would shift right by a column on the row the cursor is on.
+		st = headerStyle.Background(selBg)
+		paint = func(s lipgloss.Style) lipgloss.Style { return s.Background(selBg) }
+		lead = accentStyle.Background(selBg).Render("▌") +
+			st.Render(indent[1:])
 	}
-	label = clip(label, max(0, w-lipgloss.Width(right)))
-	gap := w - lipgloss.Width(label) - lipgloss.Width(right)
-	if gap < 0 {
-		gap = 0
+	return lead + hitRuns(name, hits, headerStyle, paint) +
+		st.Render(strings.Repeat(" ", gap)+right)
+}
+
+// headerIndent is the header's left margin: the name starts at column 2, PR
+// rows at column 4. It is one of the three channels that separate a header from
+// a row without a fill.
+const headerIndent = "  "
+
+// headerRight is the header's right-hand field, the row count padded off the
+// edge. Empty while the rule is still pending, when there is no count to show.
+func headerRight(count string) string {
+	if count == "" {
+		return ""
 	}
-	body := label + strings.Repeat(" ", gap) + right
-	if !selected {
-		// No fill: the label separates the header on its own (see selBg).
-		return headerStyle.Render(body)
-	}
-	// Selected: the mark goes in column 0 where nothing else ever draws, so a
-	// header carries the same cursor affordance a row does.
-	r := []rune(body)
-	return accentStyle.Background(selBg).Render("▌") +
-		headerStyle.Background(selBg).Render(string(r[1:]))
+	return count + "  "
 }
 
 // Width tiers. Exactly one column flexes (title), so the status cluster stays
