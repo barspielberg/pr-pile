@@ -406,10 +406,13 @@ func (m Model) matchBefore(i int) int {
 // editQuery applies one keystroke to the query, and reports whether the key
 // belonged to it at all. Both search prompts type into it, so the editing
 // rules cannot drift apart between the board and the help page.
+//
+// ctrl+u is not one of them. It means half a page everywhere else, and a chord
+// that clears a query on two prompts and scrolls on two pages is the kind of
+// split the reader has to hold in their head. Backspace already edits and esc
+// already cancels, so the prompt lost nothing by giving it up.
 func editQuery(query string, msg tea.KeyMsg) (string, bool) {
 	switch msg.String() {
-	case "ctrl+u":
-		return "", true
 	case "backspace":
 		if r := []rune(query); len(r) > 0 {
 			return string(r[:len(r)-1]), true
@@ -578,6 +581,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		m.cursor--
 		m.clampCursor()
+	// The board has no viewport of its own -- the cursor walks the slots and
+	// the window follows it -- so a page key is the same move as j, taken a
+	// page at a time.
+	case "ctrl+d":
+		m.cursor += halfPage(m.height)
+		m.clampCursor()
+	case "ctrl+u":
+		m.cursor -= halfPage(m.height)
+		m.clampCursor()
+	case "pgdown":
+		m.cursor += fullPage(m.height)
+		m.clampCursor()
+	case "pgup":
+		m.cursor -= fullPage(m.height)
+		m.clampCursor()
 	case "l", "right":
 		m.cursor = m.nextSection()
 		m.clampCursor()
@@ -669,16 +687,19 @@ func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.helpSearching {
 		return m.handleHelpSearchKey(msg)
 	}
-	page := max(1, m.height-2)
 	switch msg.String() {
 	case "j", "down":
 		m.helpScroll++
 	case "k", "up":
 		m.helpScroll--
-	case "ctrl+d", "pgdown":
-		m.helpScroll += page
-	case "ctrl+u", "pgup":
-		m.helpScroll -= page
+	case "ctrl+d":
+		m.helpScroll += halfPage(m.height)
+	case "ctrl+u":
+		m.helpScroll -= halfPage(m.height)
+	case "pgdown":
+		m.helpScroll += fullPage(m.height)
+	case "pgup":
+		m.helpScroll -= fullPage(m.height)
 	case "g", "home":
 		m.helpScroll = 0
 	case "G", "end":
@@ -719,6 +740,18 @@ func (m Model) closeHelp() Model {
 	m.helpQuery, m.helpMatch, m.helpStatus = "", -1, ""
 	return m
 }
+
+// fullPage and halfPage are what pgdn/pgup and ctrl+d/ctrl+u move by. The board
+// and the help page share them so the two surfaces cannot drift into meaning
+// different things by the same key.
+//
+// Both floor at 1, which is deliberately not helpBody's floor of 0. That one
+// answers how many lines fit, where zero is the honest answer for a pane with
+// no room; these answer how far a keypress moves, where zero is a dead key. A
+// viewport showing nothing is a real state, a motion key moving nothing is not.
+func fullPage(height int) int { return max(1, height-2) }
+
+func halfPage(height int) int { return max(1, (height-2)/2) }
 
 func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 	pr, ok := m.selected()

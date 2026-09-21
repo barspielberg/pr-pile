@@ -334,31 +334,43 @@ func TestBackspaceWidensTheQuery(t *testing.T) {
 func TestEmptyingTheQueryReturnsTheCursor(t *testing.T) {
 	mine, review := samplePRs()
 
-	for _, clear := range []string{"backspace", "ctrl+u"} {
-		m := loaded(t, 120, 40, mine, review)
-		m.cursor = 1
-		m = typeQuery(m, "lipgloss")
-		if m.cursor == 1 {
-			t.Fatalf("%s: incsearch did not move the cursor, so this test proves nothing", clear)
-		}
+	m := loaded(t, 120, 40, mine, review)
+	m.cursor = 1
+	m = typeQuery(m, "lipgloss")
+	if m.cursor == 1 {
+		t.Fatal("incsearch did not move the cursor, so this test proves nothing")
+	}
 
-		if clear == "ctrl+u" {
-			m = press(m, tea.KeyMsg{Type: tea.KeyCtrlU})
-		} else {
-			for range "lipgloss" {
-				m = press(m, tea.KeyMsg{Type: tea.KeyBackspace})
-			}
-		}
+	for range "lipgloss" {
+		m = press(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	}
 
-		if m.query != "" {
-			t.Errorf("%s: query is %q, want it empty", clear, m.query)
-		}
-		if !m.searching {
-			t.Errorf("%s: should not leave the search", clear)
-		}
-		if m.cursor != 1 {
-			t.Errorf("%s: cursor is %d, want it back at 1 where the search opened", clear, m.cursor)
-		}
+	if m.query != "" {
+		t.Errorf("query is %q, want it empty", m.query)
+	}
+	if !m.searching {
+		t.Error("backspace should not leave the search")
+	}
+	if m.cursor != 1 {
+		t.Errorf("cursor is %d, want it back at 1 where the search opened", m.cursor)
+	}
+}
+
+// ctrl+u means half a page everywhere else, so the prompt must not quietly
+// keep its old meaning: it is a plain key now, and lands in the query like any
+// other unbound chord would -- which is to say it does nothing to it.
+func TestCtrlUNoLongerClearsTheQuery(t *testing.T) {
+	mine, review := samplePRs()
+
+	m := loaded(t, 120, 40, mine, review)
+	m = typeQuery(m, "lipgloss")
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlU})
+
+	if m.query != "lipgloss" {
+		t.Errorf("query is %q, want it untouched at %q", m.query, "lipgloss")
+	}
+	if !m.searching {
+		t.Error("ctrl+u should not leave the search")
 	}
 }
 
