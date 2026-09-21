@@ -18,7 +18,32 @@ import (
 // is longer than a short pane and the reader needs all of it, so it scrolls.
 type helpBlock struct {
 	title string
-	rows  [][2]string
+	rows  []helpRow
+}
+
+// helpRow is one legend entry: the key, what it does, and the key's own style
+// where it has one. The glyph rows carry a colour because the colour is what
+// they are the legend for -- the CI block's green check explains a green check
+// on the board.
+//
+// The style travels beside the key rather than baked into it. Rendering it
+// early and recovering it later would mean stripping the escape codes back off
+// to search and highlight the text, and the search has to see plain characters:
+// a query of "x" must not match the `m` in an SGR sequence.
+type helpRow struct {
+	key, desc string
+	style     lipgloss.Style
+}
+
+// row is a legend row in the page's default style, which is most of them.
+func row(key, desc string) helpRow {
+	return helpRow{key: key, desc: desc, style: mutedStyle}
+}
+
+// glyph is a legend row whose key is a board glyph, shown in the colour it
+// carries on the board.
+func glyph(key, desc string, st lipgloss.Style) helpRow {
+	return helpRow{key: key, desc: desc, style: st}
 }
 
 // The glyph key is rendered from the same helpers the rows use, so a legend can
@@ -27,22 +52,22 @@ func (m Model) helpBlocks() []helpBlock {
 	// Aliases are grouped onto the key's own line rather than listed
 	// separately: the reader is asking "how do I move", and four rows saying
 	// "move" answer it worse than one.
-	keys := helpBlock{"KEYS", [][2]string{
-		{"j / k", "move ( ↓ ↑ )"},
-		{"l / h", "next / previous section ( → ← )"},
-		{"g / G", "top / bottom ( home / end )"},
-		{"enter", "open in browser ( o )"},
-		{"d", "detail for this PR"},
-		{"y", "copy the PR url"},
-		{"/", "search"},
-		{"n / N", "next / previous match"},
-		{"r", "reload"},
-		{"?", "help, and close it again"},
-		{"q", "quit ( esc, ctrl+c )"},
+	keys := helpBlock{"KEYS", []helpRow{
+		row("j / k", "move ( ↓ ↑ )"),
+		row("l / h", "next / previous section ( → ← )"),
+		row("g / G", "top / bottom ( home / end )"),
+		row("enter", "open in browser ( o )"),
+		row("d", "detail for this PR"),
+		row("y", "copy the PR url"),
+		row("/", "search"),
+		row("n / N", "next / previous match"),
+		row("r", "reload"),
+		row("?", "help, and close it again"),
+		row("q", "quit ( esc, ctrl+c )"),
 	}}
 	for _, a := range m.cfg.Actions {
 		if a.Run != "" {
-			keys.rows = append(keys.rows, [2]string{a.Key, a.Name})
+			keys.rows = append(keys.rows, row(a.Key, a.Name))
 		}
 	}
 
@@ -51,41 +76,41 @@ func (m Model) helpBlocks() []helpBlock {
 		// This page's own scroll and close keys are on its bottom row, live,
 		// so listing them here too would be the one redundancy a legend cannot
 		// justify -- it is the only section the reader can already see.
-		{"OVERLAYS", [][2]string{
-			{"d page", "any key closes it; j k l h close it and move"},
-			{"? page", "scrolls and searches; see its bottom row"},
+		{"OVERLAYS", []helpRow{
+			row("d page", "any key closes it; j k l h close it and move"),
+			row("? page", "scrolls and searches; see its bottom row"),
 		}},
-		{"SEARCH", [][2]string{
-			{"/", "search; the board does not move"},
-			{"n / N", "next / previous match, wrapping"},
-			{"ctrl+n/p", "next / previous while typing ( ctrl+j/k, ↓ ↑ )"},
-			{"enter", "keep the query and the highlights"},
-			{"esc", "cancel, or clear the highlights from the board"},
-			{"backspace", "edit the query"},
-			{"ctrl+u", "clear the query"},
-			{"text", "matches what you can see: number, title, author initials"},
-			{"", "the author cell is 3 letters, so type those three"},
-			{"", "this page searches the same way, over its own lines"},
+		{"SEARCH", []helpRow{
+			row("/", "search; the board does not move"),
+			row("n / N", "next / previous match, wrapping"),
+			row("ctrl+n/p", "next / previous while typing ( ctrl+j/k, ↓ ↑ )"),
+			row("enter", "keep the query and the highlights"),
+			row("esc", "cancel, or clear the highlights from the board"),
+			row("backspace", "edit the query"),
+			row("ctrl+u", "clear the query"),
+			row("text", "matches what you can see: number, title, author initials"),
+			row("", "the author cell is 3 letters, so type those three"),
+			row("", "this page searches the same way, over its own lines"),
 		}},
-		{"CI", [][2]string{
-			{okStyle.Render("✓"), "passing"},
-			{errorStyle.Render("✗2"), "2 checks failing"},
-			{attentionStyle.Render("◐"), "running"},
-			{mutedStyle.Render("·"), "no checks"},
+		{"CI", []helpRow{
+			glyph("✓", "passing", okStyle),
+			glyph("✗2", "2 checks failing", errorStyle),
+			glyph("◐", "running", attentionStyle),
+			glyph("·", "no checks", mutedStyle),
 		}},
-		{"REVIEW", [][2]string{
-			{okStyle.Render("✓"), "approved"},
-			{errorStyle.Render("✗"), "changes requested"},
-			{attentionStyle.Render("○"), "review required"},
+		{"REVIEW", []helpRow{
+			glyph("✓", "approved", okStyle),
+			glyph("✗", "changes requested", errorStyle),
+			glyph("○", "review required", attentionStyle),
 		}},
-		{"BLOCKERS", [][2]string{
-			{errorStyle.Render("!"), "merge conflicts"},
-			{mutedStyle.Render("~"), "draft"},
+		{"BLOCKERS", []helpRow{
+			glyph("!", "merge conflicts", errorStyle),
+			glyph("~", "draft", mutedStyle),
 		}},
-		{"ROWS", [][2]string{
-			{mutedStyle.Render("╭╴│╰╴"), "a stack: each PR targets the one above"},
-			{"abc", "author initials, on rules with author: true"},
-			{"2h", "last updated"},
+		{"ROWS", []helpRow{
+			glyph("╭╴│╰╴", "a stack: each PR targets the one above", mutedStyle),
+			row("abc", "author initials, on rules with author: true"),
+			row("2h", "last updated"),
 		}},
 	}
 }
@@ -124,41 +149,25 @@ func (m Model) helpPage() []helpLine {
 		}
 		line(helpSegment{"  " + blk.title, headerStyle})
 		for _, r := range blk.rows {
-			// The key is padded on its plain text: the glyph keys arrive
-			// already styled, so padding the styled string would count the
-			// escape sequence as width and shear the description column.
-			// pad, not a width-based repeat, because it is what the rest of
-			// the board pads with -- a key whose rune count and display width
-			// differ must land in the same column here as everywhere else.
-			key := stripSGR(r[0])
 			line(
 				// The indent is its own segment rather than part of the key's:
 				// it is searchable either way, but a glyph key's colour is the
 				// legend for that glyph, and stretching it over two leading
 				// spaces makes it the legend for the margin as well.
 				helpSegment{"  ", mutedStyle},
-				helpSegment{key, keyStyleFor(r[0])},
-				helpSegment{strings.TrimPrefix(pad(key, 10), key), mutedStyle},
-				helpSegment{r[1], mutedStyle},
+				helpSegment{r.key, r.style},
+				// pad, not a width-based repeat, because it is what the rest of
+				// the board pads with -- a key whose rune count and display
+				// width differ must land in the same column here as everywhere
+				// else.
+				helpSegment{strings.TrimPrefix(pad(r.key, 10), r.key), mutedStyle},
+				helpSegment{r.desc, mutedStyle},
 			)
 		}
 	}
 	line()
 	line(helpSegment{fmt.Sprintf("  config: %s", config.Path()), mutedStyle})
 	return out
-}
-
-// keyStyleFor recovers the style a glyph key was rendered with, so a legend
-// row keeps the colour it is the legend for. helpBlocks hands these over
-// pre-rendered, and a segment needs the style rather than the escape codes:
-// the highlight has to be able to replace it on the runes the query hit.
-func keyStyleFor(key string) lipgloss.Style {
-	for _, st := range []lipgloss.Style{okStyle, errorStyle, attentionStyle} {
-		if st.Render(stripSGR(key)) == key {
-			return st
-		}
-	}
-	return mutedStyle
 }
 
 // helpLines is the page as drawn: each line's segments rendered, with the runes
