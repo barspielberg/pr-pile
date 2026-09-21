@@ -12,4 +12,10 @@ check: build test
 run: build
 	./prs
 
-.PHONY: build test check run
+# install is the other end of that: put this checkout on PATH as the real prs.
+# Gated on check, because the binary you type `prs` for should be one that
+# built, passed and vetted.
+install: check
+	go install ./cmd/prs
+
+.PHONY: build test check run install

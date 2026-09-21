@@ -15,6 +15,7 @@ make build     # build ./prs
 make run       # build and run it, without installing over the prs on your PATH
 make test      # go test ./... -short
 make check     # build, test, vet
+make install   # check, then put this checkout on PATH as prs
 ```
 
 Needs `gh` installed and logged in (used only for the token) and a Nerd Font for the glyphs.
