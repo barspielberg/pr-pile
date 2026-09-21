@@ -475,12 +475,12 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	line := b.String()
 	if selected {
 		// Fill to the right edge so the selected row reads as one band.
-		if gap := m.width - lipgloss.Width(stripSGR(line)); gap > 0 {
+		if gap := m.width - lipgloss.Width(line); gap > 0 {
 			line += paint(fgStyle).Render(strings.Repeat(" ", gap))
 		}
 	}
 
-	// Gate names live in the `c` overlay, not here: a row whose height depends
+	// Gate names live in the `d` overlay, not here: a row whose height depends
 	// on its data gives the list an uneven scroll rhythm, which is the bug five
 	// attempts at the viewport math could not fix. See docs/uniform-rows.md.
 	return line
@@ -557,7 +557,6 @@ func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.S
 		return paint(st).Render(text)
 	}
 
-	typeWord := leadingType(text, parts)
 	styleFor := func(p titlePart, hit bool) lipgloss.Style {
 		// A hit takes hitStyle whole: neither the part's hue nor the
 		// selection background composes over it, or the fill would come out a
@@ -565,7 +564,7 @@ func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.S
 		if hit {
 			return hitStyle
 		}
-		return paint(titlePartStyle(st, p, typeWord))
+		return paint(titlePartStyle(st, p))
 	}
 
 	var b strings.Builder
@@ -590,23 +589,6 @@ func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.S
 		run.WriteRune(ch)
 	}
 	flush()
-	return b.String()
-}
-
-// stripSGR measures a styled string's display width by removing SGR sequences.
-func stripSGR(s string) string {
-	var b strings.Builder
-	inEsc := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEsc = true
-		case inEsc && r == 'm':
-			inEsc = false
-		case !inEsc:
-			b.WriteRune(r)
-		}
-	}
 	return b.String()
 }
 

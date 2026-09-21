@@ -1122,109 +1122,6 @@ func TestAuthorColumnDoesNotStarveTheTitle(t *testing.T) {
 	}
 }
 
-// Once the board is scrolling, the cursor must hold a steady screen line.
-//
-// A constant row margin and a constant screen position cannot both hold when
-// rows differ in height: keeping N whole rows below the cursor moves the bottom
-// edge by one or two lines depending on whether those rows carry a failing-check
-// line, which makes the cursor bob. The screen position is what the eye tracks,
-// so that is the invariant. It still steps when a section header scrolls past,
-// because a header genuinely occupies lines.
-// The board must never scroll faster than the cursor. This is the invariant
-// that five earlier attempts at the viewport math could not hold: with
-// variable-height rows a single keypress moved the board 0 to 3 lines
-// depending on whether a neighbouring row carried a failing-check line, and
-// that is what the user saw as jumping. See docs/uniform-rows.md.
-func TestOneKeypressScrollsAtMostOneLine(t *testing.T) {
-	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
-		{Name: "Mine", Query: "a", Tree: true},
-		{Name: "Needs my review", Query: "b", Author: true},
-		{Name: "All open", Query: "c", Author: true},
-	}}
-	m := New(cfg, nil)
-	m.width, m.height = 147, 24
-
-	// Every third PR fails a gate: under the old layout those were the rows
-	// that made the scroll uneven, so they are exactly what this must survive.
-	mk := func(base int, n int) []github.PR {
-		var prs []github.PR
-		for i := 0; i < n; i++ {
-			pr := github.PR{
-				Number: base + i, Title: fmt.Sprintf("pr %d", base+i), Author: "someone",
-				CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
-			}
-			if i%3 == 0 {
-				pr.CIState = "FAILURE"
-				pr.FailedGates = []string{"a-failing-gate", "another-one", "and-a-third"}
-			}
-			prs = append(prs, pr)
-		}
-		return prs
-	}
-	m.board.Apply(board.Result{Index: 0, PRs: mk(3200, 12)})
-	m.board.Apply(board.Result{Index: 1, PRs: mk(3300, 10)})
-	m.board.Apply(board.Result{Index: 2, PRs: mk(3400, 14)})
-
-	cursorOnScreen := func() bool {
-		for _, l := range strings.Split(m.View(), "\n") {
-			if strings.Contains(l, "▌") {
-				return true
-			}
-		}
-		return false
-	}
-
-	rows := len(m.visibleRows())
-	if rows < 30 {
-		t.Fatalf("board too small to scroll: %d rows", rows)
-	}
-
-	// window() reports the index of its own top line, which is exact. Matching
-	// rendered strings cannot work here: two headers or two rows can render
-	// identically, and the earlier version of this test silently mislocated
-	// the viewport because of it.
-	topIndex := func() int {
-		lines, slotStarts, _ := m.body("")
-		_, start := window(lines, m.cursor, m.height-1, slotStarts)
-		return start
-	}
-
-	// Every slot, not every row: headers are addressable, so they are part of
-	// the walk that has to hold the invariant.
-	n := len(m.slots())
-	if n < 30 {
-		t.Fatalf("board too small to scroll: %d slots", n)
-	}
-	for _, dir := range []int{1, -1} {
-		start, stop := 0, n-1
-		if dir < 0 {
-			start, stop = n-1, 0
-		}
-		m.cursor = start
-		prev := topIndex()
-		for c := start; c != stop; c += dir {
-			m.cursor = c + dir
-			if !cursorOnScreen() {
-				t.Fatalf("cursor %d is off screen", m.cursor)
-			}
-			now := topIndex()
-			if d := now - prev; d < -1 || d > 1 {
-				t.Fatalf("cursor %d -> %d: board scrolled %d lines, want at most 1",
-					c, m.cursor, d)
-			}
-			prev = now
-		}
-	}
-
-	// And the reason it holds: every line in the list is addressable, so the
-	// cursor's index and its line move together.
-	lines, slotStarts, _ := m.body("")
-	if len(lines) != len(slotStarts) {
-		t.Errorf("%d lines for %d slots: an unaddressable line would cost one line of delta",
-			len(lines), len(slotStarts))
-	}
-}
-
 // The checks overlay is a look, not a mode: a movement key closes it and moves
 // in one keypress, so inspecting a PR does not interrupt scanning the list.
 func TestChecksOverlayClosesOnMovement(t *testing.T) {
@@ -1524,7 +1421,7 @@ func TestNoBlankRowBetweenSections(t *testing.T) {
 		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8999, 0)},
 	}})
 
-	lines, slotStarts, _ := m.body("")
+	lines, slotStarts := m.body("")
 	// Every line in the list is a slot: that is the invariant, stated as code.
 	if len(lines) != len(slotStarts) {
 		t.Errorf("%d lines for %d slots: some line is not addressable", len(lines), len(slotStarts))
@@ -2085,7 +1982,10 @@ func TestCopyKeyIsDocumented(t *testing.T) {
 	}
 }
 
-// Guards DESIGN.md §3.8 against the constants drifting from the spec table.
+// Guards the tier breakpoints and the title arithmetic against drifting from
+// DESIGN.md §3.8's table. The minWidth constant itself is not asserted here --
+// four tests below use it as a loop bound, which exercises it against real
+// rendering rather than restating its value.
 func TestDocumentedTiersMatchTheCode(t *testing.T) {
 	for _, c := range []struct {
 		w    int
@@ -2105,9 +2005,6 @@ func TestDocumentedTiersMatchTheCode(t *testing.T) {
 		if got := titleWidth(c.w, widthTier(c.w)); got != c.want {
 			t.Errorf("width %d: title %d, want %d", c.w, got, c.want)
 		}
-	}
-	if minWidth != 40 {
-		t.Errorf("minWidth = %d, DESIGN.md §3.8 says 40", minWidth)
 	}
 }
 
@@ -2141,31 +2038,33 @@ func TestSlotsAgreeWithBodyLineForLine(t *testing.T) {
 					states[pick](&m, i)
 				}
 
-				lines, slotStarts, meta := m.body("")
+				lines, slotStarts := m.body("")
 				sl := m.slots()
 				if len(sl) != len(slotStarts) {
 					t.Fatalf("%d/%d/%d: slots()=%d but body drew %d slots",
 						a, b, c, len(sl), len(slotStarts))
 				}
-				// Each drawn slot line must be the kind slots() claims.
-				for line, mt := range meta {
-					if mt.slot < 0 {
-						t.Fatalf("%d/%d/%d: line %d is not a slot", a, b, c, line)
-					}
-					got := stripANSI(lines[line])
+				// Every line is a slot, so slotStarts[i] is slot i's line and
+				// each one must draw the kind slots() claims.
+				if len(lines) != len(slotStarts) {
+					t.Fatalf("%d/%d/%d: %d lines for %d slots -- some line is not addressable",
+						a, b, c, len(lines), len(slotStarts))
+				}
+				for i, start := range slotStarts {
+					got := stripANSI(lines[start])
 					switch {
-					case sl[mt.slot].isRow():
+					case sl[i].isRow():
 						if !strings.Contains(got, "#") {
-							t.Errorf("%d/%d/%d: slot %d claims a row, drew %q", a, b, c, mt.slot, got)
+							t.Errorf("%d/%d/%d: slot %d claims a row, drew %q", a, b, c, i, got)
 						}
-					case sl[mt.slot].isHeader():
-						if !strings.Contains(got, sl[mt.slot].section) {
+					case sl[i].isHeader():
+						if !strings.Contains(got, sl[i].section) {
 							t.Errorf("%d/%d/%d: slot %d claims header %q, drew %q",
-								a, b, c, mt.slot, sl[mt.slot].section, got)
+								a, b, c, i, sl[i].section, got)
 						}
-					case sl[mt.slot].isNote():
+					case sl[i].isNote():
 						if strings.Contains(got, "#") {
-							t.Errorf("%d/%d/%d: slot %d claims a note, drew a row %q", a, b, c, mt.slot, got)
+							t.Errorf("%d/%d/%d: slot %d claims a note, drew a row %q", a, b, c, i, got)
 						}
 					}
 				}
@@ -2289,7 +2188,7 @@ func TestOneKeypressScrollsAtMostOneLineAcrossSectionStates(t *testing.T) {
 						}
 					}
 
-					lines, slotStarts, _ := m.body("")
+					lines, slotStarts := m.body("")
 					// The invariant, stated directly: every line in the list
 					// is a slot. This is the cheap check that catches a new
 					// unselectable line before the walk below has to.

@@ -115,37 +115,6 @@ func TestActionReportsRunningThenSuccess(t *testing.T) {
 	}
 }
 
-// A failure must say what failed, not just that something did. The script's
-// own stderr is better than "exit status 1".
-func TestActionFailureShowsStderr(t *testing.T) {
-	m := actionBoard(t, "echo 'herdr not running' >&2; exit 1")
-	m = pressAction(t, m, "w")
-
-	if m.running != "" {
-		t.Errorf("a finished action left a running state: %q", m.running)
-	}
-	if !strings.Contains(m.status, "herdr not running") {
-		t.Errorf("status = %q, want the command's stderr", m.status)
-	}
-	if !strings.Contains(m.status, "failed") {
-		t.Errorf("status = %q, want it to say the action failed", m.status)
-	}
-}
-
-// A command that does not exist is the other failure shape: sh writes its own
-// diagnostic, and that is more useful than the exit status.
-func TestActionMissingCommandReportsFailure(t *testing.T) {
-	m := actionBoard(t, "definitely-not-a-real-command-xyz")
-	m = pressAction(t, m, "w")
-
-	if !strings.Contains(m.status, "failed") {
-		t.Errorf("status = %q, want a failure", m.status)
-	}
-	if !strings.Contains(m.status, "not found") {
-		t.Errorf("status = %q, want sh's own diagnostic", m.status)
-	}
-}
-
 // Failure persists; success clears itself so the footer stops claiming an
 // action is current.
 func TestSucceededActionClearsAndFailedActionPersists(t *testing.T) {
@@ -305,6 +274,20 @@ func TestStderrLastLineReachesTheFooter(t *testing.T) {
 	}
 }
 
+// The inverse of the case above, and the other half of why `detail` is a
+// separate field: with nothing on stderr there is no diagnostic to prefer, so
+// the footer has to fall back to the exit status rather than say only "failed".
+func TestSilentFailureFallsBackToTheExitStatus(t *testing.T) {
+	done := runActionMsg(t, "exit 7")
+	if done.detail != "" {
+		t.Errorf("detail = %q, want empty for a command that wrote no stderr", done.detail)
+	}
+	got := actionResult(done)
+	if !strings.Contains(got, "failed") || !strings.Contains(got, "exit status 7") {
+		t.Errorf("footer = %q, want the exit status as the fallback", got)
+	}
+}
+
 // A command that does not exist is distinct from one that exits non-zero: `sh`
 // starts fine and writes its own diagnostic, so the exec itself never fails.
 func TestMissingCommandIsADistinctFailure(t *testing.T) {
@@ -318,19 +301,6 @@ func TestMissingCommandIsADistinctFailure(t *testing.T) {
 	}
 	if strings.Contains(got, "✓") {
 		t.Errorf("footer = %q, a missing command must not show a tick", got)
-	}
-}
-
-// A command with nothing on stderr still has to report the failure, falling
-// back to the exit status because there is nothing better to say.
-func TestSilentFailureStillReportsFailure(t *testing.T) {
-	done := runActionMsg(t, "exit 7")
-	if done.detail != "" {
-		t.Errorf("detail = %q, want empty for a silent command", done.detail)
-	}
-	got := actionResult(done)
-	if !strings.Contains(got, "failed") || !strings.Contains(got, "exit status 7") {
-		t.Errorf("footer = %q, want the exit status as the fallback", got)
 	}
 }
 

@@ -367,7 +367,7 @@ func gateName(raw string) string {
 	return leaf
 }
 
-// Detail is the second request, made once per `c` press for one PR. Everything
+// Detail is the second request, made once per `d` press for one PR. Everything
 // here is either per-PR literal (compare needs the head ref, so it cannot be
 // batched across a search) or too expensive on a 50-PR query: reviewer names
 // cost +6,565 bytes and a rate-limit point on the board, and nothing here.

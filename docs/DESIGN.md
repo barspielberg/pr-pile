@@ -1030,7 +1030,22 @@ is proportional.
 
 ## 7. Known problems and open questions
 
-**Scroll behaviour — solved, and worth not re-litigating.** A constant row gap
+**Scroll behaviour — solved, and worth not re-litigating.**
+
+> **Superseded by uniform rows.** Everything from here to the end of this
+> passage reasons about **variable-height rows** — a leftover fraction of a row
+> that has to be absorbed, a clipped top line, a blank section separator the
+> cursor skips. None of that describes the board now: every row is exactly one
+> line, there are no blank separators, and `window()` slices whole lines,
+> clipping nothing and absorbing no remainder. §3 and `uniform-rows.md` §4.1
+> carry the shipping behaviour and the invariant that replaced this
+> (one keypress scrolls at most one line, unconditionally).
+>
+> It is kept because it is the record of *why bottom-anchoring was tried*, and
+> the measurements below are what closed that line of attack. Read it as
+> history, not as a description of the code.
+
+A constant row gap
 under the cursor is a constraint on the **bottom** edge of the viewport: `end`
 is fixed by the rows that must follow the cursor, and a fixed height then
 determines the top as `start = end - height`. That value generally does not land
@@ -1057,10 +1072,22 @@ own row needs an explicit guard against being clipped off the bottom.
 Note the metric: the cursor's **screen line** still varies, because rows above
 it differ in height. What is constant is the number of whole PR rows below it.
 
-Evidence: `docs/scroll-feasibility.md` (a 5000-board fuzz put clipped-top at
-1370/1370 exact against 6/1370 for the anchored version) and
-`docs/view-restructure.md` (the drift tracks anchor spacing, not row heights —
-so restructuring the layout would not have fixed it). `bubbles/list` cannot help
+Evidence, measured against the variable-height board of the time: a 5000-board
+fuzz over random section counts, row counts, failing-CI distributions and
+viewport heights 16–29 compared three algorithms against the constant-margin
+goal, counting boards that failed to hold it:
+
+| algorithm | boards not constant | cursor clipped |
+|---|---|---|
+| line margin + anchor snap (what shipped) | 1364 / 1370 | 0 |
+| bottom-anchored, whole rows only | 1285 / 1370 | 433 |
+| bottom-anchored, clipped top allowed | **0 / 1370** | 0 |
+
+Allowing a clipped top row is exact on every board; forcing whole-row tops hard
+enough instead clips the cursor's own row in 433 frames. All three are monotone,
+so clipping costs nothing there. Also `docs/view-restructure.md` (the drift
+tracks anchor spacing, not row heights — so restructuring the layout would not
+have fixed it). `bubbles/list` cannot help
 here: `ItemDelegate.Height()` takes no item, so variable row heights are
 structurally impossible in it.
 
