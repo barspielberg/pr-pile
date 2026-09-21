@@ -174,7 +174,7 @@ func TestSearchFillWinsOverPrefixColour(t *testing.T) {
 	subjRun := renderedTitle(m2, rows2[0])
 
 	fixSeg := segmentAround(t, subjRun, "fix")
-	if !strings.Contains(fixSeg, "38;5;173") {
+	if !hasSGRParam(fixSeg, "34") {
 		t.Errorf("type lost its colour while a query was active: %q", fixSeg)
 	}
 	if strings.Contains(fixSeg, fill) {
@@ -253,6 +253,50 @@ func segmentAround(t *testing.T, rendered, lit string) string {
 	return ""
 }
 
+// Every recognised type takes the same hue. The eleven types used to carry
+// five cube values between them, which put the board's largest block of fixed
+// colour on the field that says least -- the word itself already distinguishes
+// feat from fix. Asserting the rendered runs are byte-identical is what stops a
+// per-type map growing back one exception at a time.
+func TestEveryTypeSharesOneColour(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	seg := func(word string) string {
+		t.Helper()
+		m := loaded(t, 120, 20, []github.PR{{
+			Number: 3248, Title: word + "(ordering): do the thing",
+			CIState: "SUCCESS", UpdatedAt: time.Now(),
+		}}, nil)
+		m.cursor = -1
+		r := m.board.Sections()[0].Rows[0]
+		out := m.renderTitle(r, fgStyle, func(s lipgloss.Style) lipgloss.Style { return s }, 60, nil)
+		return segmentAround(t, out, word)
+	}
+
+	types := []string{"fix", "feat", "refactor", "perf", "revert",
+		"chore", "ci", "build", "docs", "style", "test"}
+
+	// A themed ANSI slot, not a cube value: the type colour has to resolve
+	// through the user's own theme like the status columns do.
+	first := seg(types[0])
+	if !hasSGRParam(first, "34") {
+		t.Fatalf("type is not ANSI 4: %q", first)
+	}
+	if strings.Contains(first, "38;5;") {
+		t.Fatalf("type still carries a 256-cube value: %q", first)
+	}
+
+	// Same SGR introducer for every type; only the letters differ.
+	norm := func(seg, word string) string { return strings.ReplaceAll(seg, word, "") }
+	want := norm(first, types[0])
+	for _, w := range types[1:] {
+		if got := norm(seg(w), w); got != want {
+			t.Errorf("%q renders differently from %q:\n got %q\nwant %q", w, types[0], got, want)
+		}
+	}
+}
+
 // A draft arrives muted and a selected row arrives bold. Prefix colour layers
 // onto that state rather than replacing it, or drafts stop looking like drafts.
 func TestPrefixColourLayersOntoTheRowStyle(t *testing.T) {
@@ -272,7 +316,7 @@ func TestPrefixColourLayersOntoTheRowStyle(t *testing.T) {
 	if seg := segmentAround(t, out, "add the thing"); !strings.Contains(seg, "2m") {
 		t.Errorf("draft subject lost its faint: %q", seg)
 	}
-	if seg := segmentAround(t, out, "feat"); !strings.Contains(seg, "38;5;108") {
+	if seg := segmentAround(t, out, "feat"); !hasSGRParam(seg, "34") {
 		t.Errorf("draft type lost its colour: %q", seg)
 	}
 }

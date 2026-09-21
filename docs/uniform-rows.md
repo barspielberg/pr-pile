@@ -224,6 +224,144 @@ beyond the gutter label changing.
 up from 16.** Roughly two thirds of that is the gate lines and one third the
 header bands.
 
+> **Superseded.** The gutter shipped and was later replaced by a selectable
+> inline header, which holds the same invariant without the clipped name or the
+> missing count. §4.1 records the three passes and the measurement that settled
+> it. Everything above this line is still an accurate account of the gutter and
+> of why a *non-selectable* header could not work.
+
+### 4.1 Inline headers, four passes: what actually breaks the invariant
+
+The question "why not a full-width section header?" has now been asked four
+times. The first two answers were "it breaks the invariant", the third found the
+narrower rule that makes it work, and the fourth caught the third shipping with
+the invariant broken anyway. The answers are not contradictory — each pass
+narrowed the claim — and the early conclusions are still correct *for the
+designs they tested*, so reading only the latest would lose that.
+
+If you are here to propose a change to the list's layout, the short version is:
+**count the lines the cursor cannot land on, because each one costs you a line
+of scroll delta, and check every section STATE and not just every row count.**
+
+**Pass 1 — 2026-09-17 (§4 above).** Measured a blank + a full-width band at
+`height=19` and recorded deltas of `0,1,2,3`, against `0,1` for a gutter. The
+gutter shipped. Correct, and the reasoning given — "a header still takes a line
+that is not a row" — was the right instinct with the wrong emphasis.
+
+**Pass 2 — 2026-09-21.** A design review proposed the same layout again: full
+rule name, right-aligned count, blank separator, every breakpoint dropped by 10.
+It was built and measured at a section boundary, `height=24`, sections of
+12/10/14:
+
+| section chrome | lines scrolled per single `j` at a boundary |
+|---|---|
+| blank + header, header unselectable | **3** |
+| header only, header unselectable | **2** |
+| gutter | 1 |
+
+Those reproduced pass 1's table on a second implementation. Withdrawn again,
+and §4.1 as first written concluded "a header line breaks the invariant,
+however it is drawn."
+
+**That conclusion was too strong.** It held the header responsible when the
+real property is narrower, and the next pass found it.
+
+**Pass 3 — 2026-09-21, shipped.** The cursor was allowed to *sit on* a header:
+headers became real entries in the cursor's address space (`slots()` in
+`internal/ui/model.go`), addressable but not actionable. Nothing selects a
+header in the sense of acting on it — `enter`, `d`, `y` and every configured
+action do nothing there — but `j` stops on it, and that changes the arithmetic
+completely:
+
+| section chrome | max lines scrolled per single `j` |
+|---|---|
+| blank + header, header selectable | **2** |
+| header only, header selectable | **1** |
+| gutter | 1 |
+
+Measured across 12/10/14, 5/5/5, 1/1/1, 3/20/3 and 30/1/1 at heights 5 through
+24, walking every slot in both directions. The cursor never left the viewport.
+
+**The rule, stated properly:**
+
+> Every line in the list that the cursor **cannot** occupy costs exactly one to
+> the worst-case scroll delta. Headers and notes cost nothing once they are
+> selectable. A blank separator always costs one, because there is nothing to
+> stop on. A *block* of unselectable lines costs its own height, which is why a
+> placeholder block that scaled with the pane was the worst offender of all.
+> When `len(lines) == len(slotStarts)`, the delta is 1 by construction — and
+> that equality is worth asserting directly, because it is cheap and it is the
+> whole invariant.
+
+So it was never about headers. It was about *unselectable* lines, and a header
+is only unselectable if you choose to make it so. The blank separator was the
+last one left, which is why the shipped layout has none — sections are
+separated by the header's own background instead, and that separation is free
+because the cursor can rest on it.
+
+The invariant test asserts both halves: it walks every slot and bounds the
+delta at 1, and it checks `len(lines) == len(slotStarts)` directly, so a future
+unselectable line fails loudly rather than quietly costing a line of delta.
+
+**What this bought**, beyond the invariant: the full rule name instead of
+`NEEDS M…`, and a per-section count on the board. §5 and §6 below list both as
+accepted costs of the gutter; they are no longer costs. Ten columns of title
+width came back at every tier as well.
+
+**Pass 4 — the same failure mode, in the code that fixed it.** Pass 3 shipped
+with the invariant broken, and it broke in exactly the way the rule it had just
+established predicts. `body()` emitted three kinds of line the cursor could not
+occupy, all of them in sections that had no rows: the `—` of a resolved-empty
+section, a failed section's error text, and a pending section's spinner plus a
+**placeholder block** whose height scaled with the pane.
+
+| board shape | max lines per single `j` |
+|---|---|
+| 3 sections, all Ready with rows | 1 |
+| 3 sections, one resolved empty | 2 |
+| 3 sections, one failed | 2 |
+| 3 sections, one pending | **2–5, growing with pane height** |
+
+The pending case is the one that matters: every section is Pending for the first
+moment of every launch, so the worst shape was the *common* shape, and at
+`height=16` one keypress moved the board 5 lines — worse than the `0,1,2,3` this
+whole restructure existed to remove.
+
+It survived review-by-test because the invariant test varied row counts
+(12/10/14, 5/5/5, 1/1/1, 3/20/3, 30/1/1) and never varied section **state**. It
+applied results to every rule, so every section was Ready and non-empty — the
+one shape of the 64 that passes. The commit message claimed the test would make
+a future unselectable line fail loudly; three already existed and it was silent
+on all three.
+
+The fix applies the rule instead of restating it: the note line became a slot,
+so an empty, failed or pending section is exactly one header slot plus one note
+slot, both addressable and neither actionable. The placeholder block was
+deleted outright — it was the largest delta contributor, and its purpose
+(stopping sections below from being pushed down as one resolves) is a layout
+stability concern that the scroll invariant outranks.
+
+The test now walks all 64 ordered combinations of
+Ready-with-rows / Ready-empty / Failed / Pending across three sections, at
+heights 5, 8, 10, 12, 16, 20 and 24, in both directions, and asserts
+`len(lines) == len(slotStarts)` at each. It failed 441 times before the fix,
+across 63 of the 64 combinations. **State is the axis that bites; row counts
+are the easy one.**
+
+A second defect fell out of the same change and is worth recording because it
+is a different shape of the same mistake. The note slot was added to `body()`
+while `slots()` — which the cursor, footer and `l`/`h` all index — did not know
+about it, so every slot index after an empty section was off by one and the
+footer named the wrong section. `slots()` is now the single source of truth and
+`sectionStarts()` and `cursorSection()` are derived from it rather than walking
+the sections again. **Two walks that must agree will eventually not.**
+
+**What is still true and worth not re-litigating.** `DESIGN.md` §3.5.1 covers
+the *sticky* header — a header pinned above the list rather than scrolling with
+it. That one fails for an unrelated reason (on a pane tall enough to show the
+whole board it is a constant occupying the most prominent line) and the
+measurements here say nothing about it. Inline and selectable is what works.
+
 ---
 
 ## 5. What this costs, honestly

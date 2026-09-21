@@ -51,8 +51,8 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | Startup reachability check | GitHub's search index reports `issueCount 0` for a repo behind an org IP allow list, so being blocked was indistinguishable from having no PRs. A direct `repository(...)` query does error, so ask for one at startup. |
 | ANSI 0–15 only, never hex or 256 | The 16 indices are an indirection layer, not a limitation: they resolve through the user's own theme. gh-dash shipped hex, got the bug report, and migrated (#770 / PR #771). Hex values of the same nominal colours do *not* get this (k9s #1234). |
 | `muted` is `Faint(true)`, not index 8 | Index 8 is "bright black" — a *light* grey on many light themes, near-invisible on white. Faint is relative: SGR 2 dims whatever the theme's foreground already is, so it is correct on both by construction, and degrades to plain legible text where SGR 2 is ignored. Index 7 is avoided for the same class of reason. |
-| Index 8 *is* used, as `selBg` | Its danger is as a foreground against index 0. As a background it sits between 0 and 7 in luminance in every mainstream scheme, so it contrasts with the terminal's own background at either end. |
-| Selection = background fill + `▌` bar, not `reverse`, never dim | `reverse` swaps the row's foreground into the background, destroying status colour on exactly the failing rows that need it. Dim reads as "disabled" (lazygit #1845, #802). The bar lives in column 0 where nothing else ever draws, so selection survives a theme that eats the fill. |
+| Index 8 *is* used, as `selBg` — and it is the shipped selection fill | Its danger is as a *foreground* against index 0. As a background it sits between 0 and 7 in luminance in every mainstream scheme, so it contrasts with the terminal's own background at either end. It was briefly a fixed cube grey (237) instead, on the reasoning that index 8 is mid-grey and mid-grey is the worst backdrop for foreground colour — true where 8 really is mid-grey, and wrong in the many themes where it is a tinted dark (Catppuccin Mocha: `#585b70`). The cost of going themed is that selection contrast now varies by theme; **§3.4 has the cross-theme table and the ratios.** |
+| Selection = background fill + `▌` bar, not `reverse`, never dim | `reverse` swaps the row's foreground into the background, destroying status colour on exactly the failing rows that need it. Dim reads as "disabled" (lazygit #1845, #802). The bar lives in column 0 where nothing else ever draws, so selection survives a theme that eats the fill. **The search hit does use reverse**, and §3.3.3 explains why the objection does not reach it: a hit covers three cells that never carry a status glyph, so there is no status colour for it to destroy. |
 | Status is glyph shape first, colour second | Red/green is both the commonest status pairing and the commonest colourblindness. Four distinct silhouettes (`✓ ✗ ◐ ○`) survive monochrome; the documented failure mode is several states rendering as one `•` in different hues. |
 | No column header row | Our sub-slots are 1–2 cells — no word fits, so the only renderable header over `✗2 ○ !` is more symbols. gh-dash has a header row and its status headers *are* glyphs. Evidence: one uncommented legend request in five years across three trackers, versus repeated multi-user complaints about chrome rows. The legend lives in the `?` overlay instead, rendered from the same helpers the rows use so it cannot drift. |
 | No global header row | Its three payloads were the app name (you just pressed a key), the repo (constant in a single-repo tool) and the spinner. Repo and spinner moved to the footer, which was already being paid for. One row back in a 20-row pane. (gh-dash #671: a 2-line logo drew "wasting space", "attention hogging".) |
@@ -63,9 +63,9 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | `/` searches rather than filters | Filtering answered "which PRs match?" and lost the rows around the answer, which are most of why you were looking. Worse, it made highlighting impossible for anything it hid. The board now holds still and matches are filled where they sit. Fuzzy matching, ranking and the numeric special case all go with it: one substring rule over the row's own drawn text. `bubbles/textinput` stays rejected — it pulls an OS clipboard shell-out for a paste binding this prompt does not need. |
 | The search matches only what is drawn | Every match has to be visibly highlighted, or the board marks a row and shows no reason. So the haystack is the rendered row: the padded number, the title as clipped to this width, the three author initials. The consequences are real and accepted — a full login matches nothing, a word past the clip point matches nothing, and the match set changes with the terminal width. |
 | The checks overlay names failures and pending, counts passes | 47% of check contexts on the live board are skipped and 45% pass, against 4% failing — listing passes buries 7 signal lines under 24 on the worst PR. Pending checks are named instead of counted because they are 1–3 per PR and say *what* you are waiting on. The overlay also stopped dead-ending: 47% of PRs are in PENDING rollup with nothing failing, where it used to say "no failing checks". `checks-page.md` has the measurements. |
-| Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `d` overlay and section names to a left gutter, so every line on the board is a row and one keypress scrolls at most one line — unconditionally, not by argument. `uniform-rows.md` has the measurements; `view-restructure.md` is the earlier study this overturned. |
-| No chrome line above the list | A pinned section line with a `N of M` count was built and reverted. Bound to the top visible row it could not name the wrong section — but on a pane tall enough to show the whole board nothing scrolls, so it froze on the first section and read `MINE · 1 of 5` while the cursor was three sections away. It also restated the gutter label directly beneath it, since both resolved from the same `meta[start]`. The full name and the per-section count are not on the board; `l`/`h` jumps between sections. `section-layout.md` §13 has the reproduction and what I got wrong. |
-| The gutter name is window-relative, and `╷` ≠ `│` | `firstInSection` was `i == 0` over the whole section, so a scrolled board left every row above the boundary unnamed — the gutter went blank exactly when you most needed to know where you were. With no chrome line above the list this is again the only thing naming the top row's section. `╷` is retained separately from `│`: "a section starts here" and "its start is above the window" are different facts, and conflating them would claim a boundary that is not there. |
+| Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `d` overlay, and section names to a header row the cursor can sit on, so every line in the list is a position the cursor can reach and one keypress scrolls at most one line — unconditionally, not by argument. `uniform-rows.md` §4.1 has the measurements and the three passes it took; `view-restructure.md` is the earlier study this overturned. |
+| Section headers are inline, not pinned | A pinned line with a `N of M` count was built and reverted. Bound to the top visible row it could not name the wrong section — but on a pane tall enough to show the whole board nothing scrolls, so it froze on the first section and read `MINE · 1 of 5` while the cursor was three sections away. An inline header cannot go stale (it is always directly above its rows) and cannot be a constant (it scrolls away with them). `section-layout.md` §13 has the reproduction of the pinned version. |
+| The cursor can sit on a section header | It is the difference between a delta of 1 and a delta of 2. A line the cursor cannot occupy has to be crossed *in addition to* the row it precedes, so a viewport following the cursor jumps. Making the header addressable — but not actionable, so `enter`/`d`/`y` do nothing there — makes the list's lines and the cursor's positions the same set, and the invariant arithmetic. This also removed the blank separator, the last unselectable line. `uniform-rows.md` §4.1. |
 | Scroll margin of 2 rows | lazygit ships 2, fzf migrated 0 → 3 in 2024, nnn/micro use 3; no tool surveyed migrated the other way. 2 is the smallest in the cluster and still guarantees the first line of the next PR is visible. Every implementation caps at half the viewport; none is proportional (helix rejected that on the record, #8403). |
 | Sections keep their rows while refetching | Rebuilding from empty collapsed the board and re-expanded it section by section, shoving every row below each one that resolved. A row should move when a value changes, not because a request finished. |
 | A resolved empty section collapses to one line | Reserving six blank rows for a section that *knows* it has nothing wasted most of a short pane. The reservation applies only while loading. |
@@ -80,35 +80,46 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 
 ### 3.1 Row anatomy (FULL tier, 0-based cell offsets)
 
+There are two kinds of line in the list, and both are **slots** — positions the
+cursor can occupy (§3.5).
+
+**PR row:**
+
 | # | field | offset | width | align | content |
 |---|---|---|---|---|---|
-| 0 | section | 0 | 8 | left | rule name uppercased on the section's first **visible** row, else blank (§3.5) |
-| 0b | rule | 8 | 2 | — | ` ╷` where a section starts, ` │` where it continues (§3.5) |
-| 1 | mark | 10 | 1 | — | `▌` when selected, else space |
-| 2 | gutter | 11 | 1 | — | space |
-| 3 | tree | 12 | 2 | left | `╭╴` `│ ` `╰╴` or two spaces |
-| 4 | number | 14 | 6 | left | `#3248`, padded right |
-| 5 | gutter | 20 | 1 | — | space |
-| 6 | status | 21 | 7 | left | glyph cluster, §3.2 |
-| 7 | gutter | 28 | 1 | — | space |
-| 8 | title | 29 | **flex** | left | clipped with `…` on display width |
+| 1 | mark | 0 | 1 | — | `▌` when selected, else space |
+| 2 | gutter | 1 | 1 | — | space |
+| 3 | tree | 2 | 2 | left | `╭╴` `│ ` `╰╴` or two spaces |
+| 4 | number | 4 | 6 | left | `#3248`, padded right |
+| 5 | gutter | 10 | 1 | — | space |
+| 6 | status | 11 | 7 | left | glyph cluster, §3.2 |
+| 7 | gutter | 18 | 1 | — | space |
+| 8 | title | 19 | **flex** | left | clipped with `…` on display width |
 | 9 | gutter | — | 1 | — | space (only when author shown) |
 | 10 | author | — | 3 | right | lowercase initials, only on rules with `author: true` |
 | 11 | gutter | — | 1 | — | space |
 | 12 | age | — | 3 | right | `now`, `2h`, `1d`, `3w`, `99+` |
 
+**Section header** — one per section, full width (§3.5):
+
+| # | field | offset | width | align | content |
+|---|---|---|---|---|---|
+| 1 | mark | 0 | 1 | — | `▌` when selected, else space |
+| 2 | name | 1 | flex | left | the rule name, **not** uppercased, **not** clipped to a fixed width |
+| 3 | count | — | — | right | the section's row count, 2 cells from the right edge; blank while pending |
+
 **Exactly one column flexes: title.** Everything else is fixed, which is the
 mechanical fix for "columns spread across the terminal" — slack has only one
-place to go, so the status cluster is pinned at columns 21–27 at every width.
+place to go, so the status cluster is pinned at columns 11–17 at every width.
 
-**Every row is exactly one line, always.** Row height does not depend on the
-data. This is the invariant the whole viewport rests on: it is what makes one
-keypress scroll the board by at most one line. See `uniform-rows.md`.
+**Every line is exactly one line, and every line is a slot.** Row height does
+not depend on the data, and there is no line in the list the cursor cannot
+occupy. Together those give the invariant the whole viewport rests on: one
+keypress scrolls the board at most one line. See `uniform-rows.md` §4.1.
 
 ```
-section = name(8)+rule(2) = 10
 body  = mark(1)+gut(1)+tree(2)+number(6)+gut(1)+status(7)+gut(1)+gut(1)+age(3) = 23
-titleWidth = max(0, terminalWidth - 33)            [FULL]
+titleWidth = max(0, terminalWidth - 23)            [FULL]
 titleWidth -= 4 when the rule sets author: true    [FULL only]
 ```
 
@@ -161,8 +172,8 @@ Monochrome read-out, with all colour stripped:
 
 ### 3.3 Colour tokens
 
-Seven tokens, all ANSI 0–15 or terminal-default, referenced symbolically at every
-render site (`internal/ui/render.go`).
+Nine tokens, **all** ANSI 0–15 or terminal-default, referenced symbolically at
+every render site (`internal/ui/render.go`, `internal/ui/title.go`).
 
 | token | value | used for |
 |---|---|---|
@@ -170,22 +181,142 @@ render site (`internal/ui/render.go`).
 | `error` | 1 | `✗` CI, `✗` review, `!` conflicts, section fetch errors |
 | `attention` | 3 | `◐` running, `○` review required |
 | `ok` | 2 | `✓` passing, `✓` approved |
-| `header` | 6 + bold | section name and `━` rule |
-| `accent` | 4 | PR number, selection bar `▌`, search prompt |
-| `hit` | 5, **background only** | the runes a search query matched |
-| `muted` | unset fg + `Faint(true)` | tree glyphs, age, author, continuation lines, draft titles, `·`, counts, footer |
-| `selBg` | 8, **background only** | selected-row fill |
+| `header` | 6 + bold | the section header row (§3.5) |
+| `accent` | 4 | PR number, selection bar `▌`, search prompt — on selected **and** unselected rows alike |
+| `type` | 4 | the conventional-commit type word (§3.3.1) |
+| `hit` | `Reverse` — no colour at all | the runes a search query matched (§3.3.3) |
+| `muted` | unset fg + `Faint(true)` | tree glyphs, age, **author**, scope, ticket, draft titles, `·`, counts, footer |
+| `selBg` | 8, **background only** | the selected row and the selected header (§3.4) |
 
 `error` uses **1, not 9**: index 9 is "bright red", often a pale low-contrast
 pink on light themes. Indices 7, 15 and 0 are never foregrounds.
 
-`hit` takes **5** because it is the one semantic slot a row does not already
-spend: 1 failing, 2 passing, 3 pending, 4 the number and the commit type, 6 the
-section gutter. A search hit can therefore never be misread as a status, which
-is the same argument that keeps the type tint out of red. It sets no
-foreground, so the matched text keeps the terminal's own default and the fill
-is correct on a light theme by construction rather than by measurement — the
-reason it is themed rather than a fixed cube shade.
+### 3.3.3 The search hit sets both ground and figure
+
+A hit is drawn with **reverse video** (`SGR 7`): the fill takes the theme's
+foreground and the text takes its background. No colour is chosen.
+
+**The rule this encodes: a highlight must set both ground and figure.**
+Inheriting the foreground is the bug, not a tuning problem. `hit` was
+`Background(5)` alone, which left each run with whatever foreground it already
+had — and a dark theme's ANSI 5 is a *light* pink by design, so every
+foreground landed light-on-light. Measured in Catppuccin Mocha:
+
+| a hit landing on | contrast |
+|---|---|
+| commit type / PR number (`accent` 4) | 1.38:1 |
+| title (`fg`) | 1.06:1 |
+| `muted` author | 1.03:1 |
+
+…against a fill that was itself 10.74:1 on the board. A loud block with
+invisible contents is worse than no highlight, because it draws the eye to the
+one place it cannot read.
+
+**Why reverse rather than a chosen pair of slots.** The contrast becomes
+whatever the theme already guarantees for ordinary text — by definition its
+best pairing — so it is correct on light and dark without measuring either.
+Across eight themes it is the only candidate clearing 4.5:1 everywhere:
+
+| highlight | worst case across 8 themes |
+|---|---|
+| `Background(5)`, no foreground | 1.06:1 |
+| bg 5 + fg 0 | 2.37:1 |
+| bg 3 + fg 0 | 2.39:1 |
+| **reverse** | **4.75:1** |
+
+Every fixed-slot pair collapses to about 2.4:1 on a light theme, where ANSI 5's
+luminance flips relative to the ground. Reverse cannot flip, because it has no
+fixed luminance to flip.
+
+It also cannot clash. There is no hue to collide with the commit type's ANSI 4
+(§3.3.1), so hue and hit remain the independent channels §3.3 requires: hue
+says what kind of change, the fill says where the query landed.
+
+**Why §2's objection to reverse does not reach a hit run.** §2 rejects reverse
+for the *selected row*, because swapping a whole row's foreground into its
+background destroys the status colour on exactly the failing rows that need it.
+That is sound, and it does not apply here — for a structural reason rather than
+a judgement call. `hitRuns` is applied to **three cells only**: the number, the
+title and the author. The status glyphs (`✓ ✗ ◐ ○ !`) never pass through it and
+are not searchable, so **a hit cannot recolour a status**. Those three cells are
+also already surrendering their own styling deliberately — a hit takes the style
+whole rather than composing — so there is no hue left for reverse to destroy.
+
+**On the selected row** the hit does not inherit `selBg` either: the fill stays
+the theme foreground, reading at 4.62:1 against `selBg` in Mocha. The highlight
+is still visible on the cursor line, which is the case most likely to break.
+
+Under `NO_COLOR` the fill disappears, as any background-channel highlight must.
+A match stays locatable by the cursor, the prompt's `N of M` count and `n`/`N`,
+so the feature degrades rather than breaking.
+
+**There are no fixed 256-cube values left.** Every colour on the board is ANSI
+0–15 or the terminal default, so the whole board resolves through the user's own
+theme. Three cube values existed and all three are gone:
+
+| was | used for | why it went |
+|---|---|---|
+| 237 | `selBg`, the selected-row fill | now ANSI 8. The cube grey was chosen because index 8 is *nominally* mid-grey and mid-grey is the worst backdrop for foreground colour. That holds where 8 really is mid-grey and fails where it is a tinted dark — Catppuccin Mocha renders it `#585b70` on a `#1e1e2e` ground. Neutral grey on a blue-tinted board also read as grafted on, which is what prompted the change. §3.4 has the ratios and the theme caveat |
+| 234 | `headerBg`, the section header fill | **deleted, not replaced.** Against Mocha's background 234 measures **1.04:1** and 235 measures 1.08:1 — the band was invisible in the theme it was meant to serve. The label carries the header on its own: indentation, bold weight and ANSI 6's hue, at 11.01:1 (§3.5) |
+| 75 | the accent while selected | now plain ANSI 4 on every row. The comment justifying 75 claimed "ANSI 4 measures 1.21 against `selBg`" — a figure computed against a *nominal* ANSI 4, not any real theme's. Against Mocha's `#89b4fa` it is **5.40:1** on the old 237 and **3.17:1** on ANSI 8, beating 75 (4.91 / 2.88) on both. It was protecting against nothing |
+
+> **Two lessons worth keeping.** First, a contrast figure for an ANSI slot is
+> meaningless without naming the theme it was measured in; the 1.21 above was
+> wrong for five months because nobody asked which blue. Second, an audit that a
+> later commit invalidates is worse than no audit, because it gets trusted — the
+> commit collapsing the type palette closed by naming the fixed values left, and
+> the next commit added `headerBg` without anyone noticing. This table is the
+> maintained record; commit messages are not.
+
+A fixed value is not banned in principle. `DESIGN-GUIDE.md` §3 allows one where
+a *measured* contrast requirement has no themed answer. There is currently no
+such case, and `TestNoFixedCubeColoursAnywhereOnTheBoard` fails if one
+reappears without this table changing first.
+
+### 3.3.1 One colour for every commit type
+
+Most titles on this board are conventional commits, so the type word is
+coloured to separate the prefix from the subject a reader is actually scanning
+for. **Every recognised type shares one colour** (`accent`, ANSI 4); the scope
+and any Jira key are `muted`; the subject keeps the terminal default.
+
+The eleven types used to carry five cube tints between them — `fix` terracotta,
+`feat` sage, and a shared grey-blue for the types that are not release-visible.
+That put the board's largest block of fixed colour on the field that says the
+least. The type word is written out on the row: distinguishing `feat` from
+`fix` by hue was decoration on a word that already reads, and it overrode five
+slots of the user's theme to do it.
+
+The hierarchy rule that chose the cube still stands — a type is not a status,
+and `fix` on the same red as a failing check would make the row read as broken
+— but it argued for keeping types *out of* the status colours, not for giving
+each type its own. One themed colour clears the same bar.
+
+Sharing ANSI 4 with the PR number is deliberate. Both are the row's structural
+furniture — the number identifies it, the type classifies it — and they sit at
+columns 14 and 29 with the status cluster between them, so they never abut and
+differ in shape as well as position. Verified on the live board before it was
+settled; ANSI 6 was the fallback if the two had read as confusable.
+
+The **set** of recognised types is unchanged, and the colon is still required:
+a title with no conventional prefix renders byte-for-byte as it did before
+prefix colouring existed.
+
+### 3.3.2 The author column is muted
+
+The author renders `muted`, the same as age — the two columns right of the
+title are one quiet tier, not two competing ones.
+
+It used to hash the login into a fifteen-entry cube palette so the same person
+was the same colour on every row. The initials were always the identity; the
+hue was a grouping hint layered on a fact the three characters already carried,
+which is the case §2 of `DESIGN-GUIDE.md` names as the clean example of never
+encoding anything in colour alone. Two commits went into tuning the palette
+size — eight entries, then fifteen — and thirty-odd logins collide by
+pigeonhole against any palette that fits a terminal, so no count ended it.
+
+Colour is a budget. Who wrote a PR does not belong in the same register as
+whether it is broken.
 
 **Loud** (`error`, `attention`) is failing CI, changes requested, conflicts,
 review required. **Quiet** (`ok`) is passing and approved — settled states need
@@ -206,85 +337,165 @@ Apply the background per-segment, not wrapped around the finished line: each
 segment's own style emits a reset, which would terminate an outer background
 part-way along the row.
 
-### 3.5 Section gutter
+A **selected section header** takes the same fill, so the cursor is never
+invisible; it is the only fill on the board, since the header has no band of its
+own (§3.5).
 
-```
-NEEDS M… │    #3239  ◐  ○   feat(webapp): PROJ-2038 show an "On hold" status…   19h
-         │    #3234  ◐  ○   feat(api-service): PROJ-2037 refuse order plan wri… 19h
-MY TEAM… ╷    #3211  ✗1 ✓   feat(api-service,schemas): PROJ-1880 build the XLR… 23h
-         │    #3134  ✓  ✓   feat(webapp): PROJ-1418 enable the Trade-ups ent…    1d
-```
+#### `selBg` is ANSI 8, and that is a deliberate trade
 
-The rule name, uppercased and clipped to 8 cells, on the section's first
-**visible** row; blank on the rest; then a one-cell rule. Uppercase is the only
-uppercased text on the board, which alone makes a section boundary identifiable
-without reading it.
+The fill resolves through the user's theme rather than being a fixed grey. In
+Catppuccin Mocha — a `#1e1e2e` background with ANSI 8 at `#585b70` — every
+foreground that can appear on a selected row:
 
-**The rule breaks at a boundary.** A section's first row draws `╷` U+2577 where
-a continuation row draws `│`, so the rule visibly *starts* rather than running
-through. This is what makes a boundary readable when the name fills all 8 cells
-and is clipped (`NEEDS M…`), which is exactly the case where the name itself
-cannot signal "new section" by shape. A blanked cell was tried and is too weak
-to read as intentional beside a column of `│`.
+| foreground | on ANSI 8 |
+|---|---|
+| title (default fg) | 4.62:1 |
+| commit type + PR number (`accent` 4) | 3.17:1 |
+| passing / approved (`ok` 2) | 4.49:1 |
+| running / review required (`attention` 3) | 5.25:1 |
+| **failing / conflict (`error` 1)** | **2.88:1** |
+| **`muted` author and age** | **~2.54:1** |
 
-**The name is computed against the visible window, not the board.** The top
-visible row always carries its section's name. Before this, `firstInSection` was
-`i == 0` over the whole section, so every row above a scrolled-off boundary was
-anonymous — on a scrolled board the gutter went blank and the section you were
-looking at was unnamed, which was the actual defect.
+The two below 3:1 are an accepted cost. Both clear 2:1, and status is glyph
+shape first with colour as reinforcement (§3.2), so neither is the sole carrier
+of anything. The `muted` figure is an **estimate**: SGR 2 has no specified blend
+ratio and is modelled as ~55% foreground over the fill.
 
-The top row keeps `│` when its section began above the window. The two glyphs
-carry different facts and the board does not conflate them:
+**The trade, stated plainly: this swaps a fixed-but-uniform result for a
+themed-but-variable one.** Every other colour on the board already takes that
+bet; `selBg` was deliberately exempt from it, and the exemption is what is being
+given up. `accent` on the fill, across mainstream dark themes:
 
-| glyph | name | meaning |
+| theme | `accent` on `selBg` | `selBg` vs background |
 |---|---|---|
-| `╷` | yes | a section starts on this row |
-| `│` | yes | you are inside this section; its start is above the window |
-| `│` | no | continuation |
+| Tokyo Night | 3.55:1 | 1.91:1 |
+| **Catppuccin Mocha** | **3.17:1** | **2.46:1** |
+| Nord | 2.74:1 | 1.69:1 |
+| One Dark | 2.56:1 | 2.32:1 |
+| Dracula | 1.95:1 | 3.03:1 |
+| Solarized Dark | 1.46:1 | 2.79:1 |
+| Gruvbox Dark | 1.36:1 | 4.02:1 |
 
-### 3.5.1 No chrome line above the list
+It measures well in Mocha and Tokyo Night and **poorly in Gruvbox (1.36:1) and
+Solarized (1.46:1)**, where the accent on a selected row approaches the fill.
+This board is developed and run against Mocha, so it is the right call here. **If
+this tool is ever distributed more widely, that is the first row of the table to
+look at** — and the fix would be a themed fallback or a config knob, not a
+return to a fixed cube grey, which had its own failure (§3.3).
 
-The board's first line is a row. A pinned `header` line carrying the full
-section name and a `N of M` position was built and removed; the reasoning is
-kept here because the idea is an obvious one to have again.
+### 3.5 Section headers, and the cursor's address space
 
-It was bound to the **top visible row**, to stop it naming a section whose rows
-were not beneath it. That binding is correct and was not the problem. The
-problem is that on a pane tall enough to show the whole board — ~40 rows, which
-is what this board is usually read at — nothing scrolls, so the top visible row
-is always the first row of the first section. The line read `MINE · 1 of 5` and
-stayed there while the cursor moved through every section on the board. It was a
-constant occupying the most prominent line on the screen, and the count, shaped
-like a cursor position, was never one.
+```
+▌ Mine                                                                       5
+   #3248  ✓  ○   fix(ordering): reach the dependency popup before it settles  2h
+   #3251  ◐  ○   feat(api-service): backfill the roster by materialized path  2h
+  Involved                                                                   6
+   #3199  ✓  ✗   fix(billing-service): stop double-charging the proration     1d
+```
 
-It also duplicated the gutter. Both were resolved from the same
-`meta[start]`, so whenever the top row's section started on screen the line
-above the list restated the label directly beneath it.
+Each section is announced by a **full-width header row**: the rule name at the
+left, the section's row count right-aligned two cells from the edge, on a
+background one step off the board ground. The name is neither uppercased nor
+clipped to a fixed width, so `Needs my review` renders whole.
+
+There is **no blank separator** between sections. The header's own background
+does the separating, and §3.9 explains why the blank had to go.
+
+**The cursor can sit on a header.** This is the load-bearing decision, not a
+detail. The list's lines and the cursor's positions are the same set — called
+*slots* in `internal/ui/model.go` — so moving the cursor one position moves the
+board at most one line, arithmetically rather than by argument:
+
+| slot kind | selectable | actionable | when |
+|---|---|---|---|
+| PR row | yes | yes | always |
+| section header | yes | **no** | one per section, always |
+| section note | yes | **no** | only when a section has no rows to show |
+
+Headers and notes are **addressable but not actionable**. `enter`, `o`, `d`, `y`
+and every user-configured action resolve through `selected()`, which returns
+nothing on either, so they are silent no-ops there. Nothing needs a special
+case: the absence of a PR is the guard.
+
+`slots()` is the single source of truth for this sequence, and everything that
+needs to know where the cursor is — the footer, `l`/`h`, `selected()` — indexes
+into it rather than re-deriving the layout. That is not tidiness: the note slot
+was added to `body()` first and `slots()` did not know about it, which shifted
+every slot index after an empty section by one and had the footer naming the
+wrong section. Two walks that must agree will eventually not.
+
+`l`/`h` jump to a section's **header**, not to its first row — the header is
+the section's first slot, and landing on the line that names where you arrived
+is the point of the jump. Empty and still-loading sections are jump targets
+too, which the gutter could not offer: they have a header whether or not they
+have contents, so `l` tells you a section resolved empty instead of skipping
+silently past it.
+
+While **filtering**, `ctrl+n`/`ctrl+p` step between PR rows and never stop on a
+header, and entering or editing a query re-seats the cursor on the first match.
+A filtered board is a list of matches and a header is not one of them, so
+stopping there would read as the motion having missed.
+
+**Why this shape and not the alternatives.** A header that the cursor *cannot*
+occupy costs exactly one line of scroll delta, as does a blank separator; two
+independent implementations measured `3` for blank-plus-unselectable-header and
+`2` for unselectable-header-alone, against `1` here. The general rule —
+**every unselectable line in the list costs one to the worst-case delta** — and
+the three passes it took to find it are recorded in `uniform-rows.md` §4.1.
+The gutter this replaced is §4 of that document.
+
+A section with no rows to show occupies its header plus exactly one **note**
+line — the spinner while loading, `—` once resolved and empty, the error text on
+failure — and that line is a slot like any other. It has to be: a note the
+cursor could not reach was an unselectable line in the middle of the list, and
+by the rule above it cost a line of delta. That was a real defect, shipped and
+caught in review; `uniform-rows.md` §4.1 records it.
+
+**There is no placeholder block.** A pending section used to reserve roughly its
+final height in blank lines so that sections below it were not pushed down as it
+resolved. Every one of those lines was unselectable *and* the count scaled with
+the pane, so on a tall board one keypress moved the viewport several lines —
+worse than the defect the uniform-row restructure existed to remove, and on
+every cold start rather than in some edge case.
+
+Losing it costs some layout stability while loading, and that is a real cost: a
+row can now move once as the section above it resolves. The scroll invariant
+outranks it. A row that moves when a value changes is permitted (§3.9); a board
+that scrolls five lines per keypress is the bug five earlier attempts chased.
+
+### 3.5.1 The header scrolls; it is not pinned
+
+The distinction this section exists to preserve: §3.5's header sits **inside**
+the list and scrolls with the section it names. A header **pinned** above the
+list was built and removed, and the reasoning is kept because the idea is an
+obvious one to have again — and because it is a different idea from the one
+that shipped.
+
+The pinned line carried the full section name and a `N of M` position, bound to
+the **top visible row** so it could not name a section whose rows were not
+beneath it. That binding is correct and was not the problem. The problem is
+that on a pane tall enough to show the whole board — ~40 rows, which is what
+this board is usually read at — nothing scrolls, so the top visible row is
+always the first row of the first section. The line read `MINE · 1 of 5` and
+stayed there while the cursor moved through every section on the board. It was
+a constant occupying the most prominent line on the screen, and the count,
+shaped like a cursor position, was never one.
 
 Neither cursor-binding nor showing the line conditionally rescues it.
 Cursor-binding is redundant when the board fits, because every boundary is then
-visible and the cursor's section is the nearest `╷` above it. A conditional line
-changes the list height as you scroll, which is the bug class
-`uniform-rows.md` exists to kill. See `section-layout.md` §13.
+visible. A conditional line changes the list height as you scroll, which is the
+bug class `uniform-rows.md` exists to kill. See `section-layout.md` §13.
 
-So the full name and the per-section count are **not on the board**. The gutter
-answers which section a row is in; `l`/`h` jumps between sections. Chrome is one
-line — the footer — and two while the search prompt is open.
+**An inline header avoids all of it by scrolling.** It cannot go stale, because
+it is always directly above the rows it describes; it cannot be a constant,
+because it leaves the viewport with its section; and it costs the list no height
+it does not give back, because the cursor can stop on it (§3.5). The two designs
+fail and succeed for unrelated reasons, so measurements about one say nothing
+about the other.
 
-Sections are a gutter rather than a full-width header band because **a header
-line is not a row**: whenever one crossed the top edge, a single keypress moved
-the board two lines instead of one. Measured deltas for the three candidate
-layouts are in `uniform-rows.md` §4. With the gutter, every line on the board is
-a row and the invariant is unconditional.
-
-The cost is 10 cells of title width (every breakpoint in §3.8 moved up by 10 to
-compensate) and the per-section count, which the band used to carry.
-
-A section with no rows to show occupies exactly one line, drawn with the same
-gutter: the spinner while loading, `—` once resolved and empty, the error text
-on failure. While loading, a section with no rows yet reserves a placeholder
-block (capped at 6 rows, and at `(height-2)/len(rules)`) so the skeleton starts
-near its final height.
+Chrome is still one line — the footer — and two while filtering. The section
+name and its count are now on the board, in the header, which is where the
+pinned line was trying to put them.
 
 ### 3.6 The PR detail overlay (`d`)
 
@@ -449,14 +660,15 @@ reorder or hide rows, so a chain stays contiguous and no `╰╴` can dangle.
 
 | tier | width | columns | title width |
 |---|---|---|---|
-| FULL | ≥ 86 | section, mark, tree, number, status(7), title, [author], age | `w - 33` (`-4` with author) |
-| MID | 70–85 | section, mark, tree, number, status(7), title | `w - 29` |
-| NARROW | 50–69 | section, mark, tree, number, status(3), title | `w - 25` |
-| below | < 50 | `terminal too narrow / (need 50 cols)` | — |
+| FULL | ≥ 76 | mark, tree, number, status(7), title, [author], age | `w - 23` (`-4` with author) |
+| MID | 60–75 | mark, tree, number, status(7), title | `w - 19` |
+| NARROW | 40–59 | mark, tree, number, status(3), title | `w - 15` |
+| below | < 40 | `terminal too narrow / (need 40 cols)` | — |
 
-Every breakpoint is 10 columns higher than it was before the section gutter,
-which is exactly the gutter's width — the title keeps the same readable floor at
-every tier.
+Every breakpoint is 10 columns **lower** than it was under the section gutter,
+which is exactly the gutter's width. The title keeps the same readable floor at
+every tier and gains those 10 columns back, because the section name now lives
+on its own header row instead of on every PR row (§3.5).
 
 Drop order: **age and author first** (they change how urgent something feels but
 never what you do), then the **review glyph** (the field most likely to be
@@ -464,20 +676,28 @@ re-derived by opening the PR anyway — CI and conflicts decide whether opening 
 is even worth it). Mark, tree, number, CI, blocker and title are the irreducible
 board.
 
-Breakpoint arithmetic: FULL needs `w - 33 >= 53` → 86; MID needs `w - 29 >= 41`
-→ 70; NARROW needs `w - 25 >= 25` → 50.
+Breakpoint arithmetic: FULL needs `w - 23 >= 53` → 76; MID needs `w - 19 >= 41`
+→ 60; NARROW needs `w - 15 >= 25` → 40.
 
 **Stability guarantee:** within a tier only the title's width changes; across
-tiers columns 0–20 never move at all, so the left edge of the board is identical
-from 50 to 400 columns.
+tiers columns 0–10 never move at all, so the left edge of the board is identical
+from 40 to 400 columns. The section header is full-width at every tier and has
+no columns to keep stable.
 
 ### 3.9 Vertical budget
 
-Chrome is **one line**: the footer. 20 rows − 1 chrome = 19 list rows, and **all
-19 are PRs** — there are no header rows inside the list, no blank separators and
-no continuation lines, so the list is 100% data at every board shape. Measured on
-the live board in a 27-row pane: 26 PRs visible, against 16 under the layout
-before the uniform-row restructure.
+Chrome is **one line**: the footer. 20 rows − 1 chrome = 19 list lines: one
+header per section, one note for each section with nothing to show, and PRs for
+the rest. There are no blank separators, no continuation lines and no
+placeholder block, so **every line in the list is a slot the cursor can reach**
+— which is what keeps the scroll rhythm even (§3.5).
+
+The headers are the one deliberate spend of vertical space on the board, and
+they are cheap in the way the blank separator was not: a header carries the
+section's name and its count, and the cursor can rest on it, so it costs a line
+and gives back both a label and a scroll delta of 1. A blank separator carried
+nothing and cost a line *and* a line of delta — which is why there is none.
+`uniform-rows.md` §4.1 has the measurement.
 
 A second chrome line was tried above the list (§3.5.1) and reverted, so the row
 it cost is back. Verified in a real 120×40 pane: the whole 29-row board plus the
@@ -485,10 +705,12 @@ footer, with room to spare.
 
 The footer is one `muted` line, always: keybindings on the left, and on the
 right the **cursor's section with its position in it** — `NEEDS MY REVIEW · 3 of
-10` — plus the spinner cell. The repo yielded that slot: it is a constant the
-user chose, while the section changes under every keypress, and the 8-cell
-gutter can only draw `NEEDS M…`. It is bound to the **cursor**, never to the top
-visible row: at 40 rows the board does not scroll, so a top-row binding is
+10` — plus the spinner cell. On a section header it drops the position and reads
+`NEEDS MY REVIEW · 10`, the section's size: the cursor is *at* the section
+rather than inside it, and a `1 of 10` there would be a position it does not
+have. The repo yielded that slot, being a constant the user chose while the
+section changes under every keypress. It is bound to the **cursor**, never to
+the top visible row: at 40 rows the board does not scroll, so a top-row binding is
 frozen at the first section forever, which is exactly how the reverted sticky
 line failed. `section-layout.md` §14 has the walk that verifies it changes on
 every keypress. When the two fields do not both fit the keys clip and the name
@@ -748,7 +970,8 @@ output is piped, so test the resolved path rather than the exit code.
 
 **Searching.** `/` is vim's `/`. The board does not move — no row hidden, no
 section hidden, nothing reordered, no stack glyph changed — and matches are
-filled where they sit -- a background block, the way vim's `Search` group works.
+filled where they sit -- reverse video, the way vim's `Search` group works, which
+sets both ground and figure so the matched text is readable on any theme (§3.3.3).
 A fill rather than an underline because the board spends foreground colour
 everywhere, and an underline under a faint scope or a muted draft title was
 missable, which is the one thing a search highlight may not be. The cursor previews the match as you

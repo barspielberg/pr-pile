@@ -19,6 +19,8 @@ func detailModel(t *testing.T, pr github.PR, h int) Model {
 	m.width, m.height = 120, h
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{pr}})
 	m.board.Apply(board.Result{Index: 1})
+	// Slot 0 is the section header, so land on the PR itself.
+	m.cursor = m.firstRowSlot()
 	return m
 }
 
@@ -290,7 +292,7 @@ func TestALateResponseIsFiledUnderItsOwnPR(t *testing.T) {
 	m.board.Apply(board.Result{Index: 1})
 
 	// The cursor is on #2 when #1's request finally answers.
-	m.cursor = 1
+	m = onRow(t, m, 1)
 	next, _ := m.Update(detailMsg{detail: github.Detail{
 		Number: 1, Unresolved: 4, DefaultBranch: "master",
 	}})
@@ -299,7 +301,7 @@ func TestALateResponseIsFiledUnderItsOwnPR(t *testing.T) {
 	if out := stripANSI(m.detailOverlay()); strings.Contains(out, "unresolved") {
 		t.Errorf("#1's response leaked onto #2's overlay:\n%s", out)
 	}
-	m.cursor = 0
+	m = onRow(t, m, 0)
 	if out := stripANSI(m.detailOverlay()); !strings.Contains(out, "● 4 unresolved comments") {
 		t.Errorf("#1's response was not kept for #1:\n%s", out)
 	}
@@ -354,8 +356,9 @@ func TestDetailOverlayStaysAGlance(t *testing.T) {
 	}
 
 	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	if m.showChecks || m.cursor != 1 {
-		t.Errorf("one keypress should close and move: showChecks=%v cursor=%d", m.showChecks, m.cursor)
+	if want := m.rowSlot(1); m.showChecks || m.cursor != want {
+		t.Errorf("one keypress should close and move: showChecks=%v cursor=%d want %d",
+			m.showChecks, m.cursor, want)
 	}
 }
 

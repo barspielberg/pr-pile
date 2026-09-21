@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -35,10 +36,10 @@ func TestViewShowsLoadingUntilFirstSectionResolves(t *testing.T) {
 	if out := m.View(); strings.Contains(out, "should not be visible yet") {
 		t.Error("section 2 rendered before section 1 resolved:\n" + out)
 	}
-	// The section still announces itself while pending -- now via the row
-	// gutter rather than a header band.
-	if !strings.Contains(stripANSI(m.View()), "REVIEW") {
-		t.Error("expected the pending section in the gutter")
+	// The section still announces itself while pending: the header is always
+	// drawn, so a section that has not resolved still has a name on screen.
+	if !strings.Contains(stripANSI(m.View()), "Review requested") {
+		t.Error("expected the pending section's header")
 	}
 
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
@@ -74,6 +75,7 @@ func TestViewRendersStatesAndGates(t *testing.T) {
 	if strings.Contains(out, "webapp_e2e") {
 		t.Errorf("gate name should not be in the row:\n%s", out)
 	}
+	m = onRow(t, m, 0)
 	m.showChecks = true
 	if !strings.Contains(m.View(), "webapp_e2e") {
 		t.Errorf("gate name missing from the checks overlay:\n%s", m.View())
@@ -120,11 +122,17 @@ func TestCursorSurvivesSectionsResolving(t *testing.T) {
 	m.board.Apply(board.Result{Index: 1})
 	m.clampCursor()
 
-	if m.cursor != 0 {
-		t.Errorf("cursor should clamp to 0, got %d", m.cursor)
+	// The cursor must land inside the address space. It may land on a header:
+	// the last slot of a board whose final section resolved empty is that
+	// section's header, and that is a legitimate place to be.
+	sl := m.slots()
+	if m.cursor < 0 || m.cursor >= len(sl) {
+		t.Fatalf("cursor %d is outside the %d slots", m.cursor, len(sl))
 	}
-	if _, ok := m.selected(); !ok {
-		t.Error("expected a selected PR after clamping")
+	// A row cursor must have a PR behind it; a header cursor must not.
+	_, ok := m.selected()
+	if got := sl[m.cursor]; got.isRow() != ok {
+		t.Errorf("slot kind and selected() disagree: isRow=%v selected=%v", got.isRow(), ok)
 	}
 }
 
@@ -212,8 +220,8 @@ func TestStatusClusterIsPinnedAcrossWidths(t *testing.T) {
 			}
 		}
 		// Display cells, not bytes: the ▌ mark is multi-byte. The cluster sits
-		// 11 cells into the row body, which the section gutter offsets.
-		want := sectionWidth + 2 + 11
+		// 11 cells into the row, which now starts at column 0.
+		want := 11
 		if got := lipgloss.Width(row[:strings.Index(row, "✓")]); got != want {
 			t.Errorf("width %d: CI glyph at column %d, want %d\n%q", w, got, want, row)
 		}
@@ -314,7 +322,7 @@ func TestSelectedRowIsFilledEdgeToEdge(t *testing.T) {
 		{Number: 2, Title: "not selected", UpdatedAt: time.Now().Add(-time.Hour)},
 	}})
 	m.board.Apply(board.Result{Index: 1})
-	m.cursor = 0
+	m = onRow(t, m, 0)
 
 	var sel, unsel string
 	for _, l := range strings.Split(m.View(), "\n") {
@@ -325,12 +333,18 @@ func TestSelectedRowIsFilledEdgeToEdge(t *testing.T) {
 			unsel = l
 		}
 	}
-	// selBg is 237, which the 256-colour profile emits as 48;5;237.
-	if !strings.Contains(sel, "48;5;237") {
+	// selBg is ANSI 8, which lipgloss emits as the SGR bright-black background
+	// 100 rather than a 48;5;N cube index -- that is the point: it resolves
+	// through the user's theme.
+	if !strings.Contains(sel, "100m") {
 		t.Errorf("selected row has no background fill:\n%q", sel)
 	}
-	if strings.Contains(unsel, "48;5;237") {
+	if strings.Contains(unsel, "100m") {
 		t.Errorf("unselected row should not be filled:\n%q", unsel)
+	}
+	// And no fixed cube background anywhere on the board.
+	if strings.Contains(sel, "48;5;") {
+		t.Errorf("selected row uses a fixed cube background:\n%q", sel)
 	}
 	if !strings.Contains(sel, "▌") {
 		t.Error("selected row is missing the mark bar")
@@ -345,10 +359,16 @@ func TestSelectedRowIsFilledEdgeToEdge(t *testing.T) {
 	}
 }
 
-// The accent brightens only on the selected row. An unselected row keeping
-// plain ANSI 4 is the regression this guards: the board's normal look must not
-// move just because the selected row needed more contrast against selBg.
-func TestAccentBrightensOnlyWhenSelected(t *testing.T) {
+// The accent is the SAME on a selected row as on an unselected one, and it is
+// ANSI 4 on both. It used to brighten to cube 75, justified by a comment
+// claiming ANSI 4 measured 1.21 against selBg -- a figure computed against a
+// nominal ANSI 4 rather than any real theme's palette. Against Catppuccin
+// Mocha's actual #89b4fa, ANSI 4 beats 75 on every fill (3.17:1 vs 2.88:1 on
+// an ANSI 8 selection), so 75 was costing a fixed value and buying nothing.
+//
+// This guards the regression in both directions: no cube value may reappear,
+// and the accent must not diverge between the two row states.
+func TestAccentIsThemedAndDoesNotChangeOnSelection(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
@@ -359,7 +379,7 @@ func TestAccentBrightensOnlyWhenSelected(t *testing.T) {
 		{Number: 2, Title: "not selected", UpdatedAt: time.Now().Add(-time.Hour)},
 	}})
 	m.board.Apply(board.Result{Index: 1})
-	m.cursor = 0
+	m = onRow(t, m, 0)
 
 	var sel, unsel string
 	for _, l := range strings.Split(m.View(), "\n") {
@@ -371,22 +391,21 @@ func TestAccentBrightensOnlyWhenSelected(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(sel, "38;5;75") {
-		t.Errorf("selected row did not brighten the accent to 75:\n%q", sel)
+	// ANSI 4 as a foreground is SGR 34, whether or not a background follows.
+	if !hasSGRParam(segmentAround(t, sel, "#1"), "34") {
+		t.Errorf("selected row's PR number is not ANSI 4:\n%q", sel)
 	}
-	if strings.Contains(sel, "\x1b[34m") {
-		t.Errorf("selected row still emits plain ANSI 4:\n%q", sel)
+	if !hasSGRParam(segmentAround(t, unsel, "#2"), "34") {
+		t.Errorf("unselected row's PR number is not ANSI 4:\n%q", unsel)
 	}
-	if !strings.Contains(unsel, "\x1b[34m") {
-		t.Errorf("unselected row lost plain ANSI 4:\n%q", unsel)
-	}
-	if strings.Contains(unsel, "38;5;75") {
-		t.Errorf("unselected row brightened, which changes the board:\n%q", unsel)
+	// No fixed cube foreground on either row.
+	for _, l := range []string{sel, unsel} {
+		if strings.Contains(l, "38;5;") {
+			t.Errorf("a row uses a fixed cube foreground:\n%q", l)
+		}
 	}
 }
 
-// A refresh must not collapse the board and re-expand it: that shoves every
-// row below each resolving section down the screen.
 func TestRefreshDoesNotChangeLayout(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 60
@@ -454,9 +473,9 @@ func TestFooterStaysPinnedToTheBottom(t *testing.T) {
 			t.Errorf("%d rows: last line is not the footer: %q", n, last)
 		}
 		// The footer is the only chrome, so the list owns every line above it
-		// and the first one carries the first section's gutter name.
-		if first := stripANSI(lines[0]); !strings.Contains(first, "MINE") {
-			t.Errorf("%d rows: first line is not the first row: %q", n, first)
+		// and the first one is the first section's header.
+		if first := stripANSI(lines[0]); !strings.Contains(first, "Mine") {
+			t.Errorf("%d rows: first line is not the first section's header: %q", n, first)
 		}
 
 		// And the same while searching, where the prompt is a second chrome row.
@@ -500,6 +519,54 @@ func TestAuthorColumnIsPerRule(t *testing.T) {
 	}
 	if !strings.Contains(review, "oct") {
 		t.Errorf("Review requested should show initials: %q", review)
+	}
+}
+
+// The author column is muted, like age: one quiet tier rather than two. It
+// used to carry a 15-entry hue palette keyed on the login, which spent 15 fixed
+// cube values overriding the user's theme to decorate what the initials already
+// said. Two different authors must now render identically apart from their
+// letters -- that is the property a palette would break.
+func TestAuthorColumnIsMutedLikeAge(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+		{Name: "Mine", Query: "a", Author: true},
+	}}
+	seg := func(login string) string {
+		t.Helper()
+		m := New(cfg, nil)
+		m.width, m.height = 120, 20
+		m.cursor = -1
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+			Number: 1, Title: "a title", Author: login,
+			CIState: "SUCCESS", UpdatedAt: time.Now(),
+		}}})
+		for _, l := range strings.Split(m.View(), "\n") {
+			if strings.Contains(stripANSI(l), "#1") {
+				return segmentAround(t, l, initials(login))
+			}
+		}
+		t.Fatalf("no row for %q", login)
+		return ""
+	}
+
+	// Faint, and no foreground of its own.
+	a := seg("octocat")
+	if !hasSGRParam(a, "2") {
+		t.Errorf("author is not faint: %q", a)
+	}
+	if strings.Contains(a, "38;5;") {
+		t.Errorf("author still carries a palette colour: %q", a)
+	}
+	// Two logins, same styling: only the letters differ.
+	b := seg("zebra")
+	norm := func(seg, login string) string {
+		return strings.ReplaceAll(seg, initials(login), "")
+	}
+	if norm(a, "octocat") != norm(b, "zebra") {
+		t.Errorf("authors render differently:\n %q\n %q", a, b)
 	}
 }
 
@@ -614,24 +681,24 @@ func TestResolvedEmptySectionIsOneLine(t *testing.T) {
 	lines := strings.Split(m.View(), "\n")
 	for i, l := range lines {
 		plain := stripANSI(l)
-		if !strings.Contains(plain, "REVIEW") {
+		if !strings.Contains(plain, "Review requested") {
 			continue
 		}
-		// The section name and its dash share one line now: the gutter carries
-		// the name, so an empty section costs exactly one row.
-		if !strings.HasSuffix(strings.TrimSpace(plain), "\u2014") {
-			t.Fatalf("expected the dash on the section's own line, got %q", plain)
+		// The header names the section and the dash is the one row beneath it,
+		// so an empty section costs a header plus exactly one line.
+		if i+1 >= len(lines) {
+			t.Fatal("no line after the empty section's header")
 		}
-		blank := 0
-		for j := i + 1; j < len(lines) && strings.TrimSpace(stripANSI(lines[j])) == ""; j++ {
-			blank++
+		if got := strings.TrimSpace(stripANSI(lines[i+1])); got != "\u2014" {
+			t.Fatalf("expected the dash under the header, got %q", got)
 		}
-		if blank > 1 {
-			t.Errorf("empty section holds %d blank rows after its dash", blank)
+		// And no blanks after it: there is no separator row in this layout.
+		if got := strings.TrimSpace(stripANSI(lines[i+2])); got == "" {
+			t.Errorf("empty section is followed by a blank row")
 		}
 		return
 	}
-	t.Fatal("section not found in the gutter")
+	t.Fatal("section header not found")
 }
 
 // esc and q close the help overlay rather than quitting: opening help must
@@ -794,9 +861,18 @@ func TestSectionJumpNavigation(t *testing.T) {
 	m.board.Apply(board.Result{Index: 1, PRs: mk(200, 4)})
 	m.board.Apply(board.Result{Index: 2, PRs: mk(300, 2)})
 
-	// Section boundaries in cursor space: 0, 3, 7.
-	if got := m.sectionStarts(); len(got) != 3 || got[0] != 0 || got[1] != 3 || got[2] != 7 {
-		t.Fatalf("section starts = %v, want [0 3 7]", got)
+	// Section boundaries in cursor space. Starts are the section headers now,
+	// and each header occupies a slot of its own: 0, 1+3=4, 4+1+4=9.
+	// Starts are the section headers. Asked for by name rather than counted:
+	// the offsets shift whenever a section gains or loses rows.
+	starts := m.sectionStarts()
+	if len(starts) != 3 {
+		t.Fatalf("section starts = %v, want one per section", starts)
+	}
+	for i, got := range starts {
+		if want := m.headerSlot(i); got != want {
+			t.Fatalf("section %d starts at %d, want its header slot %d", i, got, want)
+		}
 	}
 
 	press := func(key string) {
@@ -805,28 +881,28 @@ func TestSectionJumpNavigation(t *testing.T) {
 	}
 
 	press("l")
-	if m.cursor != 3 {
-		t.Errorf("l from 0 should land on 3, got %d", m.cursor)
+	if want := m.headerSlot(1); m.cursor != want {
+		t.Errorf("l should land on the second header %d, got %d", want, m.cursor)
 	}
 	press("l")
-	if m.cursor != 7 {
-		t.Errorf("l should land on 7, got %d", m.cursor)
+	if want := m.headerSlot(2); m.cursor != want {
+		t.Errorf("l should land on the third header %d, got %d", want, m.cursor)
 	}
-	// Past the last section, l stops at the final row rather than wrapping.
+	// Past the last section, l stops at the final slot rather than wrapping.
 	press("l")
-	if want := len(m.visibleRows()) - 1; m.cursor != want {
+	if want := len(m.slots()) - 1; m.cursor != want {
 		t.Errorf("l at the end should stop at %d, got %d", want, m.cursor)
 	}
 
-	// h returns to the start of the current section, then steps back.
-	m.cursor = 9
+	// h returns to the current section's header, then steps back.
+	m = onRow(t, m, len(m.visibleRows())-1)
 	press("h")
-	if m.cursor != 7 {
-		t.Errorf("h should land on the current section start 7, got %d", m.cursor)
+	if want := m.headerSlot(2); m.cursor != want {
+		t.Errorf("h should land on the current section's header %d, got %d", want, m.cursor)
 	}
 	press("h")
-	if m.cursor != 3 {
-		t.Errorf("h should step back to 3, got %d", m.cursor)
+	if want := m.headerSlot(1); m.cursor != want {
+		t.Errorf("h should step back to %d, got %d", want, m.cursor)
 	}
 	press("h")
 	press("h")
@@ -835,9 +911,12 @@ func TestSectionJumpNavigation(t *testing.T) {
 	}
 }
 
-// An empty section has no row to land on, so it must be skipped rather than
-// leaving the cursor somewhere that renders nothing.
-func TestSectionJumpSkipsEmptySections(t *testing.T) {
+// An empty section now has somewhere to land: its header. The old gutter had
+// nothing to point at when a section had no rows, so l/h had to skip it; with
+// a header row the section is on the board whether or not it has contents, and
+// jumping to it tells you it resolved empty rather than silently passing over
+// it. That is strictly more information for the same keypress.
+func TestSectionJumpLandsOnEveryHeaderIncludingEmptyOnes(t *testing.T) {
 	cfg := testCfg()
 	cfg.Rules = append(cfg.Rules, config.Rule{Name: "Third", Query: "x"})
 	m := New(cfg, nil)
@@ -847,18 +926,31 @@ func TestSectionJumpSkipsEmptySections(t *testing.T) {
 	m.board.Apply(board.Result{Index: 1})
 	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{{Number: 2, UpdatedAt: time.Now()}}})
 
-	if got := m.sectionStarts(); len(got) != 2 {
-		t.Fatalf("empty section should not be a jump target: %v", got)
+	starts := m.sectionStarts()
+	if len(starts) != 3 {
+		t.Fatalf("every section has a header to land on, got %v", starts)
 	}
-	mm, _ := m.handleKey(keyOf("l"))
-	if got := mm.(Model).cursor; got != 1 {
-		t.Errorf("l should skip the empty section and land on 1, got %d", got)
+	for i, got := range starts {
+		want := m.headerSlot(i)
+		if got != want {
+			t.Errorf("section %d starts at %d, want its header slot %d", i, got, want)
+		}
+	}
+
+	// l walks the headers in order, including the empty section's.
+	for i := 1; i < 3; i++ {
+		mm, _ := m.handleKey(keyOf("l"))
+		m = mm.(Model)
+		if want := m.headerSlot(i); m.cursor != want {
+			t.Fatalf("l %d: cursor %d, want header %d at %d", i, m.cursor, i, want)
+		}
+		sl, _ := m.slotAt(m.cursor)
+		if !sl.isHeader() {
+			t.Errorf("l should land on a header, landed on a row")
+		}
 	}
 }
 
-// Moving down should reveal what is coming, not pin the cursor to the bottom
-// edge. lazygit treated the edge-pinned version as a defect (PR #2915) and
-// fzf migrated from 0 to 3 in 2024; nobody migrated the other way.
 func TestCursorKeepsContextBelowIt(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 14
@@ -941,7 +1033,8 @@ func TestFailingRowIsOneLineAndItsGatesAreInTheOverlay(t *testing.T) {
 	}
 	m.board.Apply(board.Result{Index: 0, PRs: prs})
 	m.board.Apply(board.Result{Index: 1})
-	m.cursor = 14
+	// The failing PR is the 15th row (i == 15 above, 0-based row 14).
+	m = onRow(t, m, 14)
 
 	out := stripANSI(m.View())
 	if !strings.Contains(out, "pr 15") {
@@ -1072,11 +1165,6 @@ func TestOneKeypressScrollsAtMostOneLine(t *testing.T) {
 	m.board.Apply(board.Result{Index: 1, PRs: mk(3300, 10)})
 	m.board.Apply(board.Result{Index: 2, PRs: mk(3400, 14)})
 
-	// The viewport is identified by its top line. Comparing whole rendered
-	// frames would also catch the selection bar moving, which is not the point.
-	topLine := func() string {
-		return strings.Split(m.View(), "\n")[0]
-	}
 	cursorOnScreen := func() bool {
 		for _, l := range strings.Split(m.View(), "\n") {
 			if strings.Contains(l, "▌") {
@@ -1091,56 +1179,49 @@ func TestOneKeypressScrollsAtMostOneLine(t *testing.T) {
 		t.Fatalf("board too small to scroll: %d rows", rows)
 	}
 
-	// The top line is located by the PR it carries rather than by string
-	// equality: when its section started above the window it is re-rendered
-	// with the section's name in the gutter, so the bytes differ from body()'s
-	// own copy while the line is the same line.
-	number := func(line string) string {
-		f := strings.Fields(stripANSI(line))
-		for _, w := range f {
-			if strings.HasPrefix(w, "#") {
-				return w
-			}
-		}
-		return ""
-	}
-	lineIndex := func(top string) int {
-		want := number(top)
-		if want == "" {
-			return -1
-		}
-		lines, _, _ := m.body("")
-		for i, l := range lines {
-			if number(l) == want {
-				return i
-			}
-		}
-		return -1
+	// window() reports the index of its own top line, which is exact. Matching
+	// rendered strings cannot work here: two headers or two rows can render
+	// identically, and the earlier version of this test silently mislocated
+	// the viewport because of it.
+	topIndex := func() int {
+		lines, slotStarts, _ := m.body("")
+		_, start := window(lines, m.cursor, m.height-1, slotStarts)
+		return start
 	}
 
+	// Every slot, not every row: headers are addressable, so they are part of
+	// the walk that has to hold the invariant.
+	n := len(m.slots())
+	if n < 30 {
+		t.Fatalf("board too small to scroll: %d slots", n)
+	}
 	for _, dir := range []int{1, -1} {
-		start, stop := 0, rows-1
+		start, stop := 0, n-1
 		if dir < 0 {
-			start, stop = rows-1, 0
+			start, stop = n-1, 0
 		}
 		m.cursor = start
-		prev := lineIndex(topLine())
+		prev := topIndex()
 		for c := start; c != stop; c += dir {
 			m.cursor = c + dir
 			if !cursorOnScreen() {
 				t.Fatalf("cursor %d is off screen", m.cursor)
 			}
-			now := lineIndex(topLine())
-			if now < 0 || prev < 0 {
-				t.Fatalf("cursor %d: could not locate the viewport top", m.cursor)
-			}
+			now := topIndex()
 			if d := now - prev; d < -1 || d > 1 {
-				t.Errorf("cursor %d -> %d: board scrolled %d lines, want at most 1",
+				t.Fatalf("cursor %d -> %d: board scrolled %d lines, want at most 1",
 					c, m.cursor, d)
-				return
 			}
 			prev = now
 		}
+	}
+
+	// And the reason it holds: every line in the list is addressable, so the
+	// cursor's index and its line move together.
+	lines, slotStarts, _ := m.body("")
+	if len(lines) != len(slotStarts) {
+		t.Errorf("%d lines for %d slots: an unaddressable line would cost one line of delta",
+			len(lines), len(slotStarts))
 	}
 }
 
@@ -1154,6 +1235,7 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
 	}})
 	m.board.Apply(board.Result{Index: 1})
+	m = onRow(t, m, 0)
 
 	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	if !m.showChecks {
@@ -1167,8 +1249,8 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 	if m.showChecks {
 		t.Error("a movement key should close the overlay")
 	}
-	if m.cursor != 1 {
-		t.Errorf("the same keypress should also move: cursor %d, want 1", m.cursor)
+	if want := m.rowSlot(1); m.cursor != want {
+		t.Errorf("the same keypress should also move: cursor %d, want %d", m.cursor, want)
 	}
 
 	// esc closes without moving, and without quitting.
@@ -1177,8 +1259,8 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 	if m.showChecks {
 		t.Error("esc should close the overlay")
 	}
-	if m.cursor != 1 {
-		t.Errorf("esc should not move: cursor %d, want 1", m.cursor)
+	if want := m.rowSlot(1); m.cursor != want {
+		t.Errorf("esc should not move: cursor %d, want %d", m.cursor, want)
 	}
 }
 
@@ -1196,6 +1278,7 @@ func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
 		PassedCount:  22, SkippedCount: 10,
 	}}})
 	m.board.Apply(board.Result{Index: 1})
+	m = onRow(t, m, 0)
 	m.showChecks = true
 
 	out := stripANSI(m.View())
@@ -1226,6 +1309,7 @@ func TestChecksOverlayOnPendingPRNamesWhatIsRunning(t *testing.T) {
 		PassedCount:  9, SkippedCount: 12,
 	}}})
 	m.board.Apply(board.Result{Index: 1})
+	m = onRow(t, m, 0)
 	m.showChecks = true
 
 	out := stripANSI(m.View())
@@ -1247,6 +1331,7 @@ func TestChecksOverlayOnGreenPRIsOneLine(t *testing.T) {
 		PassedCount: 22, SkippedCount: 10,
 	}}})
 	m.board.Apply(board.Result{Index: 1})
+	m = onRow(t, m, 0)
 	m.showChecks = true
 
 	if out := stripANSI(m.View()); !strings.Contains(out, "all 22 checks passing") {
@@ -1268,6 +1353,7 @@ func TestChecksOverlayFitsThePane(t *testing.T) {
 			Number: 1, Title: "t", CIState: "FAILURE", FailedGates: gates, UpdatedAt: time.Now(),
 		}}})
 		m.board.Apply(board.Result{Index: 1})
+		m = onRow(t, m, 0)
 		m.showChecks = true
 
 		out := stripANSI(m.View())
@@ -1302,6 +1388,7 @@ func TestChecksOverlayTallySurvivesClipping(t *testing.T) {
 		PassedCount: 9, SkippedCount: 12, UpdatedAt: time.Now(),
 	}}})
 	m.board.Apply(board.Result{Index: 1})
+	m = onRow(t, m, 0)
 	m.showChecks = true
 
 	out := stripANSI(m.View())
@@ -1336,20 +1423,30 @@ func TestNoChromeLineAboveTheList(t *testing.T) {
 		{Number: 4001, Title: "theirs", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
 	}})
 
-	first := stripANSI(strings.Split(m.View(), "\n")[0])
-	if !strings.Contains(first, "#3001") {
-		t.Errorf("first line is not the first row: %q", first)
+	lines := strings.Split(m.View(), "\n")
+	// The board opens on the first section's header, with its first row
+	// directly beneath. The header is section furniture, not a chrome line: it
+	// scrolls with the content and the cursor can sit on it, which is what the
+	// reverted sticky line could not do.
+	first := stripANSI(lines[0])
+	if !strings.Contains(first, "Mine") {
+		t.Errorf("first line is not the first section's header: %q", first)
 	}
-	// A count like "1 of 5" read as a cursor position and was never one.
+	if !strings.Contains(stripANSI(lines[1]), "#3001") {
+		t.Errorf("second line is not the first row: %q", stripANSI(lines[1]))
+	}
+	// A count like "1 of 5" read as a cursor position and was never one. The
+	// header's count is a section size, which is why it is a bare number.
 	if strings.Contains(first, " of ") {
-		t.Errorf("first line carries a position count: %q", first)
+		t.Errorf("header carries a position count: %q", first)
 	}
 }
 
-// The gutter name is computed against the visible window: the top row always
-// carries its section's name, even when the section began above the fold. It
-// keeps `│` there -- `╷` claims the section starts on that row, which is false.
-func TestTopVisibleRowCarriesItsSectionName(t *testing.T) {
+// A header is a row on the board rather than a chrome line above it, so it
+// scrolls out of view with the section it names. The old gutter had to
+// re-label the top visible row precisely because the label was pinned
+// per-row; an inline header is simply above its rows or it is gone.
+func TestSectionHeaderScrollsWithItsSection(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 14
 
@@ -1363,50 +1460,79 @@ func TestTopVisibleRowCarriesItsSectionName(t *testing.T) {
 	m.board.Apply(board.Result{Index: 0, PRs: prs})
 	m.board.Apply(board.Result{Index: 1})
 
-	m.cursor = 20
-	top := stripANSI(strings.Split(m.View(), "\n")[0])
-	if !strings.HasPrefix(top, "MINE") {
-		t.Errorf("top visible row is unnamed: %q", top)
+	// At the top the header is on screen, above its first row.
+	m = onHeader(t, m, 0)
+	if top := stripANSI(strings.Split(m.View(), "\n")[0]); !strings.Contains(top, "Mine") {
+		t.Errorf("header missing at the top of the board: %q", top)
 	}
-	if !strings.Contains(top, "│") || strings.Contains(top, "╷") {
-		t.Errorf("top row should continue the rule, not start it: %q", top)
+
+	// Scrolled deep into the same section it has left the viewport rather than
+	// following the cursor down it.
+	m = onRow(t, m, 25)
+	body := strings.Join(strings.Split(stripANSI(m.View()), "\n")[:m.height-1], "\n")
+	if strings.Contains(body, "  Mine") {
+		t.Errorf("header stuck to the viewport instead of scrolling:\n%s", body)
 	}
-	if strings.Contains(top, "pr 1 ") {
-		t.Fatalf("board did not scroll, test proves nothing: %q", top)
+	if strings.Contains(body, "pr 1 ") {
+		t.Fatalf("board did not scroll, test proves nothing:\n%s", body)
 	}
 }
 
-// The rule breaks at a section boundary, so a boundary reads even when the
-// name fills all 8 cells and cannot signal it by shape.
-func TestSectionBoundaryBreaksTheRule(t *testing.T) {
+// A header announces its section's size -- the count the 8-cell gutter could
+// never carry. A section still loading has no count to show yet.
+func TestSectionHeaderCarriesTheRowCount(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 40
+	var mine []github.PR
+	for i := 1; i <= 4; i++ {
+		mine = append(mine, github.PR{
+			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+		})
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: mine})
+
+	header := func(name string) string {
+		t.Helper()
+		for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+			if strings.Contains(l, name) {
+				return strings.TrimSpace(l)
+			}
+		}
+		t.Fatalf("no header for %q", name)
+		return ""
+	}
+	if got := header("Mine"); !strings.HasSuffix(got, "4") {
+		t.Errorf("resolved section header lacks its count: %q", got)
+	}
+	// Still pending: a number here would be about to change under the reader.
+	if got := header("Review requested"); got != "Review requested" {
+		t.Errorf("pending header should carry no count: %q", got)
+	}
+}
+
+// Sections are separated by the header's own background, not by a blank row.
+// A blank is a line the cursor cannot occupy, and every such line costs one to
+// the worst-case scroll delta -- docs/uniform-rows.md §4.1.
+func TestNoBlankRowBetweenSections(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
 		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
-		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8999, 0)},
 	}})
 	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{
-		{Number: 3, Title: "c", CIState: "SUCCESS", UpdatedAt: time.Unix(8998, 0)},
+		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8999, 0)},
 	}})
 
-	var starts, continues int
-	for _, l := range strings.Split(stripANSI(m.View()), "\n") {
-		switch {
-		case strings.Contains(l, "╷"):
-			starts++
-			if !strings.HasPrefix(strings.TrimSpace(l), "MINE") &&
-				!strings.HasPrefix(strings.TrimSpace(l), "REVIEW") {
-				t.Errorf("a broken rule without a name: %q", l)
-			}
-		case strings.Contains(l, "│"):
-			continues++
+	lines, slotStarts, _ := m.body("")
+	// Every line in the list is a slot: that is the invariant, stated as code.
+	if len(lines) != len(slotStarts) {
+		t.Errorf("%d lines for %d slots: some line is not addressable", len(lines), len(slotStarts))
+	}
+	for i, l := range lines {
+		if strings.TrimSpace(stripANSI(l)) == "" {
+			t.Errorf("line %d is blank: %q", i, stripANSI(l))
 		}
-	}
-	if starts != 2 {
-		t.Errorf("got %d section starts, want 2", starts)
-	}
-	if continues != 1 {
-		t.Errorf("got %d continuation rows, want 1", continues)
 	}
 }
 
@@ -1449,12 +1575,21 @@ func TestFooterNamesTheCursorSection(t *testing.T) {
 		want = append(want, fmt.Sprintf("REVIEW REQUESTED · %d of 7", i))
 	}
 
-	m.cursor = 0
+	// Walked by PR row rather than by raw index: the indices now interleave
+	// headers, and a header's footer reads "MINE · 5" -- the section's size,
+	// with no position, because the cursor is at the section and not in it.
 	for i, w := range want {
-		m.cursor = i
+		m = onRow(t, m, i)
 		if got := foot(); !strings.Contains(got, w) {
-			t.Fatalf("cursor %d: footer %q, want it to carry %q", i, got, w)
+			t.Fatalf("row %d: footer %q, want it to carry %q", i, got, w)
 		}
+	}
+
+	// On a header the footer names the section and its size, and claims no
+	// position inside it.
+	m = onHeader(t, m, 0)
+	if got := foot(); !strings.Contains(got, "MINE · 5") || strings.Contains(got, " of ") {
+		t.Errorf("header footer %q, want the section size and no position", got)
 	}
 
 	// The repo yielded the slot, so it is not also drawn there.
@@ -1512,7 +1647,7 @@ func TestFooterKeepsTheSectionNameWhenItClips(t *testing.T) {
 	mine, review := samplePRs()
 	for _, w := range []int{80, 86, 100, 120} {
 		m := loaded(t, w, 24, mine, review)
-		m.cursor = 1
+		m = onRow(t, m, 1)
 		lines := strings.Split(stripANSI(m.View()), "\n")
 		foot := lines[len(lines)-1]
 		if !strings.Contains(foot, "MINE · 2 of 2") {
@@ -1550,11 +1685,13 @@ func TestGGGoesToTheTop(t *testing.T) {
 		t.Errorf("j after g moved to %d, want 1: g swallowed the next key", m.cursor)
 	}
 
-	// G is still the bottom, and gG is not a chord that wedges anything.
+	// G is still the bottom, and gG is not a chord that wedges anything. The
+	// bottom is the last slot, which is the last PR row on a board whose final
+	// section has any.
 	m = press(m, runeKey('g'))
 	m = press(m, runeKey('G'))
-	if want := len(m.visibleRows()) - 1; m.cursor != want {
-		t.Errorf("G left the cursor at %d, want %d", m.cursor, want)
+	if want := len(m.slots()) - 1; m.cursor != want {
+		t.Errorf("G left the cursor at %d, want the last slot %d", m.cursor, want)
 	}
 }
 
@@ -1843,7 +1980,7 @@ func TestYCopiesTheSelectedURL(t *testing.T) {
 	mine, review := samplePRs()
 	mine[0].URL = "https://github.com/o/r/pull/3248"
 	m := loaded(t, 120, 20, mine, review)
-	m.cursor = 0
+	m = onRow(t, m, 0)
 
 	_, cmd := m.handleKey(runeKey('y'))
 	msg := runCmd(t, cmd)
@@ -1945,5 +2082,293 @@ func TestCopyKeyIsDocumented(t *testing.T) {
 	}
 	if out := stripANSI(m.helpOverlay()); !strings.Contains(out, "copy") {
 		t.Errorf("the help page does not mention copying:\n%s", out)
+	}
+}
+
+// Guards DESIGN.md §3.8 against the constants drifting from the spec table.
+func TestDocumentedTiersMatchTheCode(t *testing.T) {
+	for _, c := range []struct {
+		w    int
+		want tier
+	}{
+		{40, tierNarrow}, {59, tierNarrow},
+		{60, tierMid}, {75, tierMid},
+		{76, tierFull}, {400, tierFull},
+	} {
+		if got := widthTier(c.w); got != c.want {
+			t.Errorf("width %d: tier %v, want %v", c.w, got, c.want)
+		}
+	}
+	for _, c := range []struct{ w, want int }{
+		{76, 76 - 23}, {60, 60 - 19}, {40, 40 - 15},
+	} {
+		if got := titleWidth(c.w, widthTier(c.w)); got != c.want {
+			t.Errorf("width %d: title %d, want %d", c.w, got, c.want)
+		}
+	}
+	if minWidth != 40 {
+		t.Errorf("minWidth = %d, DESIGN.md §3.8 says 40", minWidth)
+	}
+}
+
+// slots() and body() must agree line for line, because every slot index the
+// model uses -- the cursor, the footer's position, l/h -- indexes slots() while
+// what the user sees comes from body(). They desynced once: body() gained a
+// note slot that slots() did not know about, which silently shifted every slot
+// after an empty section by one, so the footer named the wrong section and
+// selected() returned the wrong PR. Counting lines does not catch that; this
+// checks the kinds line up.
+func TestSlotsAgreeWithBodyLineForLine(t *testing.T) {
+	states := []func(m *Model, i int){
+		func(m *Model, i int) { // ready with rows
+			m.board.Apply(board.Result{Index: i, PRs: []github.PR{
+				{Number: 100 + i, Title: "t", CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0)},
+			}})
+		},
+		func(m *Model, i int) { m.board.Apply(board.Result{Index: i}) },               // empty
+		func(m *Model, i int) { m.board.Apply(board.Result{Index: i, Err: errTest}) }, // failed
+		func(m *Model, i int) {}, // pending
+	}
+	for a := range states {
+		for b := range states {
+			for c := range states {
+				cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+					{Name: "One", Query: "a"}, {Name: "Two", Query: "b"}, {Name: "Three", Query: "c"},
+				}}
+				m := New(cfg, nil)
+				m.width, m.height = 147, 20
+				for i, pick := range []int{a, b, c} {
+					states[pick](&m, i)
+				}
+
+				lines, slotStarts, meta := m.body("")
+				sl := m.slots()
+				if len(sl) != len(slotStarts) {
+					t.Fatalf("%d/%d/%d: slots()=%d but body drew %d slots",
+						a, b, c, len(sl), len(slotStarts))
+				}
+				// Each drawn slot line must be the kind slots() claims.
+				for line, mt := range meta {
+					if mt.slot < 0 {
+						t.Fatalf("%d/%d/%d: line %d is not a slot", a, b, c, line)
+					}
+					got := stripANSI(lines[line])
+					switch {
+					case sl[mt.slot].isRow():
+						if !strings.Contains(got, "#") {
+							t.Errorf("%d/%d/%d: slot %d claims a row, drew %q", a, b, c, mt.slot, got)
+						}
+					case sl[mt.slot].isHeader():
+						if !strings.Contains(got, sl[mt.slot].section) {
+							t.Errorf("%d/%d/%d: slot %d claims header %q, drew %q",
+								a, b, c, mt.slot, sl[mt.slot].section, got)
+						}
+					case sl[mt.slot].isNote():
+						if strings.Contains(got, "#") {
+							t.Errorf("%d/%d/%d: slot %d claims a note, drew a row %q", a, b, c, mt.slot, got)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// The footer's section and position are read off the cursor's slot, so they
+// have to be right for every slot kind and in the presence of a note line --
+// the case that silently shifted them by one section before notes became
+// slots.
+func TestFooterSectionIsCorrectForEverySlot(t *testing.T) {
+	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+		{Name: "One", Query: "a"}, {Name: "Empty", Query: "b"}, {Name: "Three", Query: "c"},
+	}}
+	m := New(cfg, nil)
+	m.width, m.height = 147, 30
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 11, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9002, 0)},
+		{Number: 12, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(9001, 0)},
+	}})
+	m.board.Apply(board.Result{Index: 1}) // resolved empty -> header + note
+	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{
+		{Number: 31, Title: "c", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
+	}})
+
+	for i, sl := range m.slots() {
+		m.cursor = i
+		name, pos, total := m.cursorSection()
+		if name != sl.section {
+			t.Errorf("slot %d: footer says %q, slot belongs to %q", i, name, sl.section)
+		}
+		switch {
+		case sl.isRow():
+			if pos < 1 || pos > total {
+				t.Errorf("slot %d (%s): position %d of %d is out of range", i, name, pos, total)
+			}
+		default:
+			if pos != 0 {
+				t.Errorf("slot %d (%s) is not a row but claims position %d", i, name, pos)
+			}
+		}
+	}
+
+	// The last section's single row must read "1 of 1", not "3 of 1": rowIdx
+	// counts across the board and has to be offset by the sections above.
+	m.cursor = m.rowSlot(2)
+	if name, pos, total := m.cursorSection(); name != "Three" || pos != 1 || total != 1 {
+		t.Errorf("last section's row: %q %d of %d, want Three 1 of 1", name, pos, total)
+	}
+}
+
+// errTest is a section fetch failure, for the Failed state in the matrix below.
+var errTest = errors.New("rule query failed")
+
+// The scroll invariant across section STATE, not just row counts.
+//
+// This test exists because the first version of it did not vary state: it
+// applied rows to every rule, so every section was Ready and non-empty, and it
+// passed while three kinds of unselectable line were live in body(). Each cost
+// a line of delta by the rule in docs/uniform-rows.md §4.1, and the pending
+// case cost more as the pane grew, because the placeholder block scaled with
+// height. Cold start is every launch, so that was the common case.
+//
+// Row counts are the easy axis and state is the one that bites, so the matrix
+// walks every combination of Ready-with-rows / Ready-empty / Failed / Pending
+// across three sections, at every height the rest of the suite uses.
+func TestOneKeypressScrollsAtMostOneLineAcrossSectionStates(t *testing.T) {
+	type state int
+	const (
+		ready state = iota
+		empty
+		failed
+		pending
+	)
+	name := map[state]string{ready: "ready", empty: "empty", failed: "failed", pending: "pending"}
+
+	mk := func(base, n int) []github.PR {
+		var prs []github.PR
+		for i := 0; i < n; i++ {
+			prs = append(prs, github.PR{
+				Number: base + i, Title: fmt.Sprintf("pr %d", base+i),
+				Author: "someone", CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+			})
+		}
+		return prs
+	}
+
+	// Every ordered triple of states. Order matters: a pending section above a
+	// populated one is a different layout from one below it.
+	all := []state{ready, empty, failed, pending}
+	for _, a := range all {
+		for _, b := range all {
+			for _, c := range all {
+				states := [3]state{a, b, c}
+				label := name[a] + "/" + name[b] + "/" + name[c]
+				for _, h := range []int{5, 8, 10, 12, 16, 20, 24} {
+					cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+						{Name: "Mine", Query: "a"},
+						{Name: "Needs my review", Query: "b"},
+						{Name: "All open", Query: "c"},
+					}}
+					m := New(cfg, nil)
+					m.width, m.height = 147, h
+
+					// Pending is the absence of a result, so those rules get
+					// no Apply at all. Frontier means a pending rule holds
+					// every rule below it pending too, which is itself one of
+					// the shapes worth covering.
+					for i, st := range states {
+						switch st {
+						case ready:
+							m.board.Apply(board.Result{Index: i, PRs: mk(3200+i*100, 4)})
+						case empty:
+							m.board.Apply(board.Result{Index: i})
+						case failed:
+							m.board.Apply(board.Result{Index: i, Err: errTest})
+						case pending:
+							// no result
+						}
+					}
+
+					lines, slotStarts, _ := m.body("")
+					// The invariant, stated directly: every line in the list
+					// is a slot. This is the cheap check that catches a new
+					// unselectable line before the walk below has to.
+					if len(lines) != len(slotStarts) {
+						t.Errorf("%s h=%d: %d lines for %d slots -- some line is not addressable",
+							label, h, len(lines), len(slotStarts))
+						continue
+					}
+					if len(slotStarts) < 2 || len(lines) <= h-1 {
+						continue // nothing to scroll
+					}
+
+					prev := -1
+					for _, dir := range []int{1, -1} {
+						start, stop := 0, len(slotStarts)-1
+						if dir < 0 {
+							start, stop = len(slotStarts)-1, 0
+						}
+						m.cursor = start
+						_, prev = window(lines, m.cursor, h-1, slotStarts)
+						for cur := start; cur != stop; cur += dir {
+							m.cursor = cur + dir
+							_, now := window(lines, m.cursor, h-1, slotStarts)
+							if d := now - prev; d < -1 || d > 1 {
+								t.Fatalf("%s h=%d: slot %d -> %d scrolled %d lines, want at most 1",
+									label, h, cur, m.cursor, d)
+							}
+							prev = now
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// Every colour the board draws must resolve through the user's theme. This is
+// the guard on the whole arc of colour work on this branch: an author palette,
+// five commit-type tints, a header band and a brightened selection accent were
+// all fixed 256-cube values, and all of them are gone.
+//
+// A fixed value is not banned in principle -- DESIGN-GUIDE.md §3 allows one
+// where a measured contrast requirement has no themed answer -- but there is
+// currently no such case, so any cube index appearing here is a regression
+// until DESIGN.md §3.3's table says otherwise.
+func TestNoFixedCubeColoursAnywhereOnTheBoard(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+		{Name: "Mine", Query: "a", Tree: true},
+		{Name: "Needs my review", Query: "b", Author: true},
+		{Name: "Empty", Query: "c"},
+		{Name: "Broken", Query: "d"},
+	}}
+	m := New(cfg, nil)
+	m.width, m.height = 147, 24
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "fix(api): AF-1 a failing one", CIState: "FAILURE",
+			FailedGates: []string{"g1", "g2"}, Mergeable: "CONFLICTING", UpdatedAt: time.Now()},
+		{Number: 2, Title: "feat(web): a draft", CIState: "PENDING",
+			IsDraft: true, Author: "someone", UpdatedAt: time.Now()},
+		{Number: 3, Title: "chore: an approved one", CIState: "SUCCESS",
+			Review: "APPROVED", Author: "other", UpdatedAt: time.Now()},
+	}})
+	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{
+		{Number: 4, Title: "plain prose title", CIState: "SUCCESS",
+			Review: "REVIEW_REQUIRED", Author: "third", UpdatedAt: time.Now()},
+	}})
+	m.board.Apply(board.Result{Index: 2})               // resolved empty -> note
+	m.board.Apply(board.Result{Index: 3, Err: errTest}) // failed -> error note
+
+	// Walk every slot so the selected variant of every line kind is rendered.
+	for i := range m.slots() {
+		m.cursor = i
+		for _, line := range strings.Split(m.View(), "\n") {
+			if strings.Contains(line, "38;5;") || strings.Contains(line, "48;5;") {
+				t.Fatalf("cursor %d: a fixed cube colour is on the board:\n%q", i, line)
+			}
+		}
 	}
 }

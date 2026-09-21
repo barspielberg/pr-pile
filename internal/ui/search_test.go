@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,31 @@ func typeQuery(m Model, q string) Model {
 	return m
 }
 
+// onRow seats the cursor on the nth PR row, counting across sections and
+// ignoring headers and notes. Tests say what they mean -- "the third PR" --
+// instead of hand-counting past section headers, which is the arithmetic that
+// breaks whenever a section empties or the layout gains a line.
+func onRow(t *testing.T, m Model, n int) Model {
+	t.Helper()
+	i := m.rowSlot(n)
+	if i < 0 {
+		t.Fatalf("no PR row %d on this board (%d rows)", n, len(m.visibleRows()))
+	}
+	m.cursor = i
+	return m
+}
+
+// onHeader seats the cursor on the nth section's header.
+func onHeader(t *testing.T, m Model, n int) Model {
+	t.Helper()
+	i := m.headerSlot(n)
+	if i < 0 {
+		t.Fatalf("no section header %d on this board", n)
+	}
+	m.cursor = i
+	return m
+}
+
 // loaded is a two-section board with both rules resolved, so nothing is pending
 // and every row below is drawable.
 func loaded(t *testing.T, width, height int, mine, review []github.PR) Model {
@@ -41,6 +67,9 @@ func loaded(t *testing.T, width, height int, mine, review []github.PR) Model {
 	m.width, m.height = width, height
 	m.board.Apply(board.Result{Index: 0, PRs: mine})
 	m.board.Apply(board.Result{Index: 1, PRs: review})
+	// Slot 0 is the first section's header, so start on the first PR: these
+	// tests are about rows, not about where the cursor opens.
+	m.cursor = m.firstRowSlot()
 	return m
 }
 
@@ -131,16 +160,20 @@ func TestCtrlNAndCtrlPMoveWithinMatches(t *testing.T) {
 	down := tea.KeyMsg{Type: tea.KeyCtrlN}
 	up := tea.KeyMsg{Type: tea.KeyCtrlP}
 
+	// matchIndexes is in row space; the cursor addresses slots, which include
+	// section headers and notes. rowSlot is the conversion.
 	for i := 1; i < len(matches); i++ {
 		m = press(m, down)
-		if m.cursor != matches[i] {
-			t.Fatalf("ctrl+n: cursor %d, want match %d at row %d", m.cursor, i, matches[i])
+		if want := m.rowSlot(matches[i]); m.cursor != want {
+			t.Fatalf("ctrl+n: cursor %d, want match %d (row %d) at slot %d",
+				m.cursor, i, matches[i], want)
 		}
 	}
 	for i := len(matches) - 2; i >= 0; i-- {
 		m = press(m, up)
-		if m.cursor != matches[i] {
-			t.Fatalf("ctrl+p: cursor %d, want match %d at row %d", m.cursor, i, matches[i])
+		if want := m.rowSlot(matches[i]); m.cursor != want {
+			t.Fatalf("ctrl+p: cursor %d, want match %d (row %d) at slot %d",
+				m.cursor, i, matches[i], want)
 		}
 	}
 
@@ -155,14 +188,18 @@ func TestCtrlJAndCtrlKAlsoMove(t *testing.T) {
 	mine, review := samplePRs()
 	m := typeQuery(loaded(t, 120, 40, mine, review), "")
 
-	before := len(m.visibleRows())
+	// An empty query is not a search, so these are plain movement: exactly one
+	// slot per press. Asserted on the exact destination rather than merely
+	// "something changed" -- a motion that moved two slots would pass the
+	// weaker test.
+	start := m.cursor
 	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlJ})
-	if m.cursor != 1 {
-		t.Errorf("ctrl+j: cursor %d, want 1 (of %d rows)", m.cursor, before)
+	if want := start + 1; m.cursor != want {
+		t.Errorf("ctrl+j: cursor %d, want exactly one slot on at %d", m.cursor, want)
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlK})
-	if m.cursor != 0 {
-		t.Errorf("ctrl+k: cursor %d, want 0", m.cursor)
+	if m.cursor != start {
+		t.Errorf("ctrl+k: cursor %d, want back at %d", m.cursor, start)
 	}
 }
 
@@ -190,14 +227,16 @@ func TestEscRestoresTheCursor(t *testing.T) {
 }
 
 // The board does not move while searching, so a section that matches nothing
-// keeps its gutter and its rows: the user is looking for one PR among the ones
+// keeps its header and its rows: the user is looking for one PR among the ones
 // around it, not at a shortlist.
 func TestEmptySectionsStayVisibleWhileSearching(t *testing.T) {
 	mine, review := samplePRs()
 	m := typeQuery(loaded(t, 120, 40, mine, review), "refuse")
 
+	// Header names are drawn as configured, not uppercased -- the full-width
+	// header row has room for them, which the 8-cell gutter did not.
 	out := stripANSI(m.View())
-	for _, want := range []string{"MINE", "REVIEW", "#3248", "#3100", "#4001"} {
+	for _, want := range []string{"Mine", "Review requested", "#3248", "#3100", "#4001"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("searching hid %s:\n%s", want, out)
 		}
@@ -389,7 +428,7 @@ func TestPromptCountMatchesMatchingRows(t *testing.T) {
 			want = "no matches"
 		default:
 			for i, idx := range matches {
-				if idx == m.cursor {
+				if idx == m.cursorRow() {
 					want = fmt.Sprintf("%d of %d", i+1, len(matches))
 				}
 			}
@@ -555,7 +594,7 @@ func TestSearchTextMatchesWhatIsRendered(t *testing.T) {
 		for _, showAuthor := range []bool{false, true} {
 			m := loaded(t, w, 40, prs, nil)
 			for _, r := range m.board.Sections()[0].Rows {
-				row := stripANSI(m.renderRow(r, false, showAuthor, "mine", sectionStarts))
+				row := stripANSI(m.renderRow(r, false, showAuthor))
 				txt, cells := m.searchText(r, showAuthor)
 				runes := []rune(txt)
 
@@ -739,7 +778,9 @@ func TestMatchSpansFindsEveryOccurrence(t *testing.T) {
 func TestClippedNonASCIITitleHighlightsCorrectly(t *testing.T) {
 	pr := github.PR{Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
 		Title: "feat(café): refuse — órder plán writes for the whole fleet at once"}
-	m := loaded(t, 90, 40, []github.PR{pr}, nil)
+	// 80, not 90: the section gutter's 10 cells went back to the title when
+	// sections moved to their own header row, so 90 no longer clips this.
+	m := loaded(t, 80, 40, []github.PR{pr}, nil)
 	r := m.board.Sections()[0].Rows[0]
 
 	raw, _ := m.searchText(r, false)
@@ -965,13 +1006,14 @@ func TestAuthorCellHighlightsWithinItsThreeCells(t *testing.T) {
 	if got := hitRunsOf(line); len(got) != 1 || got[0] != "imm" {
 		t.Errorf("highlighted %v, want just the initials", got)
 	}
-	// The fill replaces the palette colour rather than composing with it. That
-	// is the point: an author hit has to look like every other hit, not like a
-	// slightly different shade of that author.
-	palette := fmt.Sprintf("38;5;%s", authorStyle("immanuel").GetForeground())
+	// The fill replaces the cell's own styling rather than composing with it.
+	// That is the point: an author hit has to look like every other hit. The
+	// author column used to carry a per-login palette colour and this guarded
+	// against that leaking under the fill; the column is `muted` now, so the
+	// thing that must not leak is the faint.
 	for _, seg := range strings.Split(line, "\x1b[") {
-		if strings.Contains(seg, hitFill()) && strings.Contains(seg, palette) {
-			t.Errorf("the fill kept the author's own colour under it: %q", seg)
+		if strings.Contains(seg, hitFill()) && hasSGRParam("\x1b["+seg, "2") {
+			t.Errorf("the fill kept the author's faint under it: %q", seg)
 		}
 	}
 }
@@ -996,16 +1038,16 @@ func TestAgeCellIsNeverHighlighted(t *testing.T) {
 // answer is on screen before the user stops typing.
 func TestTypingWalksTheCursorToTheFirstMatch(t *testing.T) {
 	mine, review := samplePRs()
-	m := loaded(t, 120, 40, mine, review)
-	m.cursor = 0
+	m := onRow(t, loaded(t, 120, 40, mine, review), 0)
 
 	m = typeQuery(m, "lipgloss")
 	matches := m.matchIndexes()
 	if len(matches) != 1 {
 		t.Fatalf("want 1 match, got %d", len(matches))
 	}
-	if m.cursor != matches[0] {
-		t.Errorf("cursor is %d, want it on the match at %d", m.cursor, matches[0])
+	if want := m.rowSlot(matches[0]); m.cursor != want {
+		t.Errorf("cursor is %d, want the match (row %d) at slot %d",
+			m.cursor, matches[0], want)
 	}
 }
 
@@ -1100,8 +1142,9 @@ func searched(t *testing.T, m Model, q string) Model {
 }
 
 // n walks every match in order and N walks back, both crossing section
-// boundaries -- the cursor indexes the flattened rows, so a boundary is not a
-// thing it can stop at.
+// boundaries. The cursor can stop on a section header when moving with j/k,
+// but n/N move between MATCHES, and a header is never one -- so a boundary is
+// still not a thing these two stop at.
 func TestNCrossesSectionBoundaries(t *testing.T) {
 	mine := []github.PR{
 		{Number: 3248, Title: "feat(ordering): refuse order plan writes",
@@ -1119,17 +1162,19 @@ func TestNCrossesSectionBoundaries(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("want 2 matches in different sections, got %d", len(matches))
 	}
-	if m.cursor != matches[0] {
-		t.Fatalf("the search left the cursor at %d, want %d", m.cursor, matches[0])
+	if want := m.rowSlot(matches[0]); m.cursor != want {
+		t.Fatalf("the search left the cursor at %d, want row %d at slot %d",
+			m.cursor, matches[0], want)
 	}
 
 	m = press(m, runeKey('n'))
-	if m.cursor != matches[1] {
-		t.Errorf("n stopped at %d, want the next section's match at %d", m.cursor, matches[1])
+	if want := m.rowSlot(matches[1]); m.cursor != want {
+		t.Errorf("n stopped at %d, want the next section's match (row %d) at slot %d",
+			m.cursor, matches[1], want)
 	}
 	m = press(m, runeKey('N'))
-	if m.cursor != matches[0] {
-		t.Errorf("N stopped at %d, want %d", m.cursor, matches[0])
+	if want := m.rowSlot(matches[0]); m.cursor != want {
+		t.Errorf("N stopped at %d, want row %d at slot %d", m.cursor, matches[0], want)
 	}
 }
 
@@ -1143,12 +1188,14 @@ func TestNWrapsAtTheEnds(t *testing.T) {
 		t.Fatalf("want several matches, got %d", len(matches))
 	}
 
-	// Walk to the last one, then one more.
-	m.cursor = matches[len(matches)-1]
+	// Walk to the last one, then one more. Matches are row indices; the cursor
+	// addresses slots, so seat it through rowSlot.
+	m.cursor = m.rowSlot(matches[len(matches)-1])
 	next, cmd := m.handleKey(runeKey('n'))
 	m = next.(Model)
-	if m.cursor != matches[0] {
-		t.Errorf("n at the end landed on %d, want the first match at %d", m.cursor, matches[0])
+	if want := m.rowSlot(matches[0]); m.cursor != want {
+		t.Errorf("n at the end landed on %d, want the first match (row %d) at slot %d",
+			m.cursor, matches[0], want)
 	}
 	if got := runCmd(t, cmd); got != statusMsg("search hit BOTTOM, continuing at TOP") {
 		t.Errorf("n did not announce the wrap, got %v", got)
@@ -1156,8 +1203,9 @@ func TestNWrapsAtTheEnds(t *testing.T) {
 
 	next, cmd = m.handleKey(runeKey('N'))
 	m = next.(Model)
-	if m.cursor != matches[len(matches)-1] {
-		t.Errorf("N at the top landed on %d, want %d", m.cursor, matches[len(matches)-1])
+	if want := m.rowSlot(matches[len(matches)-1]); m.cursor != want {
+		t.Errorf("N at the top landed on %d, want row %d at slot %d",
+			m.cursor, matches[len(matches)-1], want)
 	}
 	if got := runCmd(t, cmd); got != statusMsg("search hit TOP, continuing at BOTTOM") {
 		t.Errorf("N did not announce the wrap, got %v", got)
@@ -1313,5 +1361,150 @@ func TestResizeRecomputesMatches(t *testing.T) {
 	wide, _ := m.Update(tea.WindowSizeMsg{Width: 147, Height: 40})
 	if got := len(typeQuery(wide.(Model), "offline").matchIndexes()); got != 1 {
 		t.Errorf("the same word did not match at 147 cols: %d", got)
+	}
+}
+
+// An empty query is not a search, so ctrl+n/ctrl+p fall through to plain
+// movement -- which means they stop on section headers exactly as j and k do.
+//
+// This is pinned because the two used to disagree: the search motions skipped
+// furniture while j stopped on it, so the same board answered two different
+// keys differently. "The cursor sits on headers" is the whole design this
+// layout rests on (docs/uniform-rows.md §4.1), so a fallback that quietly
+// skipped headers was the fallback contradicting the design.
+func TestEmptyQueryMotionMatchesPlainMovement(t *testing.T) {
+	mine, review := samplePRs()
+
+	// Walk both keys down the whole board from the same start and compare the
+	// slot after every press, so a divergence anywhere is caught rather than
+	// only at the first header.
+	board1 := typeQuery(loaded(t, 120, 40, mine, review), "")
+	board2 := loaded(t, 120, 40, mine, review)
+	board2.cursor = board1.cursor
+
+	n := len(board1.slots())
+	if n < 4 {
+		t.Fatalf("board too small to cross a header: %d slots", n)
+	}
+	sawHeader := false
+	for i := 0; i < n+1; i++ {
+		board1 = press(board1, tea.KeyMsg{Type: tea.KeyCtrlN})
+		board2 = press(board2, runeKey('j'))
+		if board1.cursor != board2.cursor {
+			t.Fatalf("press %d: ctrl+n at slot %d, j at slot %d", i, board1.cursor, board2.cursor)
+		}
+		if s, ok := board2.slotAt(board2.cursor); ok && !s.isRow() {
+			sawHeader = true
+		}
+	}
+	// The walk has to actually land on furniture, or it proves nothing.
+	if !sawHeader {
+		t.Error("the walk never landed on a header or note, so it proves nothing")
+	}
+
+	// And back up, which is where matchBefore's fallback used to differ.
+	for i := 0; i < n+1; i++ {
+		board1 = press(board1, tea.KeyMsg{Type: tea.KeyCtrlP})
+		board2 = press(board2, runeKey('k'))
+		if board1.cursor != board2.cursor {
+			t.Fatalf("back-press %d: ctrl+p at slot %d, k at slot %d", i, board1.cursor, board2.cursor)
+		}
+	}
+}
+
+// A highlight must set BOTH ground and figure. This is the regression that
+// shipped: hitStyle was Background(5) alone, so a hit run kept whatever
+// foreground it already had -- and a dark theme's ANSI 5 is a light pink, so
+// every foreground landed light-on-light. Measured 1.03:1 to 1.38:1 in
+// Catppuccin Mocha under a fill that was 10.74:1 against the board.
+//
+// Reverse satisfies the rule by construction: it swaps the theme's own
+// foreground and background, so it cannot inherit and cannot be
+// light-on-light. The test asserts the property rather than the mechanism --
+// any highlight that sets both is allowed; one that sets only a background is
+// not.
+func TestHitSetsBothGroundAndFigure(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	seq := hitStyle.Render("x")
+	i := strings.Index(seq, "\x1b[")
+	j := strings.Index(seq[i:], "m")
+	params := strings.Split(seq[i+2:i+j], ";")
+
+	has := func(p string) bool {
+		for _, f := range params {
+			if f == p {
+				return true
+			}
+		}
+		return false
+	}
+	// SGR 7 sets both at once by swapping them, which is the whole point.
+	if has("7") {
+		return
+	}
+	// Otherwise it must name a foreground AND a background explicitly. A lone
+	// background is the bug; a lone foreground cannot mark a run at all.
+	// Both the basic ranges (30-37/90-97 fg, 40-47/100-107 bg, which is how
+	// lipgloss emits ANSI 0-15) and the extended 38;5;/48;5; forms count.
+	inRange := func(lo, hi int) bool {
+		for _, f := range params {
+			if n, err := strconv.Atoi(f); err == nil && n >= lo && n <= hi {
+				return true
+			}
+		}
+		return false
+	}
+	fg := has("39") || inRange(30, 37) || inRange(90, 97) ||
+		strings.Contains(seq, "38;5;") || strings.Contains(seq, "38;2;")
+	bg := has("49") || inRange(40, 47) || inRange(100, 107) ||
+		strings.Contains(seq, "48;5;") || strings.Contains(seq, "48;2;")
+	if !fg || !bg {
+		t.Errorf("hitStyle sets fg=%v bg=%v; a highlight must set both "+
+			"(see DESIGN.md §3.3.3): %q", fg, bg, seq)
+	}
+}
+
+// A hit must not inherit the styling of whatever it lands on -- not the faint
+// of a scope, not the hue of a commit type, and not the selection fill on the
+// cursor row. Otherwise the highlight comes out a different colour in each
+// part of a title, which is what makes it unreadable in some of them.
+func TestHitDoesNotInheritWhatItLandsOn(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	// "ordering" sits inside the scope of both titles, so the hit lands on
+	// faint text; one row is selected and one is not.
+	mine := []github.PR{
+		{Number: 3248, Title: "fix(ordering): reach the popup", CIState: "SUCCESS",
+			UpdatedAt: time.Unix(300, 0)},
+		{Number: 3100, Title: "feat(ordering): add the thing", CIState: "SUCCESS",
+			UpdatedAt: time.Unix(200, 0)},
+	}
+	m := searched(t, onRow(t, loaded(t, 147, 20, mine, nil), 0), "ordering")
+
+	for _, want := range []string{"#3248", "#3100"} {
+		line := rowFor(t, m, want)
+		selected := strings.Contains(line, "▌")
+		for _, seg := range strings.Split(line, "\x1b[") {
+			i := strings.Index(seg, "m")
+			if i < 0 || !strings.Contains(seg[:i], hitFill()) {
+				continue
+			}
+			params := seg[:i]
+			if strings.Contains(params, "2;") || params == "2" {
+				t.Errorf("%s (selected=%v): the hit kept the scope's faint: %q",
+					want, selected, seg)
+			}
+			if strings.Contains(params, "38;5;") {
+				t.Errorf("%s (selected=%v): the hit kept a foreground colour: %q",
+					want, selected, seg)
+			}
+			if strings.Contains(params, "48;5;") {
+				t.Errorf("%s (selected=%v): the hit composed a background under it: %q",
+					want, selected, seg)
+			}
+		}
 	}
 }

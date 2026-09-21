@@ -268,12 +268,31 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		return m.cancelSearch(), nil
+	// Matches are rows, so these land on rows and never on a header or a note.
+	// matchAfter/matchBefore work in row space; the cursor addresses slots, so
+	// the index is converted at this boundary rather than teaching the search
+	// about section furniture.
+	//
+	// An empty query is not a search, so these fall through to plain movement
+	// instead -- which means they stop on headers exactly as j and k do. Two
+	// motion keys disagreeing about the same board is the kind of thing that
+	// gets noticed in use, and "the cursor sits on headers" is the whole design
+	// this layout rests on (docs/uniform-rows.md §4.1), so the fallback honours
+	// it rather than quietly skipping furniture.
 	case "ctrl+n", "ctrl+j", "down":
-		m.cursor = m.matchAfter(m.cursor)
+		if m.noQuery() {
+			m.cursor++
+		} else {
+			m.cursor = m.rowSlotClamped(m.matchAfter(m.cursorRow()))
+		}
 		m.clampCursor()
 		return m, nil
 	case "ctrl+p", "ctrl+k", "up":
-		m.cursor = m.matchBefore(m.cursor)
+		if m.noQuery() {
+			m.cursor--
+		} else {
+			m.cursor = m.rowSlotClamped(m.matchBefore(m.cursorRow()))
+		}
 		m.clampCursor()
 		return m, nil
 	case "enter":
@@ -296,6 +315,10 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	// No re-seating on every keystroke: a search does not narrow the board, so
+	// the cursor's slot still means what it meant. previewMatch below walks it
+	// to a match when one exists and deliberately leaves it alone when none
+	// does.
 	m.clampCursor()
 	m.previewMatch()
 	return m, nil
@@ -321,20 +344,26 @@ func (m *Model) previewMatch() {
 	if len(matches) == 0 {
 		return
 	}
+	// matchIndexes is in row space and the cursor addresses slots, so the
+	// comparison happens in row space and the assignment converts back. Doing
+	// it the other way round parks the cursor on a section header, which is
+	// never a match and costs the matched row its selection.
+	cur := m.cursorRow()
 	for _, idx := range matches {
-		if idx == m.cursor {
+		if idx == cur {
 			return
 		}
 	}
 	// From where the search opened rather than from the cursor: backspacing to
 	// a wider query has to be able to walk back up, not only further down.
+	origin := m.rowAt(m.searchOrigin)
 	for _, idx := range matches {
-		if idx >= m.searchOrigin {
-			m.cursor = idx
+		if idx >= origin {
+			m.cursor = m.rowSlotClamped(idx)
 			return
 		}
 	}
-	m.cursor = matches[0]
+	m.cursor = m.rowSlotClamped(matches[0])
 }
 
 // matchAfter is the first match below i, wrapping to the top. With no query,
@@ -475,6 +504,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "/":
 		m.searching = true
+		// The cursor stays where it is: a search does not narrow the board, so
+		// there is nothing to jump to yet, and searchOrigin is what esc
+		// restores after incsearch has walked it away.
 		m.searchOrigin = m.cursor
 		return m, nil
 	case "?":
@@ -524,7 +556,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g", "home":
 		m.cursor = 0
 	case "G", "end":
-		m.cursor = len(m.visibleRows()) - 1
+		m.cursor = len(m.slots()) - 1
 		m.clampCursor()
 	case "r":
 		return m.refresh()
@@ -560,16 +592,20 @@ func (m Model) stepMatch(forward bool) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return statusMsg("no matches") }
 	}
 
+	// All of this is row space: matchAfter/matchBefore take and return row
+	// indices, and the wrap is detected by comparing rows. The cursor, which
+	// addresses slots, is converted once at the end.
+	cur := m.cursorRow()
 	var next int
 	var wrapped bool
 	if forward {
-		next = m.matchAfter(m.cursor)
-		wrapped = next <= m.cursor
+		next = m.matchAfter(cur)
+		wrapped = next <= cur
 	} else {
-		next = m.matchBefore(m.cursor)
-		wrapped = next >= m.cursor
+		next = m.matchBefore(cur)
+		wrapped = next >= cur
 	}
-	m.cursor = next
+	m.cursor = m.rowSlotClamped(next)
 	m.clampCursor()
 	if !wrapped {
 		m.status = ""
@@ -742,21 +778,31 @@ func (m Model) matchIndexes() []int {
 	return out
 }
 
-// sectionStarts gives the cursor index of each non-empty section's first row,
-// so l/h can jump between them without the cursor knowing about sections.
+// sectionStarts gives the cursor index of each section's header, so l/h can
+// jump between them without the cursor knowing about sections.
+//
+// The target is the header, not the first PR row. The header is the section's
+// own first slot, so a jump lands on the thing that names where you have
+// arrived -- and `j` from there is the first PR, which is one extra keypress
+// only if you did not want the orientation.
+//
+// Every section is listed, including empty and still-loading ones: they have a
+// header now, so there is somewhere to land. The old gutter had nothing to
+// point at in an empty section and had to skip it.
+// Derived from slots() rather than counted independently: a second walk that
+// has to stay in step with the first is how the note slot desynced the cursor
+// once already.
 func (m Model) sectionStarts() []int {
 	var starts []int
-	idx := 0
-	for _, s := range m.sections() {
-		if len(s.Rows) > 0 {
-			starts = append(starts, idx)
-			idx += len(s.Rows)
+	for i, s := range m.slots() {
+		if s.isHeader() {
+			starts = append(starts, i)
 		}
 	}
 	return starts
 }
 
-// nextSection moves to the first row of the following section, or the last row
+// nextSection moves to the following section's header, or to the last slot
 // when there is none -- the same end-stop behaviour as j.
 func (m Model) nextSection() int {
 	for _, start := range m.sectionStarts() {
@@ -764,14 +810,14 @@ func (m Model) nextSection() int {
 			return start
 		}
 	}
-	if n := len(m.visibleRows()); n > 0 {
+	if n := len(m.slots()); n > 0 {
 		return n - 1
 	}
 	return 0
 }
 
-// prevSection moves to the start of the current section, or to the previous
-// one when already there, which is how a "back" key is expected to feel.
+// prevSection moves to the current section's header, or to the previous one
+// when already there, which is how a "back" key is expected to feel.
 func (m Model) prevSection() int {
 	starts := m.sectionStarts()
 	for i := len(starts) - 1; i >= 0; i-- {
@@ -793,20 +839,195 @@ func (m Model) visibleRows() []board.Row {
 	return rows
 }
 
-func (m Model) selected() (github.PR, bool) {
-	rows := m.visibleRows()
-	if m.cursor < 0 || m.cursor >= len(rows) {
-		return github.PR{}, false
-	}
-	return rows[m.cursor].PR, true
+// slotKind is what the cursor is sitting on. A header is addressable but not
+// actionable: the cursor can rest there, and every key that operates on a PR
+// does nothing.
+type slotKind int
+
+const (
+	slotRow slotKind = iota
+	slotHeader
+	// slotNote is a section's single no-rows line: the spinner while loading,
+	// an em dash once resolved empty, the error text on failure. Addressable
+	// so that it is not an unselectable line in the middle of the list, and
+	// not actionable because there is no PR behind it.
+	slotNote
+)
+
+// slot is one position in the cursor's address space. That space contains the
+// section headers as well as the PR rows, which is what makes every line of
+// the list reachable and the one-keypress-one-line invariant hold by
+// construction rather than by viewport arithmetic: with nothing to skip, the
+// cursor's line and its index move together. docs/uniform-rows.md §4.1.
+//
+// The kind is carried on the value rather than inferred from the index,
+// because index arithmetic is exactly what goes wrong once the address space
+// holds two things: "slot 3" tells you nothing about whether it is a header,
+// and code that hand-counts past headers is code that breaks when a section
+// empties. Ask the slot what it is.
+type slot struct {
+	kind    slotKind
+	section string
+	row     board.Row
+	rowIdx  int // index into visibleRows(), -1 for a header
 }
 
-// Sections resolve progressively, so the row under the cursor can disappear
+func (s slot) isHeader() bool { return s.kind == slotHeader }
+func (s slot) isRow() bool    { return s.kind == slotRow }
+func (s slot) isNote() bool   { return s.kind == slotNote }
+
+// slotAt returns the slot the cursor is on, and whether there is one.
+func (m Model) slotAt(i int) (slot, bool) {
+	sl := m.slots()
+	if i < 0 || i >= len(sl) {
+		return slot{}, false
+	}
+	return sl[i], true
+}
+
+// rowSlot is the cursor index of the nth PR row, counting across sections and
+// ignoring headers, or -1 if there is no such row. This is the accessor a
+// caller wants when it means "the third PR on the board" -- notably every test
+// that used to say `m.cursor = 3` and mean exactly that.
+func (m Model) rowSlot(n int) int {
+	for i, s := range m.slots() {
+		if s.isRow() && s.rowIdx == n {
+			return i
+		}
+	}
+	return -1
+}
+
+// headerSlot is the cursor index of the nth section's header, or -1. Sections
+// are counted as drawn, so an empty or still-loading section has one too.
+func (m Model) headerSlot(n int) int {
+	seen := 0
+	for i, s := range m.slots() {
+		if !s.isHeader() {
+			continue
+		}
+		if seen == n {
+			return i
+		}
+		seen++
+	}
+	return -1
+}
+
+// slots is the cursor's address space: headers interleaved with their rows, in
+// draw order. The blank separator between sections is NOT a slot -- it carries
+// no information and stopping on it twice per boundary would be a dead beat
+// with nothing to read.
+// It must agree with body() line for line, because every slot index the rest
+// of the model uses -- the cursor, the footer's position, l/h -- is an index
+// into this. They are kept in step by construction: both walk m.sections() in
+// the same order and emit a slot for the same three things.
+func (m Model) slots() []slot {
+	var out []slot
+	idx := 0
+	for _, s := range m.sections() {
+		out = append(out, slot{kind: slotHeader, section: s.Rule.Name, rowIdx: -1})
+		for _, r := range s.Rows {
+			out = append(out, slot{kind: slotRow, section: s.Rule.Name, row: r, rowIdx: idx})
+			idx++
+		}
+		if m.hasNote(s) {
+			out = append(out, slot{kind: slotNote, section: s.Rule.Name, rowIdx: -1})
+		}
+	}
+	return out
+}
+
+// hasNote says whether a section draws its no-rows line. body() asks the same
+// question, so the two cannot drift.
+func (m Model) hasNote(s board.Section) bool {
+	switch s.State {
+	case board.Failed:
+		return true
+	case board.Ready:
+		return len(s.Rows) == 0
+	case board.Pending:
+		return len(s.Rows) == 0
+	}
+	return false
+}
+
+// firstRowSlot is the index of the first PR row in the address space, or 0 if
+// there is none. Filtering uses it: a query narrows the board to matches, so
+// opening the cursor on a header -- a line that is by definition not a match --
+// would make the first ctrl+n a wasted keypress.
+func (m Model) firstRowSlot() int {
+	if i := m.rowSlot(0); i >= 0 {
+		return i
+	}
+	return 0
+}
+
+// nextRowSlot is the next PR row in direction dir, or the current slot when
+// there is none -- the same end-stop behaviour j and k have on the board.
+func (m Model) nextRowSlot(dir int) int {
+	sl := m.slots()
+	for i := m.cursor + dir; i >= 0 && i < len(sl); i += dir {
+		if sl[i].isRow() {
+			return i
+		}
+	}
+	if m.cursor >= 0 && m.cursor < len(sl) {
+		return m.cursor
+	}
+	return m.firstRowSlot()
+}
+
+// noQuery reports whether there is no search to step through. Whitespace does
+// not count: rowMatches treats a blank query as matching nothing, so stepping
+// it as a search would be a no-op the user reads as a broken key.
+func (m Model) noQuery() bool { return strings.TrimSpace(m.query) == "" }
+
+// cursorRow is the cursor's position in ROW space -- the index space the search
+// works in, which counts only PR rows. On a header or a note the cursor has no
+// row of its own, so the nearest row above it is used: that keeps "the next
+// match after here" meaningful wherever the cursor is parked.
+func (m Model) cursorRow() int { return m.rowAt(m.cursor) }
+
+// rowAt is the row index at or above slot i, in row space. Unlike cursorRow it
+// takes an explicit slot, so searchOrigin can be compared against matches.
+func (m Model) rowAt(i int) int {
+	sl := m.slots()
+	row := -1
+	for j := 0; j <= i && j < len(sl); j++ {
+		if sl[j].isRow() {
+			row = sl[j].rowIdx
+		}
+	}
+	return row
+}
+
+// rowSlotClamped converts a row index back into a cursor slot, falling back to
+// the first row when the index is out of range. It is the inverse of cursorRow
+// and the only place row space and slot space meet.
+func (m Model) rowSlotClamped(row int) int {
+	if i := m.rowSlot(row); i >= 0 {
+		return i
+	}
+	return m.firstRowSlot()
+}
+
+// selected is the PR under the cursor. A header has none, so every key that
+// acts on a PR falls through to doing nothing there.
+func (m Model) selected() (github.PR, bool) {
+	s, ok := m.slotAt(m.cursor)
+	if !ok || !s.isRow() {
+		return github.PR{}, false
+	}
+	return s.row.PR, true
+}
+
+// Sections resolve progressively, so the slot under the cursor can disappear
 // between frames. searchOrigin is clamped alongside it: a refresh can reorder
-// the board while the prompt is open, and esc landing a row or two off is
+// the board while the prompt is open, and esc landing a slot or two off is
 // acceptable where an out-of-range index is not.
 func (m *Model) clampCursor() {
-	n := len(m.visibleRows())
+	n := len(m.slots())
 	if n == 0 {
 		m.cursor, m.searchOrigin = 0, 0
 		return
@@ -825,104 +1046,91 @@ func clampIndex(i, n int) int {
 	return i
 }
 
-// lineMeta says which section a rendered line belongs to and where the line
-// sits within it, so the top row's gutter can be resolved after window() has
-// chosen a start. Without it the label would have to be decided before the
-// window is known, which is why every row above a scrolled-off boundary used
-// to go unnamed.
+// lineMeta says which section a rendered line belongs to and which cursor slot
+// it is, so the viewport can scroll to the cursor.
 type lineMeta struct {
-	section  string
-	author   bool // the section's rule shows an author column
-	row      int  // index within the section, -1 for notes and blanks
-	isRow    bool
-	rowIndex int // index into the flattened visible rows, -1 when not a row
+	section string
+	slot    int // index into slots(), -1 for a blank separator or a note
 }
 
-// body renders every section and reports the line each row starts on, so the
-// viewport can scroll to the cursor. Every row is exactly one line, but section
-// notes and placeholder blanks sit between them, so the line is not the row
-// index.
-func (m Model) body(spin string) (lines []string, rowStarts []int, meta []lineMeta) {
-	idx := 0
+// body renders every section and reports the line each cursor slot starts on.
+// EVERY line is a slot -- headers, PR rows and the no-rows note alike -- so
+// slotStarts is the identity, which is the property that makes the scroll
+// rhythm even. See docs/uniform-rows.md §4.1.
+func (m Model) body(spin string) (lines []string, slotStarts []int, meta []lineMeta) {
 	add := func(line string, mt lineMeta) {
 		lines = append(lines, line)
 		meta = append(meta, mt)
 	}
-	addRow := func(row board.Row, s board.Section, i int) {
-		rowStarts = append(rowStarts, len(lines))
-		gs := sectionContinues
-		if i == 0 {
-			gs = sectionStarts
-		}
-		add(m.renderRow(row, idx == m.cursor, s.Rule.Author, s.Rule.Name, gs),
-			lineMeta{section: s.Rule.Name, author: s.Rule.Author, row: i,
-				isRow: true, rowIndex: idx})
-		idx++
+	slotIdx := 0
+	addSlot := func(line string, section string) {
+		slotStarts = append(slotStarts, len(lines))
+		add(line, lineMeta{section: section, slot: slotIdx})
+		slotIdx++
 	}
+	// A section with no rows still occupies exactly one note line -- the
+	// spinner while loading, an em dash once resolved empty, the error text on
+	// failure -- and that line is a SLOT. It was not, and the cursor skipped
+	// it: by the rule in docs/uniform-rows.md §4.1 every unselectable line in
+	// the list costs one to the worst-case scroll delta, so an empty, failed
+	// or pending section broke the very invariant this layout exists to hold.
+	//
+	// A note carries no PR, so it is addressable but not actionable, exactly
+	// like a header: selected() returns nothing on it and every key that acts
+	// on a PR is a silent no-op there.
 	note := func(s board.Section, text string) {
-		add(m.renderSectionNote(s.Rule.Name, text),
-			lineMeta{section: s.Rule.Name, row: -1, rowIndex: -1})
+		addSlot(renderSectionNote(text), s.Rule.Name)
+	}
+	// No blank separator between sections. It was drawn at first and measured:
+	// a blank is a line the cursor cannot occupy, and every such line costs
+	// exactly one to the worst-case scroll delta -- with it the board moved 2
+	// lines per keypress at a boundary, without it exactly 1 everywhere. The
+	// header's own background is what separates the sections instead, and it
+	// costs nothing because the cursor can sit on it.
+	header := func(s board.Section, count string) {
+		addSlot(m.sectionHeader(s.Rule.Name, count, slotIdx == m.cursor), s.Rule.Name)
 	}
 	for _, s := range m.sections() {
 		switch s.State {
 		case board.Pending:
-			// A section that already has rows keeps them, so only the spinner
-			// in the gutter changes while the refetch is in flight.
-			for i, row := range s.Rows {
-				addRow(row, s, i)
+			// The count is unknown until the rule resolves, so the header
+			// carries the name alone rather than a number about to change.
+			header(s, "")
+			for _, row := range s.Rows {
+				addSlot(m.renderRow(row, slotIdx == m.cursor, s.Rule.Author), s.Rule.Name)
 			}
-			// On a cold start there is nothing to keep, so hold a placeholder
-			// block instead: without it each section that lands pushes every
-			// section below it down the screen.
+			// One spinner line, and no placeholder block. The block reserved
+			// roughly the section's final height so sections below it were
+			// not pushed down as it resolved -- but every line of it was
+			// unselectable AND it scaled with the pane, so on a tall board a
+			// single keypress moved the viewport several lines. Cold start is
+			// every launch, which made that the common case, not an edge one.
+			//
+			// Layout stability while loading is a real concern and this does
+			// give some of it up. The scroll invariant outranks it: a row that
+			// moves once as its section resolves is a value changing, which
+			// §3.9 already allows, while a board that scrolls five lines per
+			// keypress is the defect five earlier attempts were chasing.
 			if len(s.Rows) == 0 {
 				note(s, spin)
-				for _, b := range blanks(m.placeholderRows(s.Rule) - 1) {
-					add(b, lineMeta{section: s.Rule.Name, row: -1, rowIndex: -1})
-				}
 			}
 		case board.Failed:
-			note(s, errorStyle.Render(clip(s.Err.Error(), max(0, m.width-sectionWidth-3))))
+			header(s, "")
+			note(s, errorStyle.Render(clip(s.Err.Error(), max(0, m.width-3))))
 		case board.Ready:
+			header(s, fmt.Sprint(len(s.Rows)))
 			if len(s.Rows) == 0 {
 				// A resolved empty section collapses to one line: it knows it
-				// has nothing, so holding six blank rows for it would waste
-				// most of a short pane. The shrink is the value changing,
-				// which is the one reason a row is allowed to move.
+				// has nothing, so holding six blank rows would waste most of a
+				// short pane.
 				note(s, mutedStyle.Render("—"))
 			}
-			for i, row := range s.Rows {
-				addRow(row, s, i)
+			for _, row := range s.Rows {
+				addSlot(m.renderRow(row, slotIdx == m.cursor, s.Rule.Author), s.Rule.Name)
 			}
 		}
 	}
-	return lines, rowStarts, meta
-}
-
-func blanks(n int) []string {
-	if n < 1 {
-		return nil
-	}
-	return make([]string, n)
-}
-
-// placeholderRows reserves roughly the space a pending section will occupy, so
-// the skeleton is close to its final height from the first frame. Capped well
-// below the rule's limit: overshooting would scroll real rows off the bottom.
-func (m Model) placeholderRows(r config.Rule) int {
-	const cap = 6
-	n := r.PageSize()
-	if n > cap {
-		n = cap
-	}
-	if m.height > 0 {
-		if budget := (m.height - 2) / max(1, len(m.cfg.Rules)); n > budget {
-			n = budget
-		}
-	}
-	if n < 1 {
-		return 1
-	}
-	return n
+	return lines, slotStarts, meta
 }
 
 func max(a, b int) int {
@@ -1013,8 +1221,12 @@ func (m Model) promptLine() string {
 		if len(matches) == 1 {
 			right = "1 match"
 		}
+		// matchIndexes is in row space and the cursor addresses slots, so the
+		// comparison is made in row space: comparing the two directly reports
+		// "3 matches" while the cursor sits on one of them.
+		cur := m.cursorRow()
 		for i, idx := range matches {
-			if idx == m.cursor {
+			if idx == cur {
 				right = fmt.Sprintf("%d of %d", i+1, len(matches))
 				break
 			}
@@ -1043,13 +1255,40 @@ func (m Model) promptLine() string {
 // pane never scrolls, so a top-row-bound field is frozen at its first section
 // forever -- which is exactly how the reverted sticky line failed. See
 // docs/section-layout.md §14.
+// cursorSection names the cursor's section and its position within it. On a
+// header pos is 0, which the footer renders as the section's size alone: the
+// cursor is at the section, not at a row inside it, and claiming "1 of 12"
+// there would be a position the cursor does not have.
+// Read off the slot the cursor is actually on, not recomputed by walking the
+// sections: the section a slot belongs to is recorded on the slot, and a second
+// independent walk is what put the footer one section out when the note slot
+// was added.
+//
+// pos is 0 on a header or a note -- the cursor is at the section rather than at
+// a row inside it, and claiming "1 of 12" there would be a position it does not
+// have.
 func (m Model) cursorSection() (name string, pos, total int) {
-	idx := 0
+	cur, ok := m.slotAt(m.cursor)
+	if !ok {
+		return "", 0, 0
+	}
 	for _, s := range m.sections() {
-		if m.cursor >= idx && m.cursor < idx+len(s.Rows) {
-			return s.Rule.Name, m.cursor - idx + 1, len(s.Rows)
+		if s.Rule.Name != cur.section {
+			continue
 		}
-		idx += len(s.Rows)
+		if !cur.isRow() {
+			return s.Rule.Name, 0, len(s.Rows)
+		}
+		// rowIdx counts across the whole board, so offset by the rows in the
+		// sections above this one.
+		before := 0
+		for _, up := range m.sections() {
+			if up.Rule.Name == s.Rule.Name {
+				break
+			}
+			before += len(up.Rows)
+		}
+		return s.Rule.Name, cur.rowIdx - before + 1, len(s.Rows)
 	}
 	return "", 0, 0
 }
@@ -1085,7 +1324,12 @@ func (m Model) footer(spin string) string {
 	// so this is the one place the full name and the count are legible.
 	right := m.cfg.Repo
 	if name, pos, total := m.cursorSection(); name != "" {
-		right = fmt.Sprintf("%s · %d of %d", strings.ToUpper(name), pos, total)
+		if pos == 0 {
+			// On the header: the section's size, with no false position.
+			right = fmt.Sprintf("%s · %d", strings.ToUpper(name), total)
+		} else {
+			right = fmt.Sprintf("%s · %d of %d", strings.ToUpper(name), pos, total)
+		}
 	}
 	if spin != "" {
 		right += " " + spin
@@ -1131,41 +1375,17 @@ func (m Model) View() string {
 		chrome = 2
 	}
 
-	lines, rowStarts, meta := m.body(spin)
-	start := 0
+	lines, slotStarts, _ := m.body(spin)
 	if m.height > 0 {
 		avail := m.height - chrome
-		lines, start = window(lines, m.cursor, avail, rowStarts)
+		lines, _ = window(lines, m.cursor, avail, slotStarts)
 		// Pad to the full height so the prompt and footer stay pinned to the
 		// bottom edge instead of floating under a short result set.
 		for len(lines) < avail {
 			lines = append(lines, "")
 		}
 	}
-	lines = m.nameTopSection(lines, meta, start)
 	return strings.Join(lines, "\n") + "\n" + foot
-}
-
-// nameTopSection re-renders the top visible line so it carries its section's
-// name even when the section began above the window. It keeps the rule at `│`:
-// `╷` claims a section starts on this row, which is false here, and the two
-// facts are worth keeping apart.
-func (m Model) nameTopSection(lines []string, meta []lineMeta, start int) []string {
-	if len(lines) == 0 || start >= len(meta) {
-		return lines
-	}
-	mt := meta[start]
-	if !mt.isRow || mt.row == 0 {
-		return lines
-	}
-	rows := m.visibleRows()
-	if mt.rowIndex < 0 || mt.rowIndex >= len(rows) {
-		return lines
-	}
-	out := append([]string(nil), lines...)
-	out[0] = m.renderRow(rows[mt.rowIndex], mt.rowIndex == m.cursor,
-		mt.author, mt.section, sectionAbove)
-	return out
 }
 
 // tailWriter keeps the last `limit` bytes written to it. A command's stderr is
