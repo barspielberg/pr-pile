@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barspielberg/prs-mng/internal/board"
-	"github.com/barspielberg/prs-mng/internal/config"
-	"github.com/barspielberg/prs-mng/internal/github"
+	"github.com/barspielberg/pr-pile/internal/board"
+	"github.com/barspielberg/pr-pile/internal/config"
+	"github.com/barspielberg/pr-pile/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"

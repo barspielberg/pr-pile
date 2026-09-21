@@ -1,8 +1,8 @@
-# prs-mng
+# pr-pile
 
 A terminal PR board. One keybind away, shows every PR worth looking at, opens them.
 
-Run it as `prs`. See [docs/DESIGN.md](docs/DESIGN.md) for the design, the decisions behind it, and the measured numbers.
+Run it as `pile`. See [docs/DESIGN.md](docs/DESIGN.md) for the design, the decisions behind it, and the measured numbers.
 
 ## Status
 
@@ -14,11 +14,11 @@ checks, conflicts, unresolved conversations, reviewers and size.
 ## Build
 
 ```sh
-make build     # build ./prs
-make run       # build and run it, without installing over the prs on your PATH
+make build     # build ./pile
+make run       # build and run it, without installing over the pile on your PATH
 make test      # go test ./... -short
 make check     # build, test, vet
-make install   # check, then put this checkout on PATH as prs
+make install   # check, then put this checkout on PATH as pile
 ```
 
 Needs `gh` installed and logged in (used only for the token) and a Nerd Font for the glyphs.
@@ -33,10 +33,10 @@ Rules are fetched in parallel but revealed in order: a section can only be drawn
 
 ## Config
 
-`~/.config/prs-mng/config.yml` (honors `$XDG_CONFIG_HOME`), or `$PRS_MNG_CONFIG`.
+`~/.config/pile/config.yml` (honors `$XDG_CONFIG_HOME`), or `$PILE_CONFIG`.
 
 On first run inside a GitHub checkout, the repo is inferred with `gh` and a
-commented starter config is written. `PRS_MNG_REPO=owner/name` overrides the
+commented starter config is written. `PILE_REPO=owner/name` overrides the
 configured repo for one invocation.
 
 ```yaml

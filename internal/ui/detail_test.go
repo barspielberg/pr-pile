@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barspielberg/prs-mng/internal/board"
-	"github.com/barspielberg/prs-mng/internal/github"
+	"github.com/barspielberg/pr-pile/internal/board"
+	"github.com/barspielberg/pr-pile/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

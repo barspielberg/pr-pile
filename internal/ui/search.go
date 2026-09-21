@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/barspielberg/prs-mng/internal/board"
+	"github.com/barspielberg/pr-pile/internal/board"
 	"github.com/charmbracelet/lipgloss"
 )
 

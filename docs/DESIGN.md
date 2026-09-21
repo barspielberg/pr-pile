@@ -1,4 +1,4 @@
-# prs-mng — design
+# pile — design
 
 A terminal PR board. One keybind away in a Ghostty quick terminal, shows every
 PR worth looking at with enough state to decide what to do, opens them, gets out
@@ -47,7 +47,7 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | GraphQL over HTTP, not the `gh` CLI | `gh search prs` cannot return `statusCheckRollup` / `reviewDecision` / `mergeable` — most of the board. `gh pr list` returns them but cannot express `review-requested:` / `team-review-requested:`. Neither subcommand alone works; shelling out also costs ~1.7s per call. |
 | One search per rule, in parallel | A single combined query with aliased searches is *slower* — GitHub appears to run aliases serially, so one request pays the sum instead of the max. |
 | No caching | Cold start is ~2–4s and the spinner is load-bearing. Revisit only if it grates. |
-| Repo comes from config, not cwd | `pr-status.sh` inferred from cwd and silently showed the dotfiles repo. `PRS_MNG_REPO` overrides per-invocation. |
+| Repo comes from config, not cwd | `pr-status.sh` inferred from cwd and silently showed the dotfiles repo. `PILE_REPO` overrides per-invocation. |
 | Startup reachability check | GitHub's search index reports `issueCount 0` for a repo behind an org IP allow list, so being blocked was indistinguishable from having no PRs. A direct `repository(...)` query does error, so ask for one at startup. |
 | ANSI 0–15 only, never hex or 256 | The 16 indices are an indirection layer, not a limitation: they resolve through the user's own theme. gh-dash shipped hex, got the bug report, and migrated (#770 / PR #771). Hex values of the same nominal colours do *not* get this (k9s #1234). |
 | `muted` is `Faint(true)`, not index 8 | Index 8 is "bright black" — a *light* grey on many light themes, near-invisible on white. Faint is relative: SGR 2 dims whatever the theme's foreground already is, so it is correct on both by construction, and degrades to plain legible text where SGR 2 is ignored. Index 7 is avoided for the same class of reason. |
@@ -756,8 +756,8 @@ a problem the ranking already handles.
 
 ## 4. Config reference
 
-`~/.config/prs-mng/config.yml`, honouring `$XDG_CONFIG_HOME`, overridable with
-`$PRS_MNG_CONFIG`. XDG rather than `os.UserConfigDir`, which on macOS returns
+`~/.config/pile/config.yml`, honouring `$XDG_CONFIG_HOME`, overridable with
+`$PILE_CONFIG`. XDG rather than `os.UserConfigDir`, which on macOS returns
 `~/Library/Application Support` — not where a terminal tool's config belongs.
 First run writes a commented starter config rather than failing, with the repo
 inferred via `gh repo view`. Config decodes *over* the defaults, so an absent key
@@ -767,7 +767,7 @@ keeps its default; an explicit `rules:` list replaces them wholesale.
 
 | field | type | meaning |
 |---|---|---|
-| `repo` | `owner/name` | required; the one value that cannot be guessed. `PRS_MNG_REPO` overrides it per invocation. |
+| `repo` | `owner/name` | required; the one value that cannot be guessed. `PILE_REPO` overrides it per invocation. |
 | `repoPath` | path | local checkout, for `{{.RepoPath}}` in action templates |
 | `refresh` | duration | auto-refresh interval, default `3m`; `<= 0` disables |
 | `rules` | `[]Rule` | ordered; at least one required |

@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/barspielberg/prs-mng/internal/config"
-	"github.com/barspielberg/prs-mng/internal/github"
-	"github.com/barspielberg/prs-mng/internal/ui"
+	"github.com/barspielberg/pr-pile/internal/config"
+	"github.com/barspielberg/pr-pile/internal/github"
+	"github.com/barspielberg/pr-pile/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -16,7 +16,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "prs:", err)
+		fmt.Fprintln(os.Stderr, "pile:", err)
 		os.Exit(1)
 	}
 }

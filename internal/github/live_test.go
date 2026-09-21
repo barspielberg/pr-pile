@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barspielberg/prs-mng/internal/config"
-	"github.com/barspielberg/prs-mng/internal/github"
+	"github.com/barspielberg/pr-pile/internal/config"
+	"github.com/barspielberg/pr-pile/internal/github"
 )
 
 // Hits the real API; run with -run TestLive when you want it.
@@ -16,9 +16,9 @@ func TestLive(t *testing.T) {
 		t.Skip("live API test")
 	}
 	cfg := config.Default()
-	cfg.Repo = os.Getenv("PRS_MNG_REPO")
+	cfg.Repo = os.Getenv("PILE_REPO")
 	if cfg.Repo == "" {
-		t.Skip("set PRS_MNG_REPO to the repo to test against")
+		t.Skip("set PILE_REPO to the repo to test against")
 	}
 	c, err := github.New()
 	if err != nil {
