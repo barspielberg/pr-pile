@@ -123,7 +123,7 @@ func (m Model) fetchRule(i int, r config.Rule) tea.Cmd {
 // it and these lines arrive late.
 //
 // Nothing is cancelled. Responses carry their PR number and file themselves
-// under it, so holding `j` with `c` at each row leaves requests that answer a
+// under it, so holding `j` with `d` at each row leaves requests that answer a
 // question nobody is asking any more -- harmless, and cheaper than threading
 // cancellation through Bubble Tea's command model. What is guarded is asking
 // twice: a PR already answered or already out is not requested again.
@@ -1046,26 +1046,15 @@ func clampIndex(i, n int) int {
 	return i
 }
 
-// lineMeta says which section a rendered line belongs to and which cursor slot
-// it is, so the viewport can scroll to the cursor.
-type lineMeta struct {
-	section string
-	slot    int // index into slots(), -1 for a blank separator or a note
-}
-
 // body renders every section and reports the line each cursor slot starts on.
 // EVERY line is a slot -- headers, PR rows and the no-rows note alike -- so
 // slotStarts is the identity, which is the property that makes the scroll
 // rhythm even. See docs/uniform-rows.md §4.1.
-func (m Model) body(spin string) (lines []string, slotStarts []int, meta []lineMeta) {
-	add := func(line string, mt lineMeta) {
-		lines = append(lines, line)
-		meta = append(meta, mt)
-	}
+func (m Model) body(spin string) (lines []string, slotStarts []int) {
 	slotIdx := 0
-	addSlot := func(line string, section string) {
+	addSlot := func(line string) {
 		slotStarts = append(slotStarts, len(lines))
-		add(line, lineMeta{section: section, slot: slotIdx})
+		lines = append(lines, line)
 		slotIdx++
 	}
 	// A section with no rows still occupies exactly one note line -- the
@@ -1078,8 +1067,8 @@ func (m Model) body(spin string) (lines []string, slotStarts []int, meta []lineM
 	// A note carries no PR, so it is addressable but not actionable, exactly
 	// like a header: selected() returns nothing on it and every key that acts
 	// on a PR is a silent no-op there.
-	note := func(s board.Section, text string) {
-		addSlot(renderSectionNote(text), s.Rule.Name)
+	note := func(text string) {
+		addSlot(renderSectionNote(text))
 	}
 	// No blank separator between sections. It was drawn at first and measured:
 	// a blank is a line the cursor cannot occupy, and every such line costs
@@ -1088,7 +1077,7 @@ func (m Model) body(spin string) (lines []string, slotStarts []int, meta []lineM
 	// header's own background is what separates the sections instead, and it
 	// costs nothing because the cursor can sit on it.
 	header := func(s board.Section, count string) {
-		addSlot(m.sectionHeader(s.Rule.Name, count, slotIdx == m.cursor), s.Rule.Name)
+		addSlot(m.sectionHeader(s.Rule.Name, count, slotIdx == m.cursor))
 	}
 	for _, s := range m.sections() {
 		switch s.State {
@@ -1097,7 +1086,7 @@ func (m Model) body(spin string) (lines []string, slotStarts []int, meta []lineM
 			// carries the name alone rather than a number about to change.
 			header(s, "")
 			for _, row := range s.Rows {
-				addSlot(m.renderRow(row, slotIdx == m.cursor, s.Rule.Author), s.Rule.Name)
+				addSlot(m.renderRow(row, slotIdx == m.cursor, s.Rule.Author))
 			}
 			// One spinner line, and no placeholder block. The block reserved
 			// roughly the section's final height so sections below it were
@@ -1112,32 +1101,25 @@ func (m Model) body(spin string) (lines []string, slotStarts []int, meta []lineM
 			// §3.9 already allows, while a board that scrolls five lines per
 			// keypress is the defect five earlier attempts were chasing.
 			if len(s.Rows) == 0 {
-				note(s, spin)
+				note(spin)
 			}
 		case board.Failed:
 			header(s, "")
-			note(s, errorStyle.Render(clip(s.Err.Error(), max(0, m.width-3))))
+			note(errorStyle.Render(clip(s.Err.Error(), max(0, m.width-3))))
 		case board.Ready:
 			header(s, fmt.Sprint(len(s.Rows)))
 			if len(s.Rows) == 0 {
 				// A resolved empty section collapses to one line: it knows it
 				// has nothing, so holding six blank rows would waste most of a
 				// short pane.
-				note(s, mutedStyle.Render("—"))
+				note(mutedStyle.Render("—"))
 			}
 			for _, row := range s.Rows {
-				addSlot(m.renderRow(row, slotIdx == m.cursor, s.Rule.Author), s.Rule.Name)
+				addSlot(m.renderRow(row, slotIdx == m.cursor, s.Rule.Author))
 			}
 		}
 	}
-	return lines, slotStarts, meta
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+	return lines, slotStarts
 }
 
 // scrollOff is how many lines of context are kept beyond the cursor, so moving
@@ -1153,16 +1135,18 @@ const scrollOff = 2
 // Five earlier attempts could not hold it, because a row's height depended on
 // its data and a section header took a line of its own: a single `j` moved the
 // world by 0 to 3 lines depending on what happened to be nearby, which is what
-// read as jumping. Now every line on the board is a row -- gate names live in
-// the `c` overlay and the section name lives in each row's left gutter -- so
-// the clamp below is the whole of it. See docs/uniform-rows.md.
+// read as jumping. Now every line on the board is addressable -- gate names
+// live in the `d` overlay and the section name lives in its own header row the
+// cursor can sit on -- so the clamp below is the whole of it. See
+// docs/uniform-rows.md.
 //
 // Clamping both edges rather than pinning one means the board does not move at
 // all while the cursor crosses the middle, which is the conventional behaviour
 // (vim's scrolloff, less, fzf).
-// It also reports the index of the top visible line, which the sticky header
-// and the top row's gutter both need: both name the section of the row you are
-// actually looking at, and neither can know that before the slice is chosen.
+//
+// It also reports the index of the top visible line, which the top row needs to
+// name the section of the row you are actually looking at -- not knowable
+// before the slice is chosen.
 func window(lines []string, cursorRow, height int, rowStarts []int) ([]string, int) {
 	if height <= 0 || len(lines) <= height {
 		return lines, 0
@@ -1255,10 +1239,7 @@ func (m Model) promptLine() string {
 // pane never scrolls, so a top-row-bound field is frozen at its first section
 // forever -- which is exactly how the reverted sticky line failed. See
 // docs/section-layout.md §14.
-// cursorSection names the cursor's section and its position within it. On a
-// header pos is 0, which the footer renders as the section's size alone: the
-// cursor is at the section, not at a row inside it, and claiming "1 of 12"
-// there would be a position the cursor does not have.
+//
 // Read off the slot the cursor is actually on, not recomputed by walking the
 // sections: the section a slot belongs to is recorded on the slot, and a second
 // independent walk is what put the footer one section out when the note slot
@@ -1320,8 +1301,9 @@ func (m Model) footer(spin string) string {
 	left = clip(left, max(0, m.width-2))
 	// The section name takes the right field and the repo yields it: the repo
 	// is a constant the user chose and can read in the window title, while the
-	// section changes under every keypress. The gutter only has 8 cells for it,
-	// so this is the one place the full name and the count are legible.
+	// section changes under every keypress. A header scrolls away with its
+	// section, so this is the only place the cursor's section is named once you
+	// are past the top of it.
 	right := m.cfg.Repo
 	if name, pos, total := m.cursorSection(); name != "" {
 		if pos == 0 {
@@ -1375,7 +1357,7 @@ func (m Model) View() string {
 		chrome = 2
 	}
 
-	lines, slotStarts, _ := m.body(spin)
+	lines, slotStarts := m.body(spin)
 	if m.height > 0 {
 		avail := m.height - chrome
 		lines, _ = window(lines, m.cursor, avail, slotStarts)

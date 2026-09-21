@@ -5,17 +5,17 @@ Research and recommendation, written in response to:
 > *"maybe we should restructure the view, maybe we need to change it to each item
 > take the same space and header and errors would be somewhere else"*
 
-Researched: 2026-09-17. Builds on `docs/design-research.md` (three rounds) and
-`docs/design-spec.md`. Claims about `prs-mng`'s own behaviour are from a
+Researched: 2026-09-17. Builds on the three rounds of design research and the
+design spec since consolidated into `DESIGN.md`. Claims about `prs-mng`'s own behaviour are from a
 transcription of the shipped `window()` into a simulator and exhaustive search
 over its state space; claims about other tools are cited. Where I could not
 verify something I say so in §6.
 
 ---
 
-> Note: this study cites `design-research.md` and `design-spec.md`, which have
-> since been consolidated into `DESIGN.md`. The citations are kept as written
-> for provenance; the surviving conclusions live in `DESIGN.md`.
+> Note: this study was written against an earlier `design-research.md` and
+> `design-spec.md`, which have since been consolidated into `DESIGN.md`. The
+> surviving conclusions live there.
 
 > **Superseded (2026-09-17).** §1's recommendation — "fix the scroll code, not
 > the layout" — was implemented and the jump survived. The board was then
@@ -195,7 +195,7 @@ At K=2 it does not — which is why the current code, with `scrollOff = 2`,
 This is the actionable finding. The fix is:
 
 - `scrollOff = 3` (also the modal value across fzf, nnn and micro — see
-  `design-research.md` §9.1, and it is what guarantees a full 2-line row of
+  the earlier design research (§9.1, now in `DESIGN.md`), and it is what guarantees a full 2-line row of
   lookahead rather than half of one).
 - Replace the greedy first-anchor-that-fits loop with: among anchors that keep
   the whole selected row visible, pick the one whose resulting `gapBelow` is
@@ -270,7 +270,7 @@ That is exactly the architecture we would be adopting: move the "why is CI red"
 answer out of the row, and the pane becomes load-bearing. For a tool the user
 opens with cmd+\` to *glance* and dismiss, a permanently-occupied 45% of width or
 40% of height is the wrong trade. It also directly contradicts
-`design-spec.md` §7.1, which cut the global header to buy back a single row.
+the earlier design spec (§7.1, now in `DESIGN.md`), which cut the global header to buy back a single row.
 
 Worth noting for honesty: I found **no gh-dash issue complaining the preview is
 on by default or wastes space**. The space complaints are aimed at the logo
@@ -300,7 +300,7 @@ on whether rows above it are expanded.
 fzf is the only tool I found that handles variable-height items in a scroll
 margin, and its implementation is a **two-phase loop** whose source comment says
 it exists "to avoid infinite loop of alternating between moving up and down"
-(`src/terminal.go`, cited in `design-research.md` §9.4). That loop is needed
+(`src/terminal.go`, cited in the earlier design research §9.4). That loop is needed
 precisely because item heights vary. Expand-on-demand would force us into that
 class of algorithm while the current design lets us stay with a stateless clamp.
 
@@ -330,7 +330,7 @@ failing gates, and the first name is the one that identifies the failure class
 (`lint-typecheck-test` vs `e2e / checkout-flows` vs `Tag-Deploy`). The `+1`
 suffix preserves the fact that more exist. What is lost is the *complete* list
 when 3+ gates fail — which is the case where the list was least readable anyway,
-since `design-spec.md` §1.5 already clips it to one line with `…`.
+since the earlier design spec §1.5 already clips it to one line with `…`.
 
 **What is gained.** Every row becomes exactly 1 line. At `height=19` on a board
 with 4 failing PRs that is 4 rows back — over 20% more PRs visible. And the
@@ -342,7 +342,7 @@ fix.
 and the suffix would leave 33 — too tight. So this option needs its own
 responsive rule: **show the gate suffix only at FULL tier and only above ~100
 columns**, otherwise fall back to the bare `✗2` glyph. That is a new breakpoint,
-which `design-spec.md` §6 currently does not have.
+which the earlier design spec §6 did not have.
 
 This is a real, defensible option. It is not a scroll fix — it is a density win
 that happens to make the grid uniform.
@@ -353,7 +353,7 @@ The `?` help overlay already exists (`internal/ui/help.go`), so the mechanism is
 built. Pressing e.g. `c` on a failing PR would show its full check list.
 
 Against it as a *replacement*: it costs a keystroke and a mode, and it fails the
-"glance" test in `design-research.md` §0.6 — the user wants to see why CI is red
+"glance" test in the earlier design research §0.6 — the user wants to see why CI is red
 while scanning, not after deciding to interrogate a specific row. A board where
 the answer is one keypress away is meaningfully worse than one where it is
 already on screen, for a tool whose whole premise is cmd+\`, glance, dismiss.
@@ -368,7 +368,7 @@ The brief asks me to argue this honestly rather than dismiss it. Having done so,
 it still loses.
 
 The case for dropping: `✗2` already answers "is this broken", and
-`design-spec.md` §4 says green/settled states should be *confirmable*, not
+The earlier design spec §4 says green/settled states should be *confirmable*, not
 noticeable — one could argue the same about failure detail.
 
 The case against, which is stronger: `✗2` answers "is it broken" but not "is it
@@ -376,7 +376,7 @@ The case against, which is stronger: `✗2` answers "is it broken" but not "is i
 fix". `e2e / checkout-flows` means "possibly flaky, re-run it". `Tag-Deploy`
 means "infrastructure, not me". These lead to *different actions*, and the whole
 board exists to answer "what do I need to do right now"
-(`design-spec.md` §9.1). Collapsing them to `✗2` deletes the triage signal and
+(earlier design spec §9.1). Collapsing them to `✗2` deletes the triage signal and
 forces a browser round-trip — the exact cost the tool is meant to avoid. The user
 has said this explicitly and the design spec already resolved it once
 (§1.5, "Kept, demoted", and research open question 4).
@@ -401,7 +401,7 @@ on a long board is a genuine gap. Familiar from mobile and web lists.
 **Against, and it is decisive for this tool.** A sticky header is a region whose
 *content* changes as you scroll but whose *position* does not — which means the
 line under it shifts meaning as you move. More practically: it costs a permanent
-row (the thing `design-spec.md` §7.1 just spent a section buying back), and it
+row (the thing the earlier design spec §7.1 just spent a section buying back), and it
 reintroduces exactly the coupling §3.2 rejects — the rendered chrome becomes a
 function of the cursor position, so the line map changes as you navigate.
 
@@ -440,7 +440,7 @@ Three reasons it is wrong here:
    boundary (blank + rule). With 3-5 sections that is 4-8 lines. A tab bar is a
    flat 3 — but it is 3 lines of *permanent* chrome in a 20-row pane, and it
    only breaks even at 3+ sections while making the other sections invisible.
-2. **It destroys the one-glance property.** `design-spec.md` §9.1's closing
+2. **It destroys the one-glance property.** The earlier design spec §9.1's closing
    argument is that the eye lands on the four red cells across the *whole board*
    without reading anything. With tabs, "do I need to do anything right now"
    requires visiting every tab. That is the single most important property of
@@ -454,7 +454,7 @@ Three reasons it is wrong here:
 The cheap option. Per §2.4 it **does not solve the scroll problem** — a board
 with 1-line headers and variable rows still drifts.
 
-It is also a real regression in legibility: `design-spec.md` §1.6 states the
+It is also a real regression in legibility: the earlier design spec §1.6 states the
 blank line "is the only pure-whitespace row in the design and it is what
 separates sections". Without it the header rule sits directly against the last
 row of the previous section, and the `━` band abuts a PR title.
@@ -466,7 +466,7 @@ not in the belief that it fixes scrolling.
 ### 4.5 Option 5 — keep as is. **Recommended.**
 
 The 2-line header is not implicated in the drift (§2.4), it is the only section
-separator, and it carries the count that `design-research.md` R8 requires.
+separator, and it carries the count that the earlier design research R8 requires.
 Combine with option 2 (section name in the footer) if you want the "where am I"
 answer on long boards.
 
@@ -490,7 +490,7 @@ research and that the user liked.
 
 ### 5.2 The design was derived, not chosen, and each piece has a reason
 
-`design-spec.md` is explicit that every width and glyph is a decision. The two
+The earlier design spec is explicit that every width and glyph is a decision. The two
 irregularities under scrutiny are both *resolved open questions*, not oversights:
 
 - The continuation line is research open question 4, resolved "keep, demoted"
@@ -609,7 +609,7 @@ What breaks under each route.
 
 | area | impact |
 |---|---|
-| `design-spec.md` column arithmetic | **none** |
+| earlier design-spec column arithmetic | **none** |
 | responsive tiers (§6) | **none** |
 | filter | **none** — `window()` already takes the filtering-time `avail` |
 | `l`/`h` section jumping | **none** — operates on row indices, not lines |
@@ -621,7 +621,7 @@ What breaks under each route.
 | area | impact |
 |---|---|
 | column arithmetic | **breaks.** `fixedFull = 23` assumes title is the only flex column. A gate suffix is a second variable-width field; the §1.2 budget and the "exactly one column flexes" invariant (§1.1) both need restating. |
-| responsive tiers | **breaks.** Needs a new breakpoint above FULL (~100 cols) to decide whether the suffix appears. `design-spec.md` §6 has four tiers and no fifth. |
+| responsive tiers | **breaks.** Needs a new breakpoint above FULL (~100 cols) to decide whether the suffix appears. the earlier design spec §6 has four tiers and no fifth. |
 | `renderRow` | title clip width becomes a function of gate-name length — `TestLongTitleDoesNotOverflowWidth` and `TestNoRowOverflowsAtAnyWidth` need extending to the new field. |
 | filter | title match highlighting (`renderTitle`) must not treat the suffix as title text. |
 | tests | `TestViewRendersStatesAndGates` asserts gate names appear; would need rewriting for the new position. `TestScrollAlwaysStartsOnAWholeRow`'s orphan check becomes vacuous. |
@@ -631,7 +631,7 @@ What breaks under each route.
 
 Largest blast radius: a second focusable region, a width/height split, a
 position-auto breakpoint, pane-local scrolling, and per gh-dash #798 a
-well-tested "pane closed" path. Every mockup in `design-spec.md` §9 invalidated.
+well-tested "pane closed" path. Every mockup in the earlier design spec §9 invalidated.
 Not recommended.
 
 ---

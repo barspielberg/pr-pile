@@ -182,27 +182,12 @@ func isLowerAlpha(r rune) bool { return r >= 'a' && r <= 'z' }
 // titlePartStyle layers a part's colour onto the row's own style rather than
 // replacing it, so a draft row stays faint and a selected row stays bold and
 // keeps its background.
-func titlePartStyle(st lipgloss.Style, p titlePart, typeWord string) lipgloss.Style {
+func titlePartStyle(st lipgloss.Style, p titlePart) lipgloss.Style {
 	switch p {
 	case partType:
-		if commitTypes[typeWord] {
-			return st.Foreground(typeStyle.GetForeground())
-		}
+		return st.Foreground(typeStyle.GetForeground())
 	case partScope, partTicket:
 		return st.Faint(true)
 	}
 	return st
-}
-
-// leadingType is the type word a parsed title opens with, "" for a bare-ticket
-// or unparsed title.
-func leadingType(s string, parts []titlePart) string {
-	if len(parts) == 0 || parts[0] != partType {
-		return ""
-	}
-	n := 0
-	for n < len(parts) && parts[n] == partType {
-		n++
-	}
-	return string([]rune(s)[:n])
 }

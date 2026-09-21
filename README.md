@@ -6,7 +6,10 @@ Run it as `prs`. See [docs/DESIGN.md](docs/DESIGN.md) for the design, the decisi
 
 ## Status
 
-Scaffolding. The board fetches, buckets, renders, searches and opens PRs. Not yet: review progress.
+Working. The board fetches, buckets and renders PRs with their CI, review and
+merge state; searches and highlights in place; opens PRs in the browser; copies
+urls; runs configured shell actions; and has a per-PR detail overlay covering
+checks, conflicts, unresolved conversations, reviewers and size.
 
 ## Build
 
@@ -22,7 +25,7 @@ Needs `gh` installed and logged in (used only for the token) and a Nerd Font for
 
 ## How it works
 
-Every section is a **rule** — a GitHub search query plus a name. Rules are an ordered list, and a PR is shown under the **first** rule that matches it, so ordering is the configuration. The rule's name is shown in the left gutter on the section's first visible row, clipped to 8 cells, and on the top visible row even when that section began above the fold.
+Every section is a **rule** — a GitHub search query plus a name. Rules are an ordered list, and a PR is shown under the **first** rule that matches it, so ordering is the configuration. Each section opens with a full-width header row carrying the rule's name and its row count; the header is a position the cursor can sit on, which is what keeps one keypress to one line.
 
 Every row is exactly one line, which is what keeps scrolling steady: one keypress moves the board by at most one line. Failing check names are behind `d` rather than in the list — see [docs/uniform-rows.md](docs/uniform-rows.md).
 
@@ -168,8 +171,9 @@ position (`9-45 of 45 · end`) on the right. The row is there at every height �
 when the whole legend fits it just reads `esc q ? close` and `all 45`.
 
 The footer's right field names the section the cursor is in and where it sits
-inside it — `NEEDS MY REVIEW · 3 of 10`. The gutter only has 8 cells, so this is
-the only place the full rule name and the count are legible.
+inside it — `NEEDS MY REVIEW · 3 of 10`. A section header scrolls away with its
+section, so this is the only place the cursor's section is named once you are
+past the top of it.
 
 ### Searching
 

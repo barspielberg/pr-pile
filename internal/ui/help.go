@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// pr-detail.go carries the state block that sits under the check list.
+// detail.go carries the state block that sits under the check list.
 
 // helpBlock is one titled group of rows. The page is assembled from blocks
 // rather than written out as a string so the renderer can window it: the legend
@@ -171,8 +171,8 @@ func (m Model) helpHint(top, total, body int) string {
 }
 
 // detailOverlay answers "what do I do about this PR" for the selected row. It
-// began as the checks page and kept the key: the checks block is still the top
-// of it, so `c` still means what it did.
+// began as the checks page, and the checks block is still the top of it: the
+// first thing the page answers is what CI says.
 //
 // The page is two blocks. The checks block names what is failing or running and
 // counts what passed -- 47% of contexts on this board are SKIPPED and 45%
@@ -255,7 +255,7 @@ func (m Model) bodyBudget() int {
 // without parsing the frame around it.
 //
 // Order is failing, then pending, then the passing count: the list is read
-// top-down and the top is what you pressed `c` for. Within a bucket the API's
+// top-down and the top is what you pressed `d` for. Within a bucket the API's
 // own order is kept -- it groups a workflow's jobs together, which is more
 // useful than an alphabetical sort that would interleave them.
 func (m Model) checkLines(pr github.PR) []string {
