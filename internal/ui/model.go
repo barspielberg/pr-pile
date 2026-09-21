@@ -286,22 +286,26 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		return m.cancelSearch(), nil
-	// Matches are rows, so these land on rows and never on a header or a note.
-	// matchAfter/matchBefore work in row space; the cursor addresses slots, so
-	// the index is converted at this boundary rather than teaching the search
-	// about section furniture.
+	// A matched header is a match like any other, so these land on one. That
+	// reverses the old rule ("matches are rows, so these never stop on
+	// furniture"), which was a consequence of the match set living in row
+	// space -- a space with no way to name a header -- rather than a choice.
+	// Now that a header can match, skipping it would have the footer count a
+	// match the user cannot step to, which is the worse of the two. A header is
+	// addressable but not actionable (docs/uniform-rows.md §4.1), so landing on
+	// one is a position this layout already supports.
 	//
 	// An empty query is not a search, so these fall through to plain movement
 	// instead -- which means they stop on headers exactly as j and k do. Two
 	// motion keys disagreeing about the same board is the kind of thing that
 	// gets noticed in use, and "the cursor sits on headers" is the whole design
-	// this layout rests on (docs/uniform-rows.md §4.1), so the fallback honours
-	// it rather than quietly skipping furniture.
+	// this layout rests on, so the fallback honours it rather than quietly
+	// skipping furniture.
 	case "ctrl+n", "ctrl+j", "down":
 		if m.noQuery() {
 			m.cursor++
 		} else {
-			m.cursor = m.rowSlotClamped(m.matchAfter(m.cursorRow()))
+			m.cursor = m.matchAfter(m.cursor)
 		}
 		m.clampCursor()
 		return m, nil
@@ -309,7 +313,7 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.noQuery() {
 			m.cursor--
 		} else {
-			m.cursor = m.rowSlotClamped(m.matchBefore(m.cursorRow()))
+			m.cursor = m.matchBefore(m.cursor)
 		}
 		m.clampCursor()
 		return m, nil
@@ -351,31 +355,25 @@ func (m *Model) previewMatch() {
 	if len(matches) == 0 {
 		return
 	}
-	// matchIndexes is in row space and the cursor addresses slots, so the
-	// comparison happens in row space and the assignment converts back. Doing
-	// it the other way round parks the cursor on a section header, which is
-	// never a match and costs the matched row its selection.
-	cur := m.cursorRow()
 	for _, idx := range matches {
-		if idx == cur {
+		if idx == m.cursor {
 			return
 		}
 	}
 	// From where the search opened rather than from the cursor: backspacing to
 	// a wider query has to be able to walk back up, not only further down.
-	origin := m.rowAt(m.searchOrigin)
 	for _, idx := range matches {
-		if idx >= origin {
-			m.cursor = m.rowSlotClamped(idx)
+		if idx >= m.searchOrigin {
+			m.cursor = idx
 			return
 		}
 	}
-	m.cursor = m.rowSlotClamped(matches[0])
+	m.cursor = matches[0]
 }
 
-// matchAfter is the first match below i, wrapping to the top. With no query,
-// or no match, it is the next row -- so the chords still move on an empty
-// prompt rather than doing nothing.
+// matchAfter is the first match below slot i, wrapping to the top. With no
+// query, or no match, it is the next slot -- so the chords still move on an
+// empty prompt rather than doing nothing.
 func (m Model) matchAfter(i int) int {
 	matches := m.matchIndexes()
 	if len(matches) == 0 {
@@ -646,10 +644,7 @@ func (m Model) stepMatch(forward bool) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return statusMsg("no matches") }
 	}
 
-	// All of this is row space: matchAfter/matchBefore take and return row
-	// indices, and the wrap is detected by comparing rows. The cursor, which
-	// addresses slots, is converted once at the end.
-	cur := m.cursorRow()
+	cur := m.cursor
 	var next int
 	var wrapped bool
 	if forward {
@@ -659,7 +654,7 @@ func (m Model) stepMatch(forward bool) (tea.Model, tea.Cmd) {
 		next = m.matchBefore(cur)
 		wrapped = next >= cur
 	}
-	m.cursor = m.rowSlotClamped(next)
+	m.cursor = next
 	m.clampCursor()
 	if !wrapped {
 		m.status = ""
@@ -859,23 +854,31 @@ func (m Model) sections() []board.Section {
 	return m.board.Sections()
 }
 
-// matchIndexes is every matching row's index into the flattened visible rows.
+// matchIndexes is every match's index into the cursor's address space -- a
+// SLOT index, not a row index. Both a PR row and a section header can match, so
+// the match set is expressed in the one space that holds them both, in draw
+// order.
+//
+// It used to be row space, which could not name a header at all and cost every
+// caller a conversion through rowSlotClamped. Slot space removes the
+// conversion: a match index is a cursor position already.
+//
 // It is recomputed rather than cached: the board refreshes under the query and
 // the width changes what is drawn, so a stored match set would go stale
 // silently -- and a stale highlight is the one thing this design cannot show.
 func (m Model) matchIndexes() []int {
-	if strings.TrimSpace(m.query) == "" {
+	if m.noQuery() {
 		return nil
 	}
 	var out []int
-	idx := 0
-	for _, s := range m.sections() {
-		for _, r := range s.Rows {
-			if m.rowMatches(r, s.Rule.Author, m.query) {
-				out = append(out, idx)
-			}
-			idx++
+	for i, s := range m.slots() {
+		switch {
+		case s.isRow() && m.rowMatches(s.row, s.author, m.query):
+		case s.isHeader() && m.headerMatches(s.section, s.count, m.query):
+		default:
+			continue
 		}
+		out = append(out, i)
 	}
 	return out
 }
@@ -972,6 +975,19 @@ type slot struct {
 	section string
 	row     board.Row
 	rowIdx  int // index into visibleRows(), -1 for a header
+	// author is the section rule's author setting, which decides whether a row
+	// draws its author cell and so whether the search can match it. It is a
+	// property of the rule, so every slot in the section carries it.
+	author bool
+	// count is what a HEADER draws on its right, and is empty on every other
+	// kind. It is here because it decides where the name is clipped, and so
+	// what a query can match -- not because a row has a count of its own.
+	//
+	// Both are read off the slot rather than looked up again, which keeps the
+	// match walk on the address space it reports indexes into: a second walk of
+	// m.sections() that has to stay in step with slots() is how the note slot
+	// desynced the cursor once already.
+	count string
 }
 
 func (s slot) isHeader() bool { return s.kind == slotHeader }
@@ -1028,16 +1044,37 @@ func (m Model) slots() []slot {
 	var out []slot
 	idx := 0
 	for _, s := range m.sections() {
-		out = append(out, slot{kind: slotHeader, section: s.Rule.Name, rowIdx: -1})
+		base := slot{section: s.Rule.Name, rowIdx: -1, author: s.Rule.Author}
+		header := base
+		header.kind, header.count = slotHeader, headerCount(s)
+		out = append(out, header)
 		for _, r := range s.Rows {
-			out = append(out, slot{kind: slotRow, section: s.Rule.Name, row: r, rowIdx: idx})
+			row := base
+			row.kind, row.row, row.rowIdx = slotRow, r, idx
+			out = append(out, row)
 			idx++
 		}
 		if m.hasNote(s) {
-			out = append(out, slot{kind: slotNote, section: s.Rule.Name, rowIdx: -1})
+			note := base
+			note.kind = slotNote
+			out = append(out, note)
 		}
 	}
 	return out
+}
+
+// headerCount is the count a section's header draws, empty while the rule is
+// still pending: the number is unknown until it resolves, so the header carries
+// the name alone rather than a number about to change.
+//
+// The search needs it as well as body() does -- it decides where the name is
+// clipped, and so what a query can match -- and a rule this small is exactly
+// the kind that drifts when it is written twice.
+func headerCount(s board.Section) string {
+	if s.State != board.Ready {
+		return ""
+	}
+	return fmt.Sprint(len(s.Rows))
 }
 
 // hasNote says whether a section draws its no-rows line. body() asks the same
@@ -1081,38 +1118,9 @@ func (m Model) nextRowSlot(dir int) int {
 }
 
 // noQuery reports whether there is no search to step through. Whitespace does
-// not count: rowMatches treats a blank query as matching nothing, so stepping
-// it as a search would be a no-op the user reads as a broken key.
+// not count: a blank query matches nothing, row or header, so stepping it as a
+// search would be a no-op the user reads as a broken key.
 func (m Model) noQuery() bool { return strings.TrimSpace(m.query) == "" }
-
-// cursorRow is the cursor's position in ROW space -- the index space the search
-// works in, which counts only PR rows. On a header or a note the cursor has no
-// row of its own, so the nearest row above it is used: that keeps "the next
-// match after here" meaningful wherever the cursor is parked.
-func (m Model) cursorRow() int { return m.rowAt(m.cursor) }
-
-// rowAt is the row index at or above slot i, in row space. Unlike cursorRow it
-// takes an explicit slot, so searchOrigin can be compared against matches.
-func (m Model) rowAt(i int) int {
-	sl := m.slots()
-	row := -1
-	for j := 0; j <= i && j < len(sl); j++ {
-		if sl[j].isRow() {
-			row = sl[j].rowIdx
-		}
-	}
-	return row
-}
-
-// rowSlotClamped converts a row index back into a cursor slot, falling back to
-// the first row when the index is out of range. It is the inverse of cursorRow
-// and the only place row space and slot space meet.
-func (m Model) rowSlotClamped(row int) int {
-	if i := m.rowSlot(row); i >= 0 {
-		return i
-	}
-	return m.firstRowSlot()
-}
 
 // selected is the PR under the cursor. A header has none, so every key that
 // acts on a PR falls through to doing nothing there.
@@ -1178,15 +1186,13 @@ func (m Model) body(spin string) (lines []string, slotStarts []int) {
 	// lines per keypress at a boundary, without it exactly 1 everywhere. The
 	// header's own background is what separates the sections instead, and it
 	// costs nothing because the cursor can sit on it.
-	header := func(s board.Section, count string) {
-		addSlot(m.sectionHeader(s.Rule.Name, count, slotIdx == m.cursor))
+	header := func(s board.Section) {
+		addSlot(m.sectionHeader(s.Rule.Name, headerCount(s), slotIdx == m.cursor))
 	}
 	for _, s := range m.sections() {
 		switch s.State {
 		case board.Pending:
-			// The count is unknown until the rule resolves, so the header
-			// carries the name alone rather than a number about to change.
-			header(s, "")
+			header(s)
 			for _, row := range s.Rows {
 				addSlot(m.renderRow(row, slotIdx == m.cursor, s.Rule.Author))
 			}
@@ -1206,10 +1212,10 @@ func (m Model) body(spin string) (lines []string, slotStarts []int) {
 				note(spin)
 			}
 		case board.Failed:
-			header(s, "")
+			header(s)
 			note(errorStyle.Render(clip(s.Err.Error(), max(0, m.width-3))))
 		case board.Ready:
-			header(s, fmt.Sprint(len(s.Rows)))
+			header(s)
 			if len(s.Rows) == 0 {
 				// A resolved empty section collapses to one line: it knows it
 				// has nothing, so holding six blank rows would waste most of a
@@ -1296,13 +1302,9 @@ func window(lines []string, cursorRow, height int, rowStarts []int) ([]string, i
 // which is what makes backspacing back to a match legible.
 func (m Model) promptLine() string {
 	matches := m.matchIndexes()
-	// matchIndexes is in row space and the cursor addresses slots, so the
-	// comparison is made in row space: comparing the two directly reports
-	// "3 matches" while the cursor sits on one of them.
-	cur := m.cursorRow()
 	at := -1
 	for i, idx := range matches {
-		if idx == cur {
+		if idx == m.cursor {
 			at = i
 			break
 		}

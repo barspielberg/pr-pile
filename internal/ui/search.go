@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/barspielberg/prs-mng/internal/board"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // searchCells is where each cell landed in searchText, as [start,end) rune
@@ -73,6 +74,39 @@ func (m Model) showsAuthor(showAuthor bool) bool {
 	return showAuthor && widthTierFor(m.width, showAuthor) == tierFull
 }
 
+// headerText is the searchable text of a section header: the rule name clipped
+// exactly as the header draws it. That clip is what makes a header match
+// honest, the same way searchText clips a title -- every match is visible, so
+// every match can be highlighted, and a name cut off by a wide count cannot
+// match on runes that are not on screen.
+//
+// The count itself is deliberately omitted, for the reason searchText omits the
+// age cell: it is derived state, so a match on it would appear and expire as
+// the board refreshes without the user typing anything.
+func (m Model) headerText(name, count string) string {
+	_, _, w := m.headerParts(count)
+	return clip(name, w)
+}
+
+// headerParts divides the width between a header's three segments: the indent,
+// the right-hand count, and whatever budget is left for the name.
+//
+// Each segment is clipped against what the ones to its right have already
+// taken, so the three can never sum past the width -- not even on a pane
+// narrower than the margin itself, which the single "indent+name" clip this
+// replaced handled implicitly and segment-wise drawing does not.
+//
+// sectionHeader draws from this and headerText searches from it, so the
+// searchable name and the drawn name cannot disagree about where it ends. That
+// agreement is the whole contract: every match is visible, so every match can
+// be highlighted.
+func (m Model) headerParts(count string) (indent, right string, nameWidth int) {
+	right = clip(headerRight(count), m.width)
+	indent = clip(headerIndent, m.width-lipgloss.Width(right))
+	nameWidth = max(0, m.width-lipgloss.Width(indent)-lipgloss.Width(right))
+	return indent, right, nameWidth
+}
+
 // rowMatches reports whether a row matches the query. One rule: a
 // case-insensitive substring of what the row actually draws at this width.
 //
@@ -93,11 +127,25 @@ func textMatches(text, query string) bool {
 	return strings.Contains(strings.ToLower(text), strings.ToLower(query))
 }
 
+// headerMatches reports whether a section header matches the query, by the
+// same rule rowMatches uses on a row and the help page uses on a legend line.
+func (m Model) headerMatches(name, count, query string) bool {
+	return textMatches(m.headerText(name, count), query)
+}
+
 // matchSpans returns every [start,end) rune span of the query within
 // searchText, so each cell can highlight the part of it that is on screen.
 func (m Model) matchSpans(r board.Row, showAuthor bool, query string) [][2]int {
 	txt, _ := m.searchText(r, showAuthor)
 	return textSpans(txt, query)
+}
+
+// headerHits are the rune indexes of the header name the query hit, ready for
+// hitRuns. A header is one cell where a row is three, so the whole name is the
+// cell and the projection is over the whole string.
+func (m Model) headerHits(name, count, query string) map[int]bool {
+	txt := m.headerText(name, count)
+	return cellHits(textSpans(txt, query), [2]int{0, utf8.RuneCountInString(txt)})
 }
 
 // textSpans is every [start,end) rune span of the query within one drawn
