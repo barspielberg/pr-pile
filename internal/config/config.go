@@ -110,8 +110,8 @@ rules:
 # Actions run a shell command for the selected PR. Available template fields:
 # {{.Number}} {{.Repo}} {{.RepoPath}} {{.Branch}} {{.Base}} {{.URL}}
 # {{.Author}} {{.Title}}
-# String fields are already shell-quoted; use their placeholders without
-# adding quotes around them. The run value itself remains shell syntax.
+# GitHub string fields are already shell-quoted; use their placeholders without
+# adding quotes around them. Repo, repoPath, and run remain trusted shell text.
 # actions:
 #   - key: w
 #     name: worktree

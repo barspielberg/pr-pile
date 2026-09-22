@@ -822,9 +822,11 @@ limit above the number of PRs they match.
 
 Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 `{{.Base}}` `{{.URL}}` `{{.Author}}` `{{.Title}}`.
-Every string field is POSIX-shell-quoted before template execution. Placeholders
-therefore appear directly, not inside author-supplied quotes; the surrounding
-configured command remains trusted shell syntax. `.Number` remains numeric.
+GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, and `Title`)
+are POSIX-shell-quoted before template execution. Those placeholders therefore
+appear directly, not inside author-supplied quotes. Configured `Repo` and
+`RepoPath`, the surrounding command, and numeric `.Number` remain trusted shell
+text.
 
 **No action is bound by default.** Actions are shell templates and the tool
 knows nothing about worktrees, editors or multiplexers, so a default that

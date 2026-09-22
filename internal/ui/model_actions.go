@@ -99,7 +99,7 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	}
 	var b strings.Builder
 	err = t.Execute(&b, map[string]any{
-		"Number": pr.Number, "Repo": shellQuote(m.cfg.Repo), "RepoPath": shellQuote(m.cfg.RepoPath),
+		"Number": pr.Number, "Repo": m.cfg.Repo, "RepoPath": m.cfg.RepoPath,
 		"Branch": shellQuote(pr.HeadRefName), "Base": shellQuote(pr.BaseRefName),
 		"URL": shellQuote(pr.URL), "Author": shellQuote(pr.Author), "Title": shellQuote(pr.Title),
 	})

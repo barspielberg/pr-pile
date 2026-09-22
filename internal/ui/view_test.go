@@ -140,12 +140,12 @@ func TestActionTemplateRenders(t *testing.T) {
 	cfg := testCfg()
 	cfg.RepoPath = "~/Repos/acme/monorepo"
 	m := New(cfg, nil)
-	got, err := m.renderAction("wt switch -x nvim pr:{{.Number}} # {{.Repo}} {{.Branch}}",
+	got, err := m.renderAction("wt switch -x nvim pr:{{.Number}} # {{.Repo}} {{.RepoPath}} {{.Branch}}",
 		github.PR{Number: 42, HeadRefName: "feat/x"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "wt switch -x nvim pr:42 # 'o/r' 'feat/x'"; got != want {
+	if want := "wt switch -x nvim pr:42 # o/r ~/Repos/acme/monorepo 'feat/x'"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
