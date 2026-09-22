@@ -17,8 +17,10 @@ type Model struct {
 	cursor          int // index into the flattened visible rows
 	spinner         int
 	status          string
+	statusSeq       uint64
 	fetching        bool
 	fetchGeneration uint64
+	refreshSeq      uint64
 	// running is the name of the background action in flight, empty when none.
 	// It is what the footer animates on, and what makes a second press of the
 	// same key a no-op rather than a second process.
@@ -86,15 +88,20 @@ type detailMsg struct {
 	detail     github.Detail
 	err        error
 }
-type tickMsg time.Time
+type tickMsg struct{ seq uint64 }
 type spinMsg time.Time
 type refreshMsg struct{}
 type statusMsg string
+type asyncStatusMsg struct {
+	seq  uint64
+	text string
+}
 
 type actionDoneMsg struct {
-	name string
-	seq  int
-	err  error
+	name      string
+	seq       int
+	statusSeq uint64
+	err       error
 	// detail is the command's last line of stderr, which is where a script
 	// says what actually went wrong. "action failed: exit status 1" is not
 	// worth showing when the script already said "herdr not running".
@@ -105,7 +112,7 @@ var spinFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
 func New(cfg config.Config, client *github.Client) Model {
 	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
-		fetchGeneration: 1, detail: map[int]github.Detail{},
+		fetchGeneration: 1, refreshSeq: 1, detail: map[int]github.Detail{},
 		inflight: map[int]detailRequest{}, detailIdentity: map[int]detailRequest{}}
 }
 

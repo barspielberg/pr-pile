@@ -143,9 +143,11 @@ when the configuration loads. Pick a key the table above does not use.
 Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`, `{{.Base}}`, `{{.URL}}`, `{{.Author}}`, `{{.Title}}`.
 GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, and `Title`)
 are already POSIX-shell-quoted; use those placeholders directly, without adding
-quotes around them. The trusted configured `Repo` and `RepoPath` values remain
-shell text, as does the command itself, so expansions, pipes and redirects
-written in `run` still work.
+quotes around them. Each remote placeholder must be a standalone shell word;
+quoted, embedded, command-substitution, and heredoc contexts are rejected when
+the action is invoked. The trusted configured `Repo` and `RepoPath` values
+remain shell text, as does the command itself, so expansions, pipes and
+redirects written in `run` still work.
 
 [docs/config-example.md](docs/config-example.md) works a five-section team board
 through end to end: what each rule claims versus what it actually shows once the

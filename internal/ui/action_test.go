@@ -103,7 +103,7 @@ func TestActionReportsRunningThenSuccess(t *testing.T) {
 		t.Error("footer showed no running glyph:\n" + out)
 	}
 
-	done, _ := m.Update(actionDoneMsg{name: "worktree", seq: m.runSeq})
+	done, _ := m.Update(actionDoneMsg{name: "worktree", seq: m.runSeq, statusSeq: m.statusSeq})
 	m = done.(Model)
 	if m.running != "" {
 		t.Errorf("still running after the result landed: %q", m.running)
@@ -175,6 +175,45 @@ func TestStaleResultIsIgnored(t *testing.T) {
 	}
 }
 
+func TestNewStatusCannotBeClearedByOldActionTimer(t *testing.T) {
+	m := actionBoard(t, "true")
+	m.clearSeq = 7
+	m.status = "old action"
+	next, _ := m.Update(statusMsg("new status"))
+	m = next.(Model)
+	next, _ = m.Update(clearStatusMsg(7))
+	if got := next.(Model).status; got != "new status" {
+		t.Fatalf("old action timer cleared newer status: %q", got)
+	}
+}
+
+func TestStaleAsyncStatusIsIgnored(t *testing.T) {
+	m := actionBoard(t, "true")
+	m.statusSeq = 4
+	m.status = "current"
+	next, _ := m.Update(asyncStatusMsg{seq: 3, text: "stale copy"})
+	if got := next.(Model).status; got != "current" {
+		t.Fatalf("stale async completion replaced current status: %q", got)
+	}
+}
+
+func TestSupersededActionCompletionStillClearsRunning(t *testing.T) {
+	m := actionBoard(t, "true")
+	next, _, _ := m.actionFor("w")
+	m = next
+	seq, statusSeq := m.runSeq, m.statusSeq
+	nextModel, _ := m.Update(statusMsg("new status"))
+	m = nextModel.(Model)
+	nextModel, _ = m.Update(actionDoneMsg{name: "worktree", seq: seq, statusSeq: statusSeq})
+	m = nextModel.(Model)
+	if m.running != "" {
+		t.Fatalf("superseded action completion left running=%q", m.running)
+	}
+	if m.status != "new status" {
+		t.Fatalf("superseded action completion replaced newer status: %q", m.status)
+	}
+}
+
 // A refresh takes the footer back; a result that lands afterwards must not
 // reinstate a running glyph for a board that has moved on.
 func TestRefreshDropsTheRunningIndicator(t *testing.T) {
@@ -210,7 +249,7 @@ func TestLongFailureStaysOneLine(t *testing.T) {
 // stale binary reporting every action as a success went unnoticed.
 func runActionMsg(t *testing.T, line string) actionDoneMsg {
 	t.Helper()
-	msg := runAction(exec.Command("sh", "-c", line), "worktree", 1)()
+	msg := runAction(exec.Command("sh", "-c", line), "worktree", 1, 0)()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("runAction returned %T, want actionDoneMsg", msg)

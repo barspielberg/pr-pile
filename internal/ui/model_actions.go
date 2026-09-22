@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"github.com/barspielberg/pr-pile/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
 	"os/exec"
@@ -30,21 +31,24 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 			return m, func() tea.Msg { return statusMsg("action: " + err.Error()) }, true
 		}
 		m.runSeq++
+		m.statusSeq++
+		m.clearSeq = 0
 		cmd := exec.Command("sh", "-c", line)
 		if a.Mode == "suspend" {
 			// Hand the terminal over for TUI commands (a diff pager, a review
 			// session), then repaint when they exit.
 			name := a.Name
+			statusSeq := m.statusSeq
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				if err != nil {
-					return statusMsg(name + " failed: " + err.Error())
+					return asyncStatusMsg{seq: statusSeq, text: name + " failed: " + err.Error()}
 				}
-				return statusMsg("")
+				return asyncStatusMsg{seq: statusSeq}
 			}), true
 		}
 		m.running, m.status = a.Name, ""
 		seq := m.runSeq
-		work := runAction(cmd, a.Name, seq)
+		work := runAction(cmd, a.Name, seq, m.statusSeq)
 		if m.fetching || len(m.inflight) > 0 {
 			return m, work, true
 		}
@@ -67,7 +71,7 @@ func clearStatusIn(d time.Duration, seq int) tea.Cmd {
 // runAction waits for the process off the UI goroutine and reports how it went.
 // It also reaps, which the fire-and-forget version did only as a side effect of
 // throwing the result away.
-func runAction(cmd *exec.Cmd, name string, seq int) tea.Cmd {
+func runAction(cmd *exec.Cmd, name string, seq int, statusSeq uint64) tea.Cmd {
 	// Bounded, because a command that streams to stderr should not be able to
 	// grow the board's memory; the tail is the part that says what failed.
 	var errBuf tailWriter
@@ -75,7 +79,7 @@ func runAction(cmd *exec.Cmd, name string, seq int) tea.Cmd {
 	cmd.Stderr = &errBuf
 	return func() tea.Msg {
 		err := cmd.Run()
-		return actionDoneMsg{name: name, seq: seq, err: err, detail: errBuf.lastLine()}
+		return actionDoneMsg{name: name, seq: seq, statusSeq: statusSeq, err: err, detail: errBuf.lastLine()}
 	}
 }
 
@@ -93,17 +97,125 @@ func actionResult(msg actionDoneMsg) string {
 }
 
 func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
+	if err := validateRemoteActionFields(tmpl); err != nil {
+		return "", err
+	}
 	t, err := template.New("action").Parse(tmpl)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	err = t.Execute(&b, map[string]any{
-		"Number": pr.Number, "Repo": m.cfg.Repo, "RepoPath": m.cfg.RepoPath,
-		"Branch": shellQuote(pr.HeadRefName), "Base": shellQuote(pr.BaseRefName),
-		"URL": shellQuote(pr.URL), "Author": shellQuote(pr.Author), "Title": shellQuote(pr.Title),
+	err = t.Execute(&b, actionTemplateData{
+		Number: pr.Number, Repo: m.cfg.Repo, RepoPath: m.cfg.RepoPath,
+		Branch: shellQuote(pr.HeadRefName), Base: shellQuote(pr.BaseRefName),
+		URL: shellQuote(pr.URL), Author: shellQuote(pr.Author), Title: shellQuote(pr.Title),
 	})
 	return b.String(), err
+}
+
+type actionTemplateData struct {
+	Number            int
+	Repo, RepoPath    string
+	Branch, Base, URL string
+	Author, Title     string
+}
+
+var remoteActionFields = []string{"Branch", "Base", "URL", "Author", "Title"}
+
+func validateRemoteActionFields(tmpl string) error {
+	for offset := 0; ; {
+		rel := strings.Index(tmpl[offset:], "{{")
+		if rel < 0 {
+			return nil
+		}
+		start := offset + rel
+		closeRel := strings.Index(tmpl[start+2:], "}}")
+		if closeRel < 0 {
+			return nil
+		}
+		end := start + 2 + closeRel
+		action := strings.TrimSpace(tmpl[start+2 : end])
+		for _, field := range remoteActionFields {
+			token := "." + field
+			if !strings.Contains(action, token) {
+				continue
+			}
+			if action != token || !standaloneActionField(tmpl, start, end+2) ||
+				strings.Contains(tmpl, "<<") || !topLevelShellContext(tmpl[:start]) {
+				return fmt.Errorf("remote field %s must be an unquoted standalone placeholder", token)
+			}
+		}
+		offset = end + 2
+	}
+}
+
+func standaloneActionField(tmpl string, start, end int) bool {
+	return (start == 0 || shellSpace(tmpl[start-1])) &&
+		(end == len(tmpl) || shellSpace(tmpl[end]))
+}
+
+func shellSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+func topLevelShellContext(prefix string) bool {
+	var quote byte
+	parenDepth, braceDepth := 0, 0
+	for i := 0; i < len(prefix); i++ {
+		if i+1 < len(prefix) && prefix[i:i+2] == "{{" {
+			if end := strings.Index(prefix[i+2:], "}}"); end >= 0 {
+				i += end + 3
+				continue
+			}
+		}
+		c := prefix[i]
+		if c == '\\' && quote != '\'' {
+			i++
+			continue
+		}
+		switch quote {
+		case '\'':
+			if c == '\'' {
+				quote = 0
+			}
+			continue
+		case '"':
+			if c == '"' {
+				quote = 0
+			}
+			continue
+		case '`':
+			if c == '`' {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+		case '$':
+			if i+1 < len(prefix) && prefix[i+1] == '(' {
+				parenDepth++
+				i++
+			} else if i+1 < len(prefix) && prefix[i+1] == '{' {
+				braceDepth++
+				i++
+			}
+		case '(':
+			if parenDepth > 0 {
+				parenDepth++
+			}
+		case ')':
+			if parenDepth > 0 {
+				parenDepth--
+			}
+		case '}':
+			if braceDepth > 0 {
+				braceDepth--
+			}
+		}
+	}
+	return quote == 0 && parenDepth == 0 && braceDepth == 0
 }
 
 func shellQuote(s string) string {
