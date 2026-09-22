@@ -56,16 +56,14 @@ func TestActionTemplateStringsAreShellQuoted(t *testing.T) {
 	}
 }
 
-func TestEveryStringTemplateFieldCannotInjectShell(t *testing.T) {
-	for _, field := range []string{"Repo", "RepoPath", "Branch", "Base", "URL", "Author", "Title"} {
+func TestEveryRemoteStringTemplateFieldCannotInjectShell(t *testing.T) {
+	for _, field := range []string{"Branch", "Base", "URL", "Author", "Title"} {
 		t.Run(field, func(t *testing.T) {
 			dir := t.TempDir()
 			marker := filepath.Join(dir, "injected")
 			output := filepath.Join(dir, "output")
 			value := "literal; touch " + marker
-			cfg := testCfg()
-			cfg.Repo, cfg.RepoPath = value, value
-			m := New(cfg, nil)
+			m := New(testCfg(), nil)
 			pr := github.PR{
 				HeadRefName: value,
 				BaseRefName: value,

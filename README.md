@@ -141,9 +141,11 @@ Action keys cannot shadow a built-in key, and duplicate action keys are rejected
 when the configuration loads. Pick a key the table above does not use.
 
 Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`, `{{.Base}}`, `{{.URL}}`, `{{.Author}}`, `{{.Title}}`.
-Every string field is already POSIX-shell-quoted; use placeholders directly,
-without adding quotes around them. The configured command itself remains shell
-syntax, so pipes, redirects and variables written in `run` still work.
+GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, and `Title`)
+are already POSIX-shell-quoted; use those placeholders directly, without adding
+quotes around them. The trusted configured `Repo` and `RepoPath` values remain
+shell text, as does the command itself, so expansions, pipes and redirects
+written in `run` still work.
 
 [docs/config-example.md](docs/config-example.md) works a five-section team board
 through end to end: what each rule claims versus what it actually shows once the
