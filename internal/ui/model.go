@@ -33,36 +33,22 @@ type Model struct {
 	// stays until something else takes the line.
 	clearSeq int
 
-	// selection is the set of selected PR NUMBERS. See selection.go for why it
-	// is numbers rather than positions.
-	selection map[int]bool
-	// anchor is the slot `v` was pressed on, -1 when not ranging. The range is
-	// anchor..cursor inclusive, recomputed on every move rather than
-	// accumulated, so walking back over it shrinks it.
-	anchor int
-	// ranging is whether `v` mode is on. Separate from anchor >= 0 so the
-	// footer has one thing to ask.
-	ranging bool
-	// rangeOwned is the PRs the CURRENT range selected, as opposed to ones the
-	// user marked with space beforehand. Walking the cursor back over a range
-	// has to release its own rows without touching the user's -- without this
-	// distinction, shrinking a range would eat marks it never made.
+	// The selection, by PR number, and the open `v` range: anchor..cursor
+	// inclusive, recomputed on every move so walking back shrinks it.
+	// rangeOwned is what the range itself marked, kept apart from the user's
+	// own space marks so shrinking cannot eat them. See selection.go.
+	selection  map[int]bool
+	anchor     int
+	ranging    bool
 	rangeOwned map[int]bool
 
-	// confirmOpen is the PR set a confirm prompt is waiting on, nil when no
-	// prompt is up. It holds the PRs themselves rather than a count so the
-	// prompt and the action cannot disagree: a refresh landing mid-prompt
-	// clears the selection, and re-reading it at answer time would act on the
-	// cursor row while the footer still said "7 PRs?".
-	confirmOpen []github.PR
-	// confirmAction is the configured action key the prompt is guarding, empty
-	// when the prompt is for the builtin open. A `multi` action runs one
-	// command over the whole selection, so the same "this many at once" guard
-	// applies -- `open {{.URLs}}` over forty rows is the case the prompt
-	// exists for.
+	// The pending confirm: the PR set captured when the prompt opened (nil
+	// when none is up), the action key it guards (empty for the builtin open),
+	// and what to call it on the footer. The set is held rather than a count
+	// so a refresh landing mid-prompt cannot change what the answer acts on.
+	confirmOpen   []github.PR
 	confirmAction string
-	// confirmVerb names what the prompt will do, for the footer.
-	confirmVerb string
+	confirmVerb   string
 
 	searching bool
 	query     string

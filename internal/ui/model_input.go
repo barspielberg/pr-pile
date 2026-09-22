@@ -24,12 +24,8 @@ var copyToClipboard = func(s string) error {
 }
 
 // copySelected yanks the url of every selected PR, or of the row under the
-// cursor when nothing is selected. With neither -- an empty board -- there is
-// no URL to copy and saying so is better than a silent no-op.
-//
-// Urls are joined with NEWLINES. One per line is what pastes into a PR
-// description, a Slack message or a ticket, which is what this is for; a shell
-// can join lines far more easily than a user can split them back apart.
+// cursor when nothing is selected. Urls are joined with newlines: one per line
+// is what pastes into a PR description, a ticket or a Slack message.
 func (m Model) copySelected() (Model, tea.Cmd) {
 	prs := m.actionPRs()
 	if len(prs) == 0 {
@@ -74,17 +70,11 @@ func (m Model) copySelected() (Model, tea.Cmd) {
 	}
 }
 
-// openURL is browser.Open behind a var, so a test can watch what would be
-// opened without taking over the developer's screen. Same trade as
-// copyToClipboard.
+// A var so a test can watch what would be opened.
 var openURL = browser.Open
 
-// confirmThreshold is where opening a selection starts asking first.
-//
-// Two tabs is a normal thing to want and prompting for it would be friction on
-// the common case. Three is where a mistyped key stops being recoverable: esc
-// closes a prompt, but nothing closes the tabs an accidental `enter` on a
-// forty-row board would spray across the browser.
+// Two tabs is a normal thing to want; three is where a mistyped key stops
+// being recoverable, since nothing closes the tabs it would spray. See §4.5.
 const confirmThreshold = 3
 
 // openSelected opens every selected PR, or the row under the cursor when
