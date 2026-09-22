@@ -67,7 +67,13 @@ type Model struct {
 	detail map[int]github.Detail
 	// inflight is the set of PRs already asked about, so holding `j` cannot
 	// fire the same request twice while the first is still out.
-	inflight map[int]bool
+	inflight       map[int]detailRequest
+	detailIdentity map[int]detailRequest
+}
+
+type detailRequest struct {
+	generation uint64
+	head       string
 }
 
 type resultMsg struct {
@@ -99,7 +105,8 @@ var spinFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
 func New(cfg config.Config, client *github.Client) Model {
 	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
-		fetchGeneration: 1, detail: map[int]github.Detail{}, inflight: map[int]bool{}}
+		fetchGeneration: 1, detail: map[int]github.Detail{},
+		inflight: map[int]detailRequest{}, detailIdentity: map[int]detailRequest{}}
 }
 
 func (m Model) Init() tea.Cmd {

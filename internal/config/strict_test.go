@@ -24,6 +24,19 @@ func TestLoadRejectsUnknownConfigFields(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsTrailingYAMLDocument(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	body := "repo: o/r\nrules:\n  - name: mine\n    query: author:@me\n---\nrepo: ignored/repo\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withConfigPath(t, path)
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted a trailing YAML document")
+	}
+}
+
 func TestValidateRejectsMalformedRepo(t *testing.T) {
 	for _, repo := range []string{"owner", "/repo", "owner/", "a/b/c", " owner/repo", "owner /repo", "owner/re po"} {
 		cfg := Default()

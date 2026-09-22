@@ -4,6 +4,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -172,6 +173,13 @@ func Load() (Config, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return cfg, fmt.Errorf("parse %s: %w", path, err)
+		}
+		return cfg, fmt.Errorf("parse %s: multiple YAML documents are not supported", path)
 	}
 	if env := os.Getenv("PILE_REPO"); env != "" {
 		cfg.Repo = env

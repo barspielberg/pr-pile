@@ -27,6 +27,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.board.Apply(msg.result)
+		m.reconcileDetailIdentity()
 		if !m.board.Loading() {
 			m.fetching = false
 			m.clampCursor()
@@ -41,6 +42,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.fetchGeneration {
 			return m, nil
 		}
+		request, pending := m.inflight[msg.detail.Number]
+		if !pending || request.generation != msg.generation || request.head != msg.head {
+			return m, nil
+		}
 		head, ok := m.currentHead(msg.detail.Number)
 		if !ok || head != msg.head {
 			return m, nil
@@ -51,6 +56,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// saying so at the user would be noise about a page they are reading.
 		if msg.err == nil && msg.detail.Number != 0 {
 			m.detail[msg.detail.Number] = msg.detail
+			m.detailIdentity[msg.detail.Number] = request
 		}
 		return m, nil
 
@@ -95,7 +101,8 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	m.fetchGeneration++
 	m.board.Refetch()
 	m.detail = make(map[int]github.Detail)
-	m.inflight = make(map[int]bool)
+	m.inflight = make(map[int]detailRequest)
+	m.detailIdentity = make(map[int]detailRequest)
 	m.fetching = true
 	m.status = ""
 	// A refresh does not kill the process, but the board it was launched from
