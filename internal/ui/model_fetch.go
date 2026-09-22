@@ -2,10 +2,12 @@ package ui
 
 import (
 	"context"
+	"time"
+
+	"github.com/barspielberg/pr-pile/internal/board"
 	"github.com/barspielberg/pr-pile/internal/config"
 	"github.com/barspielberg/pr-pile/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
-	"time"
 )
 
 // Every rule is fetched concurrently; only the reveal is ordered, which the
@@ -23,7 +25,7 @@ func (m Model) fetchRule(i int, r config.Rule) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		prs, err := m.client.Search(ctx, m.cfg.SearchQuery(r), r.PageSize())
-		return resultMsg{Index: i, PRs: prs, Err: err}
+		return resultMsg{generation: m.fetchGeneration, result: board.Result{Index: i, PRs: prs, Err: err}}
 	}
 }
 

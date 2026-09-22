@@ -13,11 +13,12 @@ type Model struct {
 	client *github.Client
 	board  *board.Board
 
-	width, height int
-	cursor        int // index into the flattened visible rows
-	spinner       int
-	status        string
-	fetching      bool
+	width, height   int
+	cursor          int // index into the flattened visible rows
+	spinner         int
+	status          string
+	fetching        bool
+	fetchGeneration uint64
 	// running is the name of the background action in flight, empty when none.
 	// It is what the footer animates on, and what makes a second press of the
 	// same key a no-op rather than a second process.
@@ -69,7 +70,10 @@ type Model struct {
 	inflight map[int]bool
 }
 
-type resultMsg board.Result
+type resultMsg struct {
+	generation uint64
+	result     board.Result
+}
 type detailMsg struct {
 	detail github.Detail
 	err    error
@@ -93,7 +97,7 @@ var spinFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
 func New(cfg config.Config, client *github.Client) Model {
 	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
-		detail: map[int]github.Detail{}, inflight: map[int]bool{}}
+		fetchGeneration: 1, detail: map[int]github.Detail{}, inflight: map[int]bool{}}
 }
 
 func (m Model) Init() tea.Cmd {
