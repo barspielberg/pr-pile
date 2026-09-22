@@ -154,12 +154,9 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 }
 
 // renderMultiAction renders a `multi: true` action once for the whole
-// selection.
-//
-// The plural fields carry exactly the same attacker-controlled GitHub data as
-// the singular ones -- a branch name or a PR title is written by whoever opened
-// the PR -- so they go through the SAME validation, and each element is quoted
-// by the same shellQuote. A list is a bigger surface, not a safer one.
+// selection. The plural fields carry the same attacker-controlled data as the
+// singular ones, so they get the same validation and the same per-element
+// quoting.
 func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 	if err := validateRemoteActionFields(tmpl); err != nil {
 		return "", err
@@ -208,14 +205,10 @@ type multiActionTemplateData struct {
 	Authors, Titles string
 }
 
-// remoteActionFields is every template field whose value comes from GitHub and
-// is therefore attacker-controlled. Each must appear as a bare, standalone
-// placeholder at top-level shell context.
-//
-// The plural forms are here for the same reason the singular ones are. Adding a
-// field to the template data without adding it here is the mistake this list
-// exists to prevent -- see TestRemoteFieldListCoversEveryStringField, which
-// walks the structs by reflection so the list cannot silently fall behind.
+// Every template field whose value comes from GitHub, and is therefore
+// attacker-controlled. Each must appear as a bare, standalone placeholder at
+// top-level shell context. TestRemoteFieldListCoversEveryStringField keeps this
+// list from falling behind the structs.
 var remoteActionFields = []string{
 	"Branch", "Base", "URL", "Author", "Title",
 	"Branches", "Bases", "URLs", "Authors", "Titles",

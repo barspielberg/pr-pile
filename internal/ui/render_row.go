@@ -68,15 +68,8 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 		mark = "▌"
 	}
 
-	// Column 1 was a blank spacer and now carries the multi-select mark. The
-	// cursor (column 0) and the selection are separate channels on purpose: a
-	// row can be under the cursor, selected, both or neither, and all four have
-	// to be tellable apart. Reusing an existing column means nothing shifts and
-	// the one-line-per-row invariant is untouched, and a board with nothing
-	// selected renders exactly as it did before the feature existed.
-	//
-	// A glyph rather than a hue, so it survives NO_COLOR and a light theme --
-	// the design guide's rule that colour is never the sole carrier.
+	// A glyph rather than a hue, so the mark survives NO_COLOR and a light
+	// theme: colour is never the sole carrier.
 	pick := " "
 	if picked {
 		pick = "•"
