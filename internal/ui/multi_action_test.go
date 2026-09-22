@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/barspielberg/pr-pile/internal/board"
 	"github.com/barspielberg/pr-pile/internal/config"
@@ -98,7 +100,7 @@ func TestMultiActionPluralFieldsAreQuotedPerElement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := runShell(line)
+	out, err := runShell(t, line)
 	if err != nil {
 		t.Fatalf("run %q: %v", line, err)
 	}
@@ -155,7 +157,7 @@ func TestEveryRemotePluralTemplateFieldCannotInjectShell(t *testing.T) {
 			if err != nil {
 				t.Fatalf("render: %v", err)
 			}
-			if _, err := runShell(line); err != nil {
+			if _, err := runShellIn(t, dir, line); err != nil {
 				t.Fatalf("run %q: %v", line, err)
 			}
 			if _, err := os.Stat(marker); err == nil {
@@ -179,7 +181,7 @@ func TestInjectionFromASecondSelectedPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if _, err := runShell(line); err != nil {
+	if _, err := runShellIn(t, dir, line); err != nil {
 		t.Fatalf("run %q: %v", line, err)
 	}
 	if _, err := os.Stat(marker); err == nil {
@@ -275,13 +277,29 @@ func TestMultiActionClearsTheSelection(t *testing.T) {
 	}
 }
 
-// runShell runs a rendered action line the way the board does, from a
-// throwaway directory: an injection test that ever DOES inject should leave its
-// debris in a temp dir rather than in the working tree.
-func runShell(line string) (string, error) {
-	cmd := exec.Command("sh", "-c", line)
-	cmd.Dir = os.TempDir()
+// shellTimeout bounds a payload that blocks -- a test command that waits on
+// stdin or sleeps would otherwise hold the whole runner.
+const shellTimeout = 10 * time.Second
+
+// runShell runs a rendered action line the way the board does, contained: a
+// per-test temp dir so an injection that ever DOES fire leaves its debris
+// somewhere `go test` cleans up, rather than in the working tree or in the
+// shared system temp that nothing ever empties.
+func runShell(t *testing.T, line string) (string, error) {
+	t.Helper()
+	return runShellIn(t, t.TempDir(), line)
+}
+
+func runShellIn(t *testing.T, dir, line string) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), shellTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", line)
+	cmd.Dir = dir
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		t.Fatalf("command %q did not finish within %s", line, shellTimeout)
+	}
 	return string(out), err
 }
 

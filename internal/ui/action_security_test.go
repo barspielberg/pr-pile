@@ -2,7 +2,6 @@ package ui
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -45,7 +44,7 @@ func TestActionTemplateStringsAreShellQuoted(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			out, err := exec.Command("sh", "-c", line).Output()
+			out, err := runShell(t, line)
 			if err != nil {
 				t.Fatalf("run %q: %v", line, err)
 			}
@@ -75,7 +74,7 @@ func TestEveryRemoteStringTemplateFieldCannotInjectShell(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := exec.Command("sh", "-c", line).Run(); err != nil {
+			if _, err := runShellIn(t, dir, line); err != nil {
 				t.Fatalf("run %q: %v", line, err)
 			}
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
