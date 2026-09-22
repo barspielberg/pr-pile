@@ -11,6 +11,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func detailResponse(m Model, detail github.Detail) detailMsg {
+	head, _ := m.currentHead(detail.Number)
+	m.inflight[detail.Number] = detailRequest{generation: m.fetchGeneration, head: head}
+	return detailMsg{generation: m.fetchGeneration, head: head, detail: detail}
+}
+
+func markDetailInflight(m *Model, number int) {
+	head, _ := m.currentHead(number)
+	m.inflight[number] = detailRequest{generation: m.fetchGeneration, head: head}
+}
+
 // detailModel is a board with one PR selected, which is what every test here
 // starts from: the overlay only ever renders the selected row.
 func detailModel(t *testing.T, pr github.PR, h int) Model {
@@ -212,9 +223,9 @@ func TestDetailOverlayIsUsableBeforeTheRequestLands(t *testing.T) {
 	}
 
 	// The response lands and the lines appear.
-	next, _ := m.Update(detailMsg{detail: github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{
 		Number: 3186, BehindBy: 26, Unresolved: 9, DefaultBranch: "master",
-	}})
+	}))
 	out = stripANSI(next.(Model).detailOverlay())
 	if !strings.Contains(out, "26 commits behind master") ||
 		!strings.Contains(out, "● 9 unresolved comments") {
@@ -238,12 +249,12 @@ func TestReviewerLineShowsALoaderUntilItArrives(t *testing.T) {
 		t.Errorf("no loader held the reviewer line:\n%s", out)
 	}
 
-	next, _ := m.Update(detailMsg{detail: github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{
 		Number: 3246, DefaultBranch: "master",
 		Reviewers: []github.Reviewer{
 			{Login: "alicechen", Name: "Alice Chen", State: "CHANGES_REQUESTED"},
 		},
-	}})
+	}))
 	out = stripANSI(next.(Model).detailOverlay())
 	if !strings.Contains(out, "review    ✗ Alice Chen (alicechen)") {
 		t.Errorf("the reviewer did not replace the loader:\n%s", out)
@@ -293,9 +304,9 @@ func TestALateResponseIsFiledUnderItsOwnPR(t *testing.T) {
 
 	// The cursor is on #2 when #1's request finally answers.
 	m = onRow(t, m, 1)
-	next, _ := m.Update(detailMsg{detail: github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{
 		Number: 1, Unresolved: 4, DefaultBranch: "master",
-	}})
+	}))
 	m = next.(Model)
 
 	if out := stripANSI(m.detailOverlay()); strings.Contains(out, "unresolved") {
@@ -319,7 +330,7 @@ func TestRepeatedPressesDoNotRefetch(t *testing.T) {
 
 	// No client, so the command is nil either way; what is asserted is the
 	// bookkeeping that decides whether one would have been issued.
-	m.inflight[pr.Number] = true
+	markDetailInflight(&m, pr.Number)
 	if cmd := m.fetchDetail(pr); cmd != nil {
 		t.Error("a second request was issued while the first was in flight")
 	}
@@ -467,9 +478,9 @@ func TestDetailOverlayShowsItIsStillLoading(t *testing.T) {
 
 	// One on-demand line arrives, which is the common shape, and it lands on
 	// the loader's own row.
-	next, _ := m.Update(detailMsg{detail: github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{
 		Number: 3186, BehindBy: 26, DefaultBranch: "master",
-	}})
+	}))
 	after := strings.Split(stripANSI(next.(Model).detailOverlay()), "\n")
 
 	if strings.Contains(strings.Join(after, "\n"), "checking for conflicts") {
@@ -511,7 +522,7 @@ func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
 		Author: "someone", UpdatedAt: time.Now()}
 	m := detailModel(t, pr, 24)
 	m.fetching = false
-	m.inflight[1] = true
+	markDetailInflight(&m, 1)
 
 	next, cmd := m.Update(spinMsg(time.Now()))
 	if next.(Model).spinner == m.spinner {
@@ -522,7 +533,7 @@ func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
 	}
 
 	// And it stops once nothing is out, so an idle board is not spinning.
-	m.inflight = map[int]bool{}
+	m.inflight = map[int]detailRequest{}
 	if _, cmd := m.Update(spinMsg(time.Now())); cmd != nil {
 		t.Error("the spinner kept ticking on an idle board")
 	}

@@ -140,12 +140,12 @@ func TestActionTemplateRenders(t *testing.T) {
 	cfg := testCfg()
 	cfg.RepoPath = "~/Repos/acme/monorepo"
 	m := New(cfg, nil)
-	got, err := m.renderAction("wt switch -x nvim pr:{{.Number}} # {{.Repo}} {{.Branch}}",
+	got, err := m.renderAction("wt switch -x nvim pr:{{.Number}} # {{.Repo}} {{.RepoPath}} {{.Branch}}",
 		github.PR{Number: 42, HeadRefName: "feat/x"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "wt switch -x nvim pr:42 # o/r feat/x"; got != want {
+	if want := "wt switch -x nvim pr:42 # o/r ~/Repos/acme/monorepo 'feat/x'"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
@@ -1981,13 +1981,14 @@ func TestYCopiesTheSelectedURL(t *testing.T) {
 	m := loaded(t, 120, 20, mine, review)
 	m = onRow(t, m, 0)
 
-	_, cmd := m.handleKey(runeKey('y'))
+	next, cmd := m.handleKey(runeKey('y'))
+	m = next.(Model)
 	msg := runCmd(t, cmd)
 
 	if *got != "https://github.com/o/r/pull/3248" {
 		t.Errorf("copied %q, want the selected PR's url", *got)
 	}
-	if s, ok := msg.(statusMsg); !ok || !strings.Contains(string(s), "3248") {
+	if s, ok := msg.(asyncStatusMsg); !ok || !strings.Contains(s.text, "3248") {
 		t.Errorf("status was %v, want it to name the PR that was copied", msg)
 	}
 }
@@ -2016,14 +2017,15 @@ func TestYWithNothingSelectedDoesNotCrash(t *testing.T) {
 	got := withClipboard(t, nil)
 
 	m := loaded(t, 120, 20, nil, nil)
-	_, cmd := m.handleKey(runeKey('y'))
+	next, cmd := m.handleKey(runeKey('y'))
+	m = next.(Model)
 	msg := runCmd(t, cmd)
 
 	if *got != "" {
 		t.Errorf("copied %q from an empty board, want nothing", *got)
 	}
-	if s, ok := msg.(statusMsg); !ok || string(s) == "" {
-		t.Errorf("status was %v, want it to say nothing is selected", msg)
+	if msg != nil || m.status == "" {
+		t.Errorf("status=%q msg=%v, want a synchronous no-selection status", m.status, msg)
 	}
 }
 
@@ -2064,9 +2066,26 @@ func TestYReportsAFailedCopy(t *testing.T) {
 
 	_, cmd := m.handleKey(runeKey('y'))
 	msg := runCmd(t, cmd)
-	s, ok := msg.(statusMsg)
-	if !ok || !strings.Contains(string(s), "copy failed") {
+	s, ok := msg.(asyncStatusMsg)
+	if !ok || !strings.Contains(s.text, "copy failed") {
 		t.Errorf("status was %v, want it to report the failure", msg)
+	}
+}
+
+func TestRefreshInvalidatesPendingCopyStatus(t *testing.T) {
+	withClipboard(t, nil)
+	mine, review := samplePRs()
+	mine[0].URL = "https://github.com/o/r/pull/3248"
+	m := onRow(t, loaded(t, 120, 20, mine, review), 0)
+
+	next, cmd := m.handleKey(runeKey('y'))
+	m = next.(Model)
+	msg := runCmd(t, cmd)
+	next, _ = m.refresh()
+	m = next.(Model)
+	next, _ = m.Update(msg)
+	if got := next.(Model).status; got != "" {
+		t.Fatalf("copy completion from before refresh set status %q", got)
 	}
 }
 

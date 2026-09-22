@@ -91,8 +91,6 @@ func TestActionReportsRunningThenSuccess(t *testing.T) {
 		t.Fatal("w did not match the configured action")
 	}
 	m = next
-	started, _ := m.Update(actionStartMsg{name: "worktree", seq: m.runSeq})
-	m = started.(Model)
 
 	if m.running != "worktree" {
 		t.Fatalf("running = %q, want the action name", m.running)
@@ -105,7 +103,7 @@ func TestActionReportsRunningThenSuccess(t *testing.T) {
 		t.Error("footer showed no running glyph:\n" + out)
 	}
 
-	done, _ := m.Update(actionDoneMsg{name: "worktree", seq: m.runSeq})
+	done, _ := m.Update(actionDoneMsg{name: "worktree", seq: m.runSeq, statusSeq: m.statusSeq})
 	m = done.(Model)
 	if m.running != "" {
 		t.Errorf("still running after the result landed: %q", m.running)
@@ -139,9 +137,9 @@ func TestSucceededActionClearsAndFailedActionPersists(t *testing.T) {
 func TestSecondPressWhileRunningIsRefused(t *testing.T) {
 	m := actionBoard(t, "true")
 	next, _, _ := m.actionFor("w")
-	started, _ := next.Update(actionStartMsg{name: "worktree", seq: next.runSeq})
-	m = started.(Model)
-	seq := m.runSeq
+	m = next
+	seq, statusSeq := m.runSeq, m.statusSeq
+	m, _ = m.copySelected()
 
 	again, cmd, ok := m.actionFor("w")
 	if !ok {
@@ -156,9 +154,13 @@ func TestSecondPressWhileRunningIsRefused(t *testing.T) {
 	}
 
 	// The first result still lands and still clears the running state.
-	done, _ := m.Update(actionDoneMsg{name: "worktree", seq: seq})
-	if r := done.(Model).running; r != "" {
+	done, _ := m.Update(actionDoneMsg{name: "worktree", seq: seq, statusSeq: statusSeq})
+	got := done.(Model)
+	if r := got.running; r != "" {
 		t.Errorf("running state stranded after the result: %q", r)
+	}
+	if got.status != "worktree ✓" {
+		t.Errorf("completion did not replace still-running status: %q", got.status)
 	}
 }
 
@@ -178,13 +180,50 @@ func TestStaleResultIsIgnored(t *testing.T) {
 	}
 }
 
+func TestNewStatusCannotBeClearedByOldActionTimer(t *testing.T) {
+	m := actionBoard(t, "true")
+	m.clearSeq = 7
+	m.status = "old action"
+	m = m.setStatus("new status")
+	next, _ := m.Update(clearStatusMsg(7))
+	if got := next.(Model).status; got != "new status" {
+		t.Fatalf("old action timer cleared newer status: %q", got)
+	}
+}
+
+func TestStaleAsyncStatusIsIgnored(t *testing.T) {
+	m := actionBoard(t, "true")
+	m.statusSeq = 4
+	m.status = "current"
+	next, _ := m.Update(asyncStatusMsg{seq: 3, text: "stale copy"})
+	if got := next.(Model).status; got != "current" {
+		t.Fatalf("stale async completion replaced current status: %q", got)
+	}
+}
+
+func TestSupersededActionCompletionStillClearsRunning(t *testing.T) {
+	m := actionBoard(t, "true")
+	next, _, _ := m.actionFor("w")
+	m = next
+	seq, statusSeq := m.runSeq, m.statusSeq
+	m = m.setStatus("new status")
+	var nextModel tea.Model
+	nextModel, _ = m.Update(actionDoneMsg{name: "worktree", seq: seq, statusSeq: statusSeq})
+	m = nextModel.(Model)
+	if m.running != "" {
+		t.Fatalf("superseded action completion left running=%q", m.running)
+	}
+	if m.status != "new status" {
+		t.Fatalf("superseded action completion replaced newer status: %q", m.status)
+	}
+}
+
 // A refresh takes the footer back; a result that lands afterwards must not
 // reinstate a running glyph for a board that has moved on.
 func TestRefreshDropsTheRunningIndicator(t *testing.T) {
 	m := actionBoard(t, "true")
 	next, _, _ := m.actionFor("w")
-	started, _ := next.Update(actionStartMsg{name: "worktree", seq: next.runSeq})
-	m = started.(Model)
+	m = next
 
 	refreshed, _ := m.refresh()
 	if r := refreshed.(Model).running; r != "" {
@@ -214,7 +253,7 @@ func TestLongFailureStaysOneLine(t *testing.T) {
 // stale binary reporting every action as a success went unnoticed.
 func runActionMsg(t *testing.T, line string) actionDoneMsg {
 	t.Helper()
-	msg := runAction(exec.Command("sh", "-c", line), "worktree", 1)()
+	msg := runAction(exec.Command("sh", "-c", line), "worktree", 1, 0)()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("runAction returned %T, want actionDoneMsg", msg)
