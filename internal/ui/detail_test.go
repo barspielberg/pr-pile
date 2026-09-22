@@ -13,7 +13,13 @@ import (
 
 func detailResponse(m Model, detail github.Detail) detailMsg {
 	head, _ := m.currentHead(detail.Number)
+	m.inflight[detail.Number] = detailRequest{generation: m.fetchGeneration, head: head}
 	return detailMsg{generation: m.fetchGeneration, head: head, detail: detail}
+}
+
+func markDetailInflight(m *Model, number int) {
+	head, _ := m.currentHead(number)
+	m.inflight[number] = detailRequest{generation: m.fetchGeneration, head: head}
 }
 
 // detailModel is a board with one PR selected, which is what every test here
@@ -324,7 +330,7 @@ func TestRepeatedPressesDoNotRefetch(t *testing.T) {
 
 	// No client, so the command is nil either way; what is asserted is the
 	// bookkeeping that decides whether one would have been issued.
-	m.inflight[pr.Number] = true
+	markDetailInflight(&m, pr.Number)
 	if cmd := m.fetchDetail(pr); cmd != nil {
 		t.Error("a second request was issued while the first was in flight")
 	}
@@ -516,7 +522,7 @@ func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
 		Author: "someone", UpdatedAt: time.Now()}
 	m := detailModel(t, pr, 24)
 	m.fetching = false
-	m.inflight[1] = true
+	markDetailInflight(&m, 1)
 
 	next, cmd := m.Update(spinMsg(time.Now()))
 	if next.(Model).spinner == m.spinner {
@@ -527,7 +533,7 @@ func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
 	}
 
 	// And it stops once nothing is out, so an idle board is not spinning.
-	m.inflight = map[int]bool{}
+	m.inflight = map[int]detailRequest{}
 	if _, cmd := m.Update(spinMsg(time.Now())); cmd != nil {
 		t.Error("the spinner kept ticking on an idle board")
 	}

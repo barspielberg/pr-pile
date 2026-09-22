@@ -45,12 +45,15 @@ func (m Model) fetchDetail(pr github.PR) tea.Cmd {
 	}
 	// It does not go stale within a session: behindBy and unresolved threads
 	// move on the scale of a working day, and `r` refetches the board anyway.
-	if _, done := m.detail[pr.Number]; done || m.inflight[pr.Number] {
+	if _, done := m.detail[pr.Number]; done {
 		return nil
 	}
-	m.inflight[pr.Number] = true
+	if _, pending := m.inflight[pr.Number]; pending {
+		return nil
+	}
 
 	repo, number, head, generation := m.cfg.Repo, pr.Number, pr.HeadRefName, m.fetchGeneration
+	m.inflight[number] = detailRequest{generation: generation, head: head}
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -58,6 +61,22 @@ func (m Model) fetchDetail(pr github.PR) tea.Cmd {
 		d, err := client.Detail(ctx, repo, number, head)
 		d.Number = number // so a failed response is still attributable
 		return detailMsg{generation: generation, head: head, detail: d, err: err}
+	}
+}
+
+func (m *Model) reconcileDetailIdentity() {
+	for number, request := range m.inflight {
+		head, ok := m.currentHead(number)
+		if request.generation != m.fetchGeneration || !ok || head != request.head {
+			delete(m.inflight, number)
+		}
+	}
+	for number, identity := range m.detailIdentity {
+		head, ok := m.currentHead(number)
+		if identity.generation != m.fetchGeneration || !ok || head != identity.head {
+			delete(m.detail, number)
+			delete(m.detailIdentity, number)
+		}
 	}
 }
 
