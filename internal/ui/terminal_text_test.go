@@ -11,6 +11,23 @@ import (
 	"github.com/muesli/termenv"
 )
 
+// Stripping the ESC rune alone left the rest of the sequence as printable
+// text, so remote titles drew a literal "[31m" and paid column width for it.
+func TestTerminalTextRemovesWholeEscapeSequences(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"sgr", "Fix \x1b[31mthe\x1b[0m parser", "Fix the parser"},
+		{"osc title", "before\x1b]0;pwned\x07after", "beforeafter"},
+		{"truncated csi", "tail\x1b[31", "tail"},
+		{"plain text untouched", "Fix the parser", "Fix the parser"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := terminalText(tc.in); got != tc.want {
+				t.Fatalf("terminalText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTerminalTextReplacesControlsAndPreservesUnicode(t *testing.T) {
 	input := "שלום\x00\a\n\r\t\x1b[31mred\x1b]0;owned\a\u0085世界"
 	got := terminalText(input)
