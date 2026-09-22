@@ -179,7 +179,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Toggle the PR under the cursor. The cursor deliberately does NOT
 		// advance: it saves a keypress going down the board and costs one
 		// going up, and k9s closed that request as not-planned for exactly
-		// that reason. See docs/multi-select.md.
+		// that reason.
 		m.toggleSelect()
 		return m, nil
 	case "n":
