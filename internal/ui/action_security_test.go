@@ -92,6 +92,25 @@ func TestEveryRemoteStringTemplateFieldCannotInjectShell(t *testing.T) {
 	}
 }
 
+func TestRemoteTemplateFieldsRejectUnsafeShellContexts(t *testing.T) {
+	for _, tmpl := range []string{
+		`printf '%s' "{{.Title}}"`,
+		`printf '%s' '{{.Title}}'`,
+		`printf '%s' prefix{{.Title}}`,
+		`printf '%s' {{.Title}}suffix`,
+		`printf '%s' $(printf '%s' {{.Title}})`,
+		"cat <<EOF\n{{.Title}}\nEOF",
+		`printf '%s' {{index . "Title"}}`,
+	} {
+		t.Run(strconv.Quote(tmpl), func(t *testing.T) {
+			m := New(testCfg(), nil)
+			if _, err := m.renderAction(tmpl, github.PR{Title: "remote"}); err == nil {
+				t.Fatalf("renderAction accepted unsafe remote-field context %q", tmpl)
+			}
+		})
+	}
+}
+
 func actionBoardWithPR(t *testing.T, run string, pr github.PR) Model {
 	t.Helper()
 	m := New(actionCfg(run), nil)

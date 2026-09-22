@@ -100,5 +100,6 @@ func (m Model) refreshTick() tea.Cmd {
 	if d <= 0 {
 		return nil
 	}
-	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
+	seq := m.refreshSeq
+	return tea.Tick(d, func(time.Time) tea.Msg { return tickMsg{seq: seq} })
 }

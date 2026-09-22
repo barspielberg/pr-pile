@@ -35,7 +35,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tickMsg, refreshMsg:
+	case tickMsg:
+		if msg.seq != m.refreshSeq {
+			return m, nil
+		}
+		return m.refresh()
+
+	case refreshMsg:
 		return m.refresh()
 
 	case detailMsg:
@@ -61,7 +67,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statusMsg:
+		m.statusSeq++
 		m.status = string(msg)
+		m.clearSeq = 0
+		return m, nil
+
+	case asyncStatusMsg:
+		if msg.seq != m.statusSeq {
+			return m, nil
+		}
+		m.status = msg.text
+		m.clearSeq = 0
 		return m, nil
 
 	case actionDoneMsg:
@@ -71,6 +87,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.running = ""
+		if msg.statusSeq != m.statusSeq {
+			return m, nil
+		}
 		m.status = actionResult(msg)
 		if msg.err == nil {
 			// Success has said its piece; leaving it up would have the footer
@@ -99,12 +118,15 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// Keep the current rows on screen while refetching, so the board does not
 	// collapse and re-expand under the cursor.
 	m.fetchGeneration++
+	m.refreshSeq++
+	m.statusSeq++
 	m.board.Refetch()
 	m.detail = make(map[int]github.Detail)
 	m.inflight = make(map[int]detailRequest)
 	m.detailIdentity = make(map[int]detailRequest)
 	m.fetching = true
 	m.status = ""
+	m.clearSeq = 0
 	// A refresh does not kill the process, but the board it was launched from
 	// is gone; keeping its name on the footer would attribute the fetch
 	// spinner to the action. Its result still lands, keyed by seq.

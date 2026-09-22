@@ -824,7 +824,8 @@ Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 `{{.Base}}` `{{.URL}}` `{{.Author}}` `{{.Title}}`.
 GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, and `Title`)
 are POSIX-shell-quoted before template execution. Those placeholders therefore
-appear directly, not inside author-supplied quotes. Configured `Repo` and
+appear as standalone, unquoted shell words; quoted, embedded,
+command-substitution, and heredoc contexts are rejected. Configured `Repo` and
 `RepoPath`, the surrounding command, and numeric `.Number` remain trusted shell
 text.
 

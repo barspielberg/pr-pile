@@ -34,3 +34,27 @@ func TestStaleBoardResultFromPreviousRefreshIsIgnored(t *testing.T) {
 		t.Fatalf("current result left frontier at %d", got)
 	}
 }
+
+func TestStaleRefreshTimerIsIgnored(t *testing.T) {
+	m := New(testCfg(), nil)
+	old := tickMsg{seq: m.refreshSeq}
+	next, _ := m.refresh()
+	m = next.(Model)
+	generation := m.fetchGeneration
+
+	next, _ = m.Update(old)
+	m = next.(Model)
+	if m.fetchGeneration != generation {
+		t.Fatalf("stale timer started another refresh: generation %d -> %d", generation, m.fetchGeneration)
+	}
+}
+
+func TestCurrentRefreshTimerStartsOneRefresh(t *testing.T) {
+	m := New(testCfg(), nil)
+	generation := m.fetchGeneration
+	next, _ := m.Update(tickMsg{seq: m.refreshSeq})
+	m = next.(Model)
+	if m.fetchGeneration != generation+1 {
+		t.Fatalf("current timer moved generation %d -> %d", generation, m.fetchGeneration)
+	}
+}

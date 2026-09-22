@@ -111,8 +111,8 @@ rules:
 # Actions run a shell command for the selected PR. Available template fields:
 # {{.Number}} {{.Repo}} {{.RepoPath}} {{.Branch}} {{.Base}} {{.URL}}
 # {{.Author}} {{.Title}}
-# GitHub string fields are already shell-quoted; use their placeholders without
-# adding quotes around them. Repo, repoPath, and run remain trusted shell text.
+# GitHub string fields are already shell-quoted; use each as a standalone,
+# unquoted placeholder. Repo, repoPath, and run remain trusted shell text.
 # actions:
 #   - key: w
 #     name: worktree

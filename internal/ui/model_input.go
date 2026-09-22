@@ -25,7 +25,7 @@ var copyToClipboard = func(s string) error {
 // copySelected yanks the selected PR's URL. With nothing selected -- an empty
 // board -- there is no URL to copy and saying so is better than a silent
 // no-op.
-func (m Model) copySelected() tea.Cmd {
+func (m Model) copySelected(seq uint64) tea.Cmd {
 	pr, ok := m.selected()
 	if !ok {
 		return func() tea.Msg { return statusMsg("no PR selected") }
@@ -36,13 +36,13 @@ func (m Model) copySelected() tea.Cmd {
 	}
 	return func() tea.Msg {
 		if err := copyToClipboard(url); err != nil {
-			return statusMsg("copy failed: " + err.Error())
+			return asyncStatusMsg{seq: seq, text: "copy failed: " + err.Error()}
 		}
-		return statusMsg(fmt.Sprintf("copied #%d url", number))
+		return asyncStatusMsg{seq: seq, text: fmt.Sprintf("copied #%d url", number)}
 	}
 }
 
-func (m Model) openSelected() tea.Cmd {
+func (m Model) openSelected(seq uint64) tea.Cmd {
 	pr, ok := m.selected()
 	if !ok {
 		return nil
@@ -50,9 +50,9 @@ func (m Model) openSelected() tea.Cmd {
 	url := pr.URL
 	return func() tea.Msg {
 		if err := browser.Open(url); err != nil {
-			return statusMsg("open failed: " + err.Error())
+			return asyncStatusMsg{seq: seq, text: "open failed: " + err.Error()}
 		}
-		return statusMsg("")
+		return asyncStatusMsg{seq: seq}
 	}
 }
 
@@ -169,11 +169,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return m.refresh()
 	case "enter", "o":
-		if cmd := m.openSelected(); cmd != nil {
+		m.statusSeq++
+		if cmd := m.openSelected(m.statusSeq); cmd != nil {
 			return m, cmd
 		}
 	case "y":
-		return m, m.copySelected()
+		m.statusSeq++
+		return m, m.copySelected(m.statusSeq)
 	default:
 		// User-configured actions are matched last so they cannot shadow
 		// navigation keys.
