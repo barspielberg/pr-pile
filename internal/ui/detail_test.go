@@ -11,6 +11,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func detailResponse(m Model, detail github.Detail) detailMsg {
+	head, _ := m.currentHead(detail.Number)
+	return detailMsg{generation: m.fetchGeneration, head: head, detail: detail}
+}
+
 // detailModel is a board with one PR selected, which is what every test here
 // starts from: the overlay only ever renders the selected row.
 func detailModel(t *testing.T, pr github.PR, h int) Model {
@@ -212,9 +217,9 @@ func TestDetailOverlayIsUsableBeforeTheRequestLands(t *testing.T) {
 	}
 
 	// The response lands and the lines appear.
-	next, _ := m.Update(detailMsg{detail: github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{
 		Number: 3186, BehindBy: 26, Unresolved: 9, DefaultBranch: "master",
-	}})
+	}))
 	out = stripANSI(next.(Model).detailOverlay())
 	if !strings.Contains(out, "26 commits behind master") ||
 		!strings.Contains(out, "● 9 unresolved comments") {
@@ -238,12 +243,12 @@ func TestReviewerLineShowsALoaderUntilItArrives(t *testing.T) {
 		t.Errorf("no loader held the reviewer line:\n%s", out)
 	}
 
-	next, _ := m.Update(detailMsg{detail: github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{
 		Number: 3246, DefaultBranch: "master",
 		Reviewers: []github.Reviewer{
 			{Login: "alicechen", Name: "Alice Chen", State: "CHANGES_REQUESTED"},
 		},
-	}})
+	}))
 	out = stripANSI(next.(Model).detailOverlay())
 	if !strings.Contains(out, "review    ✗ Alice Chen (alicechen)") {
 		t.Errorf("the reviewer did not replace the loader:\n%s", out)
@@ -293,9 +298,9 @@ func TestALateResponseIsFiledUnderItsOwnPR(t *testing.T) {
 
 	// The cursor is on #2 when #1's request finally answers.
 	m = onRow(t, m, 1)
-	next, _ := m.Update(detailMsg{detail: github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{
 		Number: 1, Unresolved: 4, DefaultBranch: "master",
-	}})
+	}))
 	m = next.(Model)
 
 	if out := stripANSI(m.detailOverlay()); strings.Contains(out, "unresolved") {
@@ -467,9 +472,9 @@ func TestDetailOverlayShowsItIsStillLoading(t *testing.T) {
 
 	// One on-demand line arrives, which is the common shape, and it lands on
 	// the loader's own row.
-	next, _ := m.Update(detailMsg{detail: github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{
 		Number: 3186, BehindBy: 26, DefaultBranch: "master",
-	}})
+	}))
 	after := strings.Split(stripANSI(next.(Model).detailOverlay()), "\n")
 
 	if strings.Contains(strings.Join(after, "\n"), "checking for conflicts") {

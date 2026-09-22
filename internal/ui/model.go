@@ -75,8 +75,10 @@ type resultMsg struct {
 	result     board.Result
 }
 type detailMsg struct {
-	detail github.Detail
-	err    error
+	generation uint64
+	head       string
+	detail     github.Detail
+	err        error
 }
 type tickMsg time.Time
 type spinMsg time.Time
