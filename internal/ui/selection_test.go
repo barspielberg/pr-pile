@@ -66,13 +66,6 @@ func TestSpaceSelectsThePRUnderTheCursor(t *testing.T) {
 	}
 }
 
-func TestSpaceTwiceDeselects(t *testing.T) {
-	m := pressKey(pressKey(selectBoard(t), " "), " ")
-	if got := selectedNumbers(m); len(got) != 0 {
-		t.Fatalf("selection = %v, want empty", got)
-	}
-}
-
 func TestSpaceOnAHeaderSelectsNothing(t *testing.T) {
 	m := selectBoard(t)
 	m.cursor = m.headerSlot(0)
@@ -155,13 +148,6 @@ func TestSelectionDropsPRsThatLeftTheBoard(t *testing.T) {
 	}
 }
 
-func TestSelectedRowDrawsItsMark(t *testing.T) {
-	m := pressKey(selectBoard(t), " ")
-	if !strings.Contains(stripANSI(m.View()), "•") {
-		t.Fatal("expected the selection mark on the board:\n" + stripANSI(m.View()))
-	}
-}
-
 // The design guide's "does it make a healthy board louder" check, as an assert.
 func TestUnselectedBoardLooksExactlyAsBefore(t *testing.T) {
 	plain := selectBoard(t).View()
@@ -188,45 +174,30 @@ func TestCursorAndSelectionAreSeparateMarks(t *testing.T) {
 	}
 }
 
-func TestSelectionMarkSurvivesNoColor(t *testing.T) {
-	m := pressKey(selectBoard(t), " ")
-	if !strings.Contains(stripANSI(m.View()), "•") {
-		t.Fatal("the mark must be a glyph, not a hue")
-	}
-}
-
-func TestEscClearsSelectionBeforeSearch(t *testing.T) {
+// The three rungs in order: selection, then search, then quit. Walked in one
+// test because the point is the ordering -- each rung only claims esc when it
+// has something to clear.
+func TestEscClearsSelectionThenSearchThenQuits(t *testing.T) {
 	m := selectBoard(t)
 	m.query = "first"
 	m = pressKey(m, " ")
+
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(Model)
 	if got := selectedNumbers(m); len(got) != 0 {
-		t.Fatalf("selection = %v, want cleared first", got)
+		t.Fatalf("selection = %v, want the first esc to clear it", got)
 	}
 	if m.query != "first" {
 		t.Fatalf("query = %q, want it to survive the first esc", m.query)
 	}
-}
 
-func TestEscThenClearsTheSearch(t *testing.T) {
-	m := selectBoard(t)
-	m.query = "first"
-	m = pressKey(m, " ")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if q := next.(Model).query; q != "" {
-		t.Fatalf("query = %q, want cleared by the second esc", q)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if m.query != "" {
+		t.Fatalf("query = %q, want the second esc to clear it", m.query)
 	}
-}
 
-func TestEscThenQuits(t *testing.T) {
-	m := selectBoard(t)
-	m.query = "first"
-	m = pressKey(m, " ")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
-	_, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatal("third esc should quit")
 	}

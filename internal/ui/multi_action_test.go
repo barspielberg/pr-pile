@@ -189,27 +189,16 @@ func TestInjectionFromASecondSelectedPR(t *testing.T) {
 	}
 }
 
-func TestPluralFieldsRejectQuotedPlaceholders(t *testing.T) {
+// A plural placeholder has to be bare and at top-level shell context, exactly
+// as the singular ones do. Quoting it, feeding it to another shell, or burying
+// it in a substitution all defeat the per-element quoting.
+func TestPluralFieldsRejectUnsafeShellContexts(t *testing.T) {
 	m := New(testCfg(), nil)
-	for _, tmpl := range []string{`open "{{.URLs}}"`, "open '{{.URLs}}'"} {
-		if _, err := m.renderMultiAction(tmpl, []github.PR{{URL: "u"}}); err == nil {
-			t.Errorf("%q was accepted", tmpl)
-		}
-	}
-}
-
-func TestPluralFieldsRejectIndirectEvaluation(t *testing.T) {
-	m := New(testCfg(), nil)
-	for _, tmpl := range []string{"eval {{.URLs}}", "sh -c {{.URLs}}", "bash -c {{.Titles}}"} {
-		if _, err := m.renderMultiAction(tmpl, []github.PR{{URL: "u"}}); err == nil {
-			t.Errorf("%q was accepted", tmpl)
-		}
-	}
-}
-
-func TestPluralFieldsRejectNonTopLevelContext(t *testing.T) {
-	m := New(testCfg(), nil)
-	for _, tmpl := range []string{"echo $( {{.URLs}} )", "echo `{{.URLs}}`", "cat <<EOF\n{{.URLs}}\nEOF"} {
+	for _, tmpl := range []string{
+		`open "{{.URLs}}"`, "open '{{.URLs}}'",
+		"eval {{.URLs}}", "sh -c {{.URLs}}", "bash -c {{.Titles}}",
+		"echo $( {{.URLs}} )", "echo `{{.URLs}}`", "cat <<EOF\n{{.URLs}}\nEOF",
+	} {
 		if _, err := m.renderMultiAction(tmpl, []github.PR{{URL: "u"}}); err == nil {
 			t.Errorf("%q was accepted", tmpl)
 		}
