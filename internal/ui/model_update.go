@@ -1,9 +1,6 @@
 package ui
 
-import (
-	"github.com/barspielberg/pr-pile/internal/board"
-	tea "github.com/charmbracelet/bubbletea"
-)
+import tea "github.com/charmbracelet/bubbletea"
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -23,7 +20,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, spinTick()
 
 	case resultMsg:
-		m.board.Apply(board.Result(msg))
+		if msg.generation != m.fetchGeneration {
+			return m, nil
+		}
+		m.board.Apply(msg.result)
 		if !m.board.Loading() {
 			m.fetching = false
 			m.clampCursor()
@@ -82,6 +82,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// Keep the current rows on screen while refetching, so the board does not
 	// collapse and re-expand under the cursor.
+	m.fetchGeneration++
 	m.board.Refetch()
 	m.fetching = true
 	m.status = ""
