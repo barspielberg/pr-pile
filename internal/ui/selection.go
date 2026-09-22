@@ -70,5 +70,86 @@ func (m *Model) clearSelection() {
 	if len(m.selection) > 0 {
 		m.selection = map[int]bool{}
 	}
+	m.rangeOwned = map[int]bool{}
 	m.ranging, m.anchor = false, -1
+}
+
+// startRange anchors a range at the cursor, or ends one that is already open.
+// `v` is its own toggle so there are two ways out of the mode -- `v` again and
+// `esc` -- which is what lazygit landed on after finding a mode with one exit
+// is a mode people get stuck in.
+//
+// Ending a range KEEPS what it selected. The mode is a way of marking rows, not
+// a container for them: leaving it should not throw away the work. esc is the
+// key that discards.
+func (m *Model) startRange() {
+	if m.ranging {
+		m.ranging, m.anchor = false, -1
+		return
+	}
+	m.ranging, m.anchor = true, m.cursor
+	m.applyRange()
+}
+
+// applyRange selects every PR row between the anchor and the cursor, in either
+// direction. Called on every move while ranging.
+//
+// It ADDS to the selection rather than replacing it, so `space` on a few
+// scattered rows and then `v` over a run gives both -- the documented route to
+// a non-contiguous selection.
+//
+// Headers and notes inside the span contribute nothing and are not an error:
+// the range is drawn over slots because that is what the cursor moves through,
+// but only the PR rows inside it are collected.
+func (m *Model) applyRange() {
+	if !m.ranging || m.anchor < 0 {
+		return
+	}
+	lo, hi := m.anchor, m.cursor
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	// Rows the range previously covered but no longer does have to come back
+	// out, or walking the cursor back over a range would leave a trail behind
+	// it. Everything selected outside the span is left alone, which is what
+	// keeps an earlier `space` from being undone.
+	for _, pr := range m.rangeDrop(lo, hi) {
+		delete(m.selection, pr)
+	}
+	sl := m.slots()
+	for i := lo; i <= hi && i < len(sl); i++ {
+		if !sl[i].isRow() {
+			continue
+		}
+		number := sl[i].row.PR.Number
+		// A row the user had already marked with `space` is NOT claimed by the
+		// range, even though the span covers it. Claiming it would mean
+		// shrinking the range back off that row released a mark the range
+		// never made -- the user's own work, undone by a cursor move.
+		if !m.selection[number] {
+			m.rangeOwned[number] = true
+		}
+		m.selection[number] = true
+	}
+}
+
+// rangeDrop is the PRs this range had selected that its current span no longer
+// covers. Only rows the RANGE selected are eligible: one marked with `space`
+// before the range started is the user's and stays.
+func (m *Model) rangeDrop(lo, hi int) []int {
+	sl := m.slots()
+	inSpan := map[int]bool{}
+	for i := lo; i <= hi && i < len(sl); i++ {
+		if sl[i].isRow() {
+			inSpan[sl[i].row.PR.Number] = true
+		}
+	}
+	var out []int
+	for number := range m.rangeOwned {
+		if !inSpan[number] {
+			out = append(out, number)
+			delete(m.rangeOwned, number)
+		}
+	}
+	return out
 }
