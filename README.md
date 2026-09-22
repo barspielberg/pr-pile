@@ -71,7 +71,24 @@ actions:
     name: review
     run: tuicr pr {{.Number}}
     mode: suspend       # hand over the terminal; default is background
+
+  - key: b
+    name: browse all
+    run: open {{.URLs}}
+    multi: true         # runs once for the whole selection
 ```
+
+Select PRs with `space` (one) or `v` (a range), then `y` copies every selected
+url, one per line.
+
+An action only sees a selection if it says `multi: true`. Without it the action
+keeps the singular fields (`{{.Number}}`, `{{.URL}}`, ...) and refuses when
+several PRs are selected, rather than quietly running on whichever one came
+first. A `multi` action gets the plural fields instead — `{{.Numbers}}`,
+`{{.URLs}}`, `{{.Branches}}`, `{{.Bases}}`, `{{.Authors}}`, `{{.Titles}}` —
+space-joined and individually quoted, and runs once. Mixing the two forms in
+one template is an error. With nothing selected, a `multi` action gets the row
+under the cursor as a list of one.
 
 No actions are bound by default. The tool knows nothing about worktrees,
 editors or multiplexers — it renders a template and runs what it gets — so a

@@ -12,13 +12,21 @@ import (
 )
 
 func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
-	pr, ok := m.selected()
-	if !ok {
+	prs := m.actionPRs()
+	if len(prs) == 0 {
 		return m, nil, false
 	}
 	for _, a := range m.cfg.Actions {
 		if a.Key != key || strings.TrimSpace(a.Run) == "" {
 			continue
+		}
+		// An action that did not opt in refuses a selection rather than
+		// running on whichever PR happens to be first. Silently acting on one
+		// of several is the failure that takes longest to notice, and the
+		// singular fields cannot mean a list without breaking every config
+		// written before selections existed.
+		if !a.Multi && len(prs) > 1 {
+			return m.setStatus(a.Name + ": one PR at a time"), nil, true
 		}
 		// A second press while one is still out would start a second process
 		// and lose the first's result to the seq check. Saying so is more
@@ -29,7 +37,15 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 			m.clearSeq = 0
 			return m, nil, true
 		}
-		line, err := m.renderAction(a.Run, pr)
+		// A multi action with nothing selected gets the cursor row as a list of
+		// one, so its template needs no special case for that.
+		var line string
+		var err error
+		if a.Multi {
+			line, err = m.renderMultiAction(a.Run, prs)
+		} else {
+			line, err = m.renderAction(a.Run, prs[0])
+		}
 		if err != nil {
 			return m.setStatus("action: " + err.Error()), nil, true
 		}
@@ -42,6 +58,7 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 			// session), then repaint when they exit.
 			name := a.Name
 			statusSeq := m.statusSeq
+			m.clearSelection()
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				if err != nil {
 					return asyncStatusMsg{seq: statusSeq, text: name + " failed: " + err.Error()}
@@ -50,6 +67,7 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 			}), true
 		}
 		m.running, m.status = a.Name, ""
+		m.clearSelection()
 		seq := m.runSeq
 		work := runAction(cmd, a.Name, seq, m.statusSeq)
 		if m.fetching || len(m.inflight) > 0 {
@@ -103,6 +121,9 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	if err := validateRemoteActionFields(tmpl); err != nil {
 		return "", err
 	}
+	if err := rejectFields(tmpl, pluralActionFields); err != nil {
+		return "", err
+	}
 	t, err := template.New("action").Parse(tmpl)
 	if err != nil {
 		return "", err
@@ -116,6 +137,46 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	return b.String(), err
 }
 
+// renderMultiAction renders a `multi: true` action once for the whole
+// selection.
+//
+// The plural fields carry exactly the same attacker-controlled GitHub data as
+// the singular ones -- a branch name or a PR title is written by whoever opened
+// the PR -- so they go through the SAME validation, and each element is quoted
+// by the same shellQuote. A list is a bigger surface, not a safer one.
+func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
+	if err := validateRemoteActionFields(tmpl); err != nil {
+		return "", err
+	}
+	if err := rejectFields(tmpl, singularActionFields); err != nil {
+		return "", err
+	}
+	t, err := template.New("action").Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
+	data := multiActionTemplateData{Repo: m.cfg.Repo, RepoPath: m.cfg.RepoPath}
+	var numbers, branches, bases, urls, authors, titles []string
+	for _, pr := range prs {
+		numbers = append(numbers, fmt.Sprint(pr.Number))
+		branches = append(branches, shellQuote(pr.HeadRefName))
+		bases = append(bases, shellQuote(pr.BaseRefName))
+		urls = append(urls, shellQuote(pr.URL))
+		authors = append(authors, shellQuote(pr.Author))
+		titles = append(titles, shellQuote(pr.Title))
+	}
+	data.Numbers = strings.Join(numbers, " ")
+	data.Branches = strings.Join(branches, " ")
+	data.Bases = strings.Join(bases, " ")
+	data.URLs = strings.Join(urls, " ")
+	data.Authors = strings.Join(authors, " ")
+	data.Titles = strings.Join(titles, " ")
+
+	var b strings.Builder
+	err = t.Execute(&b, data)
+	return b.String(), err
+}
+
 type actionTemplateData struct {
 	Number            int
 	Repo, RepoPath    string
@@ -123,7 +184,82 @@ type actionTemplateData struct {
 	Author, Title     string
 }
 
-var remoteActionFields = []string{"Branch", "Base", "URL", "Author", "Title"}
+type multiActionTemplateData struct {
+	Numbers         string
+	Repo, RepoPath  string
+	Branches, Bases string
+	URLs            string
+	Authors, Titles string
+}
+
+// remoteActionFields is every template field whose value comes from GitHub and
+// is therefore attacker-controlled. Each must appear as a bare, standalone
+// placeholder at top-level shell context.
+//
+// The plural forms are here for the same reason the singular ones are. Adding a
+// field to the template data without adding it here is the mistake this list
+// exists to prevent -- see TestRemoteFieldListCoversEveryStringField, which
+// walks the structs by reflection so the list cannot silently fall behind.
+var remoteActionFields = []string{
+	"Branch", "Base", "URL", "Author", "Title",
+	"Branches", "Bases", "URLs", "Authors", "Titles",
+}
+
+// A singular template in a multi action (or the reverse) is a config error
+// rather than an empty expansion: `{{.URL}}` in a multi action would render
+// nothing at all, and an action that silently does the wrong thing is worse
+// than one that refuses at startup.
+var singularActionFields = []string{"Number", "Branch", "Base", "URL", "Author", "Title"}
+var pluralActionFields = []string{"Numbers", "Branches", "Bases", "URLs", "Authors", "Titles"}
+
+// actionUsesToken reports whether a template action references exactly this
+// field, splitting on the characters that can delimit a field in a template
+// action so a longer field name cannot answer for a shorter one.
+func actionUsesToken(action, token string) bool {
+	for _, word := range strings.FieldsFunc(action, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '(' || r == ')' || r == '|'
+	}) {
+		if word == token {
+			return true
+		}
+	}
+	return false
+}
+
+// rejectFields fails if the template mentions any of the given fields.
+func rejectFields(tmpl string, fields []string) error {
+	for _, field := range fields {
+		if templateMentions(tmpl, field) {
+			return fmt.Errorf("field %s does not belong in this action", "."+field)
+		}
+	}
+	return nil
+}
+
+// templateMentions reports whether a template uses a given field, matching the
+// whole name so .URL does not answer for .URLs.
+func templateMentions(tmpl, field string) bool {
+	for offset := 0; ; {
+		rel := strings.Index(tmpl[offset:], "{{")
+		if rel < 0 {
+			return false
+		}
+		start := offset + rel
+		closeRel := strings.Index(tmpl[start+2:], "}}")
+		if closeRel < 0 {
+			return false
+		}
+		end := start + 2 + closeRel
+		for _, token := range strings.FieldsFunc(tmpl[start+2:end], func(r rune) bool {
+			return r == ' ' || r == '\t' || r == '(' || r == ')' || r == '|'
+		}) {
+			if token == "."+field {
+				return true
+			}
+		}
+		offset = end + 2
+	}
+}
 
 func validateRemoteActionFields(tmpl string) error {
 	for offset := 0; ; {
@@ -140,7 +276,10 @@ func validateRemoteActionFields(tmpl string) error {
 		action := strings.TrimSpace(tmpl[start+2 : end])
 		for _, field := range remoteActionFields {
 			token := "." + field
-			if !strings.Contains(action, token) {
+			// Whole-token, not substring: `.URL` is a prefix of `.URLs`, so a
+			// Contains check reports the wrong field and rejects a valid
+			// plural template outright.
+			if !actionUsesToken(action, token) {
 				continue
 			}
 			if action != token || !standaloneActionField(tmpl, start, end+2) ||

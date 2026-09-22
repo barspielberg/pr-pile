@@ -36,6 +36,11 @@ type Action struct {
 	Name string `yaml:"name"`
 	Run  string `yaml:"run"`
 	Mode string `yaml:"mode"` // background (default) | suspend
+	// Multi opts an action into running once for a whole selection, with the
+	// plural template fields. Default off: the singular fields already shipped
+	// and cannot change meaning, so an action written before selections
+	// existed keeps doing exactly what it did.
+	Multi bool `yaml:"multi"`
 }
 
 type Config struct {
