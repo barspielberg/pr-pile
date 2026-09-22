@@ -128,7 +128,7 @@ func (m Model) doOpen(prs []github.PR) (Model, tea.Cmd) {
 	}
 	next := m
 	next.clearSelection()
-	next.confirmOpen = nil
+	next.clearConfirm()
 	return next, func() tea.Msg {
 		for _, url := range urls {
 			if err := openURL(url); err != nil {
@@ -376,8 +376,8 @@ func fullPage(height int) int { return max(1, height-2) }
 
 func halfPage(height int) int { return max(1, (height-2)/2) }
 
-// handleConfirmKey answers the open-this-many prompt. `y` and `enter` go ahead;
-// anything else does not.
+// handleConfirmKey answers the do-this-to-this-many prompt. `y` and `enter` go
+// ahead; anything else does not.
 //
 // The default is NO: every key that is not an explicit yes cancels, rather than
 // only esc cancelling and stray keys falling through to the board. A prompt
@@ -388,13 +388,21 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "y", "enter":
-		prs := m.confirmOpen
-		m.confirmOpen = nil
+		prs, key := m.confirmOpen, m.confirmAction
+		m.clearConfirm()
+		if key != "" {
+			next, cmd, _ := m.runAction(key, prs)
+			return next, cmd
+		}
 		return m.doOpen(prs)
 	default:
 		// The selection survives a cancel, so the user can adjust it rather
 		// than rebuild it.
-		m.confirmOpen = nil
+		m.clearConfirm()
 		return m, nil
 	}
+}
+
+func (m *Model) clearConfirm() {
+	m.confirmOpen, m.confirmAction, m.confirmVerb = nil, "", ""
 }
