@@ -720,6 +720,28 @@ func TestConfirmOpensTheSetItAskedAbout(t *testing.T) {
 	}
 }
 
+// A prompt must never outlive the selection it counted. The tick route is the
+// one that matters: the board refetches on a timer, so a refresh lands here
+// with no user action at all and no confirm gate in its way.
+func TestRefreshDismissesTheConfirmPrompt(t *testing.T) {
+	openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+
+	next, _ := m.Update(tickMsg{seq: m.refreshSeq})
+	m = next.(Model)
+	if len(m.selection) != 0 {
+		t.Fatalf("selection = %v, want the refresh to have cleared it", selectedNumbers(m))
+	}
+	if len(m.confirmOpen) != 0 {
+		t.Fatalf("confirmOpen = %d, want the prompt gone with the selection", len(m.confirmOpen))
+	}
+	if strings.Contains(stripANSI(m.View()), "in the browser?") {
+		t.Fatal("the prompt should be off screen:\n" + stripANSI(m.View()))
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

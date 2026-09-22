@@ -138,6 +138,10 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// off across a refetch, so a set that survived would be a claim about a
 	// board that no longer exists -- and the next `y` would act on it silently.
 	m.clearSelection()
+	// The prompt goes with it. A question about a selection that no longer
+	// exists has nothing left to answer, and leaving it up would mean the next
+	// keypress is eaten by a confirm the user can no longer reason about.
+	m.confirmOpen = nil
 	// A refresh does not kill the process, but the board it was launched from
 	// is gone; keeping its name on the footer would attribute the fetch
 	// spinner to the action. Its result still lands, keyed by seq.
