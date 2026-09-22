@@ -1,6 +1,8 @@
 # Multi-select — research and plan
 
-Proposal. Nothing here is built yet.
+Steps 1-3 are **built** on `feat/multi-select`: `space`, `v`, the mark, the
+`esc` rung, and `y` over a selection. Steps 4-5 (the open confirm, and `multi`
+actions) are still proposal.
 
 Goal: copy several PR urls at once. That needs two things — a way to pick more
 than one row, and a way to act on what you picked.
@@ -250,12 +252,14 @@ for searching, so this is a third variant:
 
 ## 4. Order to build it
 
-1. Add `selected` and `anchor` to the model, `space` to toggle, the mark in column
-   1, and the new `esc` rung. Nothing acts on the selection yet.
-2. `v` for ranges, the footer variant, and tests for ranges that cover headers and
-   notes.
-3. `y` over a selection, with the count in the status line. **This is the actual
-   goal, and it works at the end of this step.**
+1. ~~Add `selected` and `anchor` to the model, `space` to toggle, the mark in
+   column 1, and the new `esc` rung.~~ **Done.**
+2. ~~`v` for ranges, the footer variant, and tests for ranges that cover headers
+   and notes.~~ **Done.** One thing the tests caught: a range that covers a row
+   the user had already marked with `space` must not claim it, or shrinking the
+   range back off that row undoes their own mark.
+3. ~~`y` over a selection, with the count in the status line.~~ **Done — this was
+   the goal.**
 4. `enter`/`o` with the confirm at 3 or more.
 5. `multi: true`, the plural fields, `remoteActionFields` extended, security tests.
    Biggest piece, and last, because once people have configs we can't change it.
