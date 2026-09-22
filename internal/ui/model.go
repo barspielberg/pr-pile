@@ -33,6 +33,17 @@ type Model struct {
 	// stays until something else takes the line.
 	clearSeq int
 
+	// selection is the set of selected PR NUMBERS. See selection.go for why it
+	// is numbers rather than positions.
+	selection map[int]bool
+	// anchor is the slot `v` was pressed on, -1 when not ranging. The range is
+	// anchor..cursor inclusive, recomputed on every move rather than
+	// accumulated, so walking back over it shrinks it.
+	anchor int
+	// ranging is whether `v` mode is on. Separate from anchor >= 0 so the
+	// footer has one thing to ask.
+	ranging bool
+
 	searching bool
 	query     string
 	// searchOrigin is where the cursor was when / was pressed, so esc can put
@@ -112,7 +123,8 @@ var spinFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 func New(cfg config.Config, client *github.Client) Model {
 	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
 		fetchGeneration: 1, refreshSeq: 1, detail: map[int]github.Detail{},
-		inflight: map[int]detailRequest{}, detailIdentity: map[int]detailRequest{}}
+		inflight: map[int]detailRequest{}, detailIdentity: map[int]detailRequest{},
+		selection: map[int]bool{}, anchor: -1}
 }
 
 func (m Model) Init() tea.Cmd {

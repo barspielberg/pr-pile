@@ -9,6 +9,7 @@ import (
 )
 
 func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
+	picked := m.isSelected(r.PR.Number)
 	t := widthTierFor(m.width, showAuthor)
 	tw := m.searchTitleWidth(showAuthor)
 
@@ -67,9 +68,23 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 		mark = "▌"
 	}
 
+	// Column 1 was a blank spacer and now carries the multi-select mark. The
+	// cursor (column 0) and the selection are separate channels on purpose: a
+	// row can be under the cursor, selected, both or neither, and all four have
+	// to be tellable apart. Reusing an existing column means nothing shifts and
+	// the one-line-per-row invariant is untouched, and a board with nothing
+	// selected renders exactly as it did before the feature existed.
+	//
+	// A glyph rather than a hue, so it survives NO_COLOR and a light theme --
+	// the design guide's rule that colour is never the sole carrier.
+	pick := " "
+	if picked {
+		pick = "•"
+	}
+
 	var b strings.Builder
 	b.WriteString(paint(accent).Render(mark))
-	b.WriteString(paint(fgStyle).Render(" "))
+	b.WriteString(paint(accent).Render(pick))
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
 	b.WriteString(hitRuns(pad("#"+fmt.Sprint(r.PR.Number), numberWidth),
 		cellHits(spans, cells.number), accent, paint))
