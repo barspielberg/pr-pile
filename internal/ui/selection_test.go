@@ -753,3 +753,16 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// Every movement key has to extend an open range. `g` was the one that set the
+// cursor without clamping, so applyRange never ran and the range stayed at the
+// row `v` was pressed on.
+func TestRangeExtendsToTheTopWithG(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(4) // last PR
+	m = pressKey(m, "v")
+	m = pressKey(m, "g")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2, 3, 4, 5}) {
+		t.Fatalf("selection = %v, want every PR -- g must extend the range", got)
+	}
+}

@@ -273,6 +273,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// a stray `g` could wedge.
 	case "g", "home":
 		m.cursor = 0
+		m.clampCursor()
 	case "G", "end":
 		m.cursor = len(m.slots()) - 1
 		m.clampCursor()
