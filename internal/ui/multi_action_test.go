@@ -275,8 +275,12 @@ func TestMultiActionClearsTheSelection(t *testing.T) {
 	}
 }
 
-// runShell runs a rendered action line the way the board does.
+// runShell runs a rendered action line the way the board does, from a
+// throwaway directory: an injection test that ever DOES inject should leave its
+// debris in a temp dir rather than in the working tree.
 func runShell(line string) (string, error) {
-	out, err := exec.Command("sh", "-c", line).Output()
+	cmd := exec.Command("sh", "-c", line)
+	cmd.Dir = os.TempDir()
+	out, err := cmd.Output()
 	return string(out), err
 }
