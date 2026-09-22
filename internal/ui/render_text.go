@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ciCell returns the 2-cell CI glyph plus count. Four distinct silhouettes so
@@ -80,6 +81,7 @@ const authorWidth = 3
 // since they are the whole of what is drawn: two logins sharing a prefix share
 // a cell and so share a match, which the row shows rather than hides.
 func initials(login string) string {
+	login = terminalText(login)
 	if login == "" {
 		return ""
 	}
@@ -114,6 +116,7 @@ func age(t time.Time) string {
 }
 
 func clip(s string, w int) string {
+	s = terminalText(s)
 	if w <= 0 {
 		return ""
 	}
@@ -136,6 +139,7 @@ func clip(s string, w int) string {
 // clipLeft drops from the front, keeping the tail visible. The query grows at
 // its end, so that is the end worth keeping on screen.
 func clipLeft(s string, w int) string {
+	s = terminalText(s)
 	if w <= 0 {
 		return ""
 	}
@@ -149,6 +153,15 @@ func clipLeft(s string, w int) string {
 		}
 	}
 	return ""
+}
+
+func terminalText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '\uFFFD'
+		}
+		return r
+	}, s)
 }
 
 func pad(s string, w int) string {
