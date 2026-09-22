@@ -21,7 +21,9 @@ make check     # build, test, vet
 make install   # check, then put this checkout on PATH as pile
 ```
 
-Needs `gh` installed and logged in (used only for the token) and a Nerd Font for the glyphs.
+Currently requires macOS: browser integration uses `open`/`osascript`, and
+clipboard integration uses `pbcopy`. It also needs `gh` installed and logged in
+(used only for the token) and a Nerd Font for the glyphs.
 
 ## How it works
 
@@ -34,6 +36,10 @@ Rules are fetched in parallel but revealed in order: a section can only be drawn
 ## Config
 
 `~/.config/pile/config.yml` (honors `$XDG_CONFIG_HOME`), or `$PILE_CONFIG`.
+
+Configuration is strict: unknown fields are errors, `repo` must be exactly
+`owner/name`, rule limits are `1` through `100` (`0` means the default `20`),
+and action mode is either `background` or `suspend`.
 
 On first run inside a GitHub checkout, the repo is inferred with `gh` and a
 commented starter config is written. `PILE_REPO=owner/name` overrides the
@@ -131,11 +137,13 @@ enough), and the next `wt switch pr:<n>` then fails with *Directory already
 exists* rather than reusing it. If the key stops working on a PR you have
 removed before, clear the leftover directory.
 
-Action keys are matched **last**, so they cannot shadow a built-in key: binding
-an action to `d` or `j` means it never fires. Pick a key the table above does
-not use.
+Action keys cannot shadow a built-in key, and duplicate action keys are rejected
+when the configuration loads. Pick a key the table above does not use.
 
 Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`, `{{.Base}}`, `{{.URL}}`, `{{.Author}}`, `{{.Title}}`.
+Every string field is already POSIX-shell-quoted; use placeholders directly,
+without adding quotes around them. The configured command itself remains shell
+syntax, so pipes, redirects and variables written in `run` still work.
 
 [docs/config-example.md](docs/config-example.md) works a five-section team board
 through end to end: what each rule claims versus what it actually shows once the
@@ -150,6 +158,7 @@ authors.
 | `j` / `k` | move (also `↓` / `↑`) |
 | `l` / `h` | next / previous section (also `→` / `←`) |
 | `g` / `G` | top / bottom (also `home` / `end`) |
+| `ctrl+d` / `ctrl+u` | down / up half a page (`pgdn` / `pgup` move a full page) |
 | `enter` / `o` | open in browser (reuses an existing Arc tab) |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus conflict, unresolved comments, author, reviewer, size and branches |
 | `y` | copy the PR url to the clipboard (`pbcopy`) |
@@ -211,6 +220,8 @@ While typing, every printable key is query text, so navigation moves to chords:
 | `↓` / `↑` | same |
 | `enter` | keep the query and the highlights, close the prompt |
 | `backspace` | edit the query |
-| `ctrl+u` | clear the query |
 | `esc` | cancel, restoring the cursor |
 | `ctrl+c` | quit |
+
+`ctrl+u` deliberately does not edit a live query; outside the prompt it keeps
+its board/help meaning of moving half a page upward.
