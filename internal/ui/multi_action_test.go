@@ -61,7 +61,7 @@ func TestMultiActionRunsOnceForTheWholeSelection(t *testing.T) {
 	counter := filepath.Join(dir, "runs")
 	m := multiBoard(t, "echo x >> "+counter, true)
 	m = pressKey(m, "v")
-	m = pressKey(pressKey(m, "j"), "j")
+	m = pressKey(m, "j") // two PRs: under the confirm threshold
 	m = pressAction(t, m, "x")
 	data, err := os.ReadFile(counter)
 	if err != nil {
@@ -283,4 +283,73 @@ func runShell(line string) (string, error) {
 	cmd.Dir = os.TempDir()
 	out, err := cmd.Output()
 	return string(out), err
+}
+
+// A multi action runs one command over the whole selection, so it gets the same
+// "this many at once" guard `enter` has. `open {{.URLs}}` over a big selection
+// is the exact case the prompt exists for.
+func TestMultiActionAsksBeforeRunningOnManyPRs(t *testing.T) {
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "runs")
+	m := multiBoard(t, "echo x >> "+counter, true)
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "j"), "j") // three PRs
+
+	m = pressAction(t, m, "x")
+	if len(m.confirmOpen) != 3 {
+		t.Fatalf("confirmOpen = %d, want the prompt up for 3 PRs", len(m.confirmOpen))
+	}
+	if _, err := os.Stat(counter); err == nil {
+		t.Fatal("the action ran before the prompt was answered -- the prompt must gate it")
+	}
+	if got := stripANSI(m.View()); !strings.Contains(got, "act on 3 PRs?") {
+		t.Fatalf("prompt not on screen:\n%s", got)
+	}
+
+	m = pressAction(t, m, "y") // answer it
+	data, err := os.ReadFile(counter)
+	if err != nil {
+		t.Fatalf("the action should have run once confirmed: %v", err)
+	}
+	if got := strings.Count(string(data), "x"); got != 1 {
+		t.Fatalf("ran %d times, want exactly 1 for the whole selection", got)
+	}
+}
+
+// A non-multi action is refused outright over a selection, so it must never
+// raise a prompt -- there is nothing to confirm.
+func TestSingleActionDoesNotAskItRefuses(t *testing.T) {
+	m := multiBoard(t, "true", false)
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	next, _, _ := m.actionFor("x")
+	if len(next.confirmOpen) != 0 {
+		t.Fatalf("confirmOpen = %d, want no prompt for a non-multi action", len(next.confirmOpen))
+	}
+	if !strings.Contains(next.status, "one PR at a time") {
+		t.Fatalf("status = %q, want the refusal", next.status)
+	}
+}
+
+// The prompt runs the set it asked about, not whatever the selection holds when
+// the answer arrives.
+func TestMultiActionConfirmUsesTheCapturedSet(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "numbers")
+	m := multiBoard(t, "echo {{.Numbers}} > "+out, true)
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressAction(t, m, "x")
+
+	m.clearSelection()
+	m.cursor = m.rowSlot(2)
+	m = pressAction(t, m, "y")
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "1 2 3" {
+		t.Fatalf("ran on %q, want \"1 2 3\" -- the captured set", got)
+	}
 }

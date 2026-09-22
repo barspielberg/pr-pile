@@ -141,7 +141,7 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// The prompt goes with it. A question about a selection that no longer
 	// exists has nothing left to answer, and leaving it up would mean the next
 	// keypress is eaten by a confirm the user can no longer reason about.
-	m.confirmOpen = nil
+	m.clearConfirm()
 	// A refresh does not kill the process, but the board it was launched from
 	// is gone; keeping its name on the footer would attribute the fetch
 	// spinner to the action. Its result still lands, keyed by seq.

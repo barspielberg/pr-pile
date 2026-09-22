@@ -131,7 +131,11 @@ func (m Model) footer(spin string) string {
 	// question the board is waiting on, and nothing else on the line matters
 	// until it is answered.
 	if len(m.confirmOpen) > 0 {
-		left = fmt.Sprintf("  open %d PRs in the browser?  y / enter to confirm · any other key cancels", len(m.confirmOpen))
+		what := "open %d PRs in the browser?"
+		if m.confirmVerb != "" {
+			what = m.confirmVerb + " on %d PRs?"
+		}
+		left = fmt.Sprintf("  "+what+"  y / enter to confirm · any other key cancels", len(m.confirmOpen))
 	}
 	// A running action outranks a status: the status line is history and this
 	// is happening now. The glyph is the board's own spinner rather than a

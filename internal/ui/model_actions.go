@@ -16,6 +16,22 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 	if len(prs) == 0 {
 		return m, nil, false
 	}
+	// A multi action over a big selection runs one command across every PR in
+	// it, so it gets the same "this many at once" guard `enter` has: ask first,
+	// and capture the set now rather than re-reading it when the answer comes.
+	for _, a := range m.cfg.Actions {
+		if a.Key == key && strings.TrimSpace(a.Run) != "" &&
+			a.Multi && len(prs) >= confirmThreshold {
+			m.confirmOpen, m.confirmAction, m.confirmVerb = prs, key, a.Name
+			return m, nil, true
+		}
+	}
+	return m.runAction(key, prs)
+}
+
+// runAction is actionFor once the PR set is settled -- either straight from the
+// board, or handed back by a confirm prompt.
+func (m Model) runAction(key string, prs []github.PR) (Model, tea.Cmd, bool) {
 	for _, a := range m.cfg.Actions {
 		if a.Key != key || strings.TrimSpace(a.Run) == "" {
 			continue

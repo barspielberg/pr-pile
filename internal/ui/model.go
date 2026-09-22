@@ -49,12 +49,20 @@ type Model struct {
 	// distinction, shrinking a range would eat marks it never made.
 	rangeOwned map[int]bool
 
-	// confirmOpen is the PR set an `enter` is waiting to be confirmed for, nil
-	// when no prompt is up. It holds the PRs themselves rather than a count so
-	// the prompt and the action cannot disagree: a refresh landing mid-prompt
-	// clears the selection, and re-reading it at answer time would open the
-	// cursor row while the footer still said "open 7 PRs?".
+	// confirmOpen is the PR set a confirm prompt is waiting on, nil when no
+	// prompt is up. It holds the PRs themselves rather than a count so the
+	// prompt and the action cannot disagree: a refresh landing mid-prompt
+	// clears the selection, and re-reading it at answer time would act on the
+	// cursor row while the footer still said "7 PRs?".
 	confirmOpen []github.PR
+	// confirmAction is the configured action key the prompt is guarding, empty
+	// when the prompt is for the builtin open. A `multi` action runs one
+	// command over the whole selection, so the same "this many at once" guard
+	// applies -- `open {{.URLs}}` over forty rows is the case the prompt
+	// exists for.
+	confirmAction string
+	// confirmVerb names what the prompt will do, for the footer.
+	confirmVerb string
 
 	searching bool
 	query     string

@@ -90,6 +90,10 @@ space-joined and individually quoted, and runs once. Mixing the two forms in
 one template is an error. With nothing selected, a `multi` action gets the row
 under the cursor as a list of one.
 
+Acting on three or more PRs at once asks first — both `enter`/`o` and any
+`multi` action. `y` or `enter` confirms, any other key cancels and keeps the
+selection.
+
 No actions are bound by default. The tool knows nothing about worktrees,
 editors or multiplexers — it renders a template and runs what it gets — so a
 default that shelled out to a script only the author has would fail with
