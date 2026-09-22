@@ -22,25 +22,54 @@ var copyToClipboard = func(s string) error {
 	return cmd.Run()
 }
 
-// copySelected yanks the selected PR's URL. With nothing selected -- an empty
-// board -- there is no URL to copy and saying so is better than a silent
-// no-op.
+// copySelected yanks the url of every selected PR, or of the row under the
+// cursor when nothing is selected. With neither -- an empty board -- there is
+// no URL to copy and saying so is better than a silent no-op.
+//
+// Urls are joined with NEWLINES. One per line is what pastes into a PR
+// description, a Slack message or a ticket, which is what this is for; a shell
+// can join lines far more easily than a user can split them back apart.
 func (m Model) copySelected() (Model, tea.Cmd) {
-	pr, ok := m.selected()
-	if !ok {
+	prs := m.actionPRs()
+	if len(prs) == 0 {
 		return m.setStatus("no PR selected"), nil
 	}
-	url, number := pr.URL, pr.Number
-	if url == "" {
-		return m.setStatus("no URL for this PR"), nil
+	var urls []string
+	for _, pr := range prs {
+		// A PR with no url contributes nothing rather than an empty line, and
+		// the reported count follows what was actually copied.
+		if pr.URL != "" {
+			urls = append(urls, pr.URL)
+		}
 	}
+	if len(urls) == 0 {
+		if len(prs) == 1 {
+			return m.setStatus("no URL for this PR"), nil
+		}
+		return m.setStatus("no URLs to copy"), nil
+	}
+
+	payload := strings.Join(urls, "\n")
+	// A single PR still names itself: "copied #3248 url" is the confirmation
+	// this board has always given, and a count would be a downgrade for the
+	// case that has not changed.
+	text := fmt.Sprintf("copied #%d url", prs[0].Number)
+	if len(urls) > 1 {
+		text = fmt.Sprintf("copied %d urls", len(urls))
+	}
+
 	m.statusSeq++
 	seq := m.statusSeq
-	return m, func() tea.Msg {
-		if err := copyToClipboard(url); err != nil {
-			return asyncStatusMsg{seq: seq, text: "copy failed: " + err.Error()}
+	// The selection is dropped on success only. A failed copy is the one case
+	// where the user has to try again, and clearing what they picked would
+	// make them pick it a second time.
+	cleared := m
+	cleared.clearSelection()
+	return cleared, func() tea.Msg {
+		if err := copyToClipboard(payload); err != nil {
+			return asyncStatusMsg{seq: seq, text: "copy failed: " + err.Error(), restore: m.selection}
 		}
-		return asyncStatusMsg{seq: seq, text: fmt.Sprintf("copied #%d url", number)}
+		return asyncStatusMsg{seq: seq, text: text}
 	}
 }
 

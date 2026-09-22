@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -371,5 +372,150 @@ func TestFooterReturnsToNormalWhenSelectionCleared(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if !strings.Contains(stripANSI(next.(Model).View()), "/ search") {
 		t.Fatal("footer should return to the default legend")
+	}
+}
+
+// copyCapture swaps the clipboard shell-out for the duration of a test and
+// returns what would have been written.
+func copyCapture(t *testing.T, fail error) *string {
+	t.Helper()
+	var got string
+	prev := copyToClipboard
+	copyToClipboard = func(s string) error {
+		got = s
+		return fail
+	}
+	t.Cleanup(func() { copyToClipboard = prev })
+	return &got
+}
+
+func TestCopyWithNothingSelectedCopiesTheCursorRow(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := drain(t, selectBoard(t), nil)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if *got != "https://x/1" {
+		t.Fatalf("copied %q, want the cursor row's url", *got)
+	}
+	if m.status != "copied #1 url" {
+		t.Fatalf("status = %q, want the single-PR wording unchanged", m.status)
+	}
+}
+
+func TestCopyCopiesEverySelectedURL(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	drain(t, next.(Model), cmd)
+	for _, want := range []string{"https://x/1", "https://x/2", "https://x/3"} {
+		if !strings.Contains(*got, want) {
+			t.Fatalf("copied %q, missing %s", *got, want)
+		}
+	}
+}
+
+// Decided: one url per line.
+func TestCopyJoinsWithNewlines(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	drain(t, next.(Model), cmd)
+	if *got != "https://x/1\nhttps://x/2" {
+		t.Fatalf("copied %q, want newline-joined with no trailing newline", *got)
+	}
+}
+
+// A Go map has no iteration order, so without this the url order is random.
+func TestCopyUsesBoardOrderNotSelectionOrder(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(2) // select bottom-up
+	m = pressKey(m, " ")
+	m.cursor = m.rowSlot(0)
+	m = pressKey(m, " ")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	drain(t, next.(Model), cmd)
+	if *got != "https://x/1\nhttps://x/3" {
+		t.Fatalf("copied %q, want board order regardless of selection order", *got)
+	}
+}
+
+func TestCopyReportsTheCount(t *testing.T) {
+	copyCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if m.status != "copied 3 urls" {
+		t.Fatalf("status = %q, want \"copied 3 urls\"", m.status)
+	}
+}
+
+func TestCopySkipsSelectedPRsWithNoURL(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 20
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Number: 1, Title: "a", URL: "https://x/1"},
+		{Number: 2, Title: "b"}, // no url
+		{Number: 3, Title: "c", URL: "https://x/3"},
+	}})
+	m.board.Apply(board.Result{Index: 1})
+	m.fetching = false
+	m.cursor = m.firstRowSlot()
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if *got != "https://x/1\nhttps://x/3" {
+		t.Fatalf("copied %q, want the two real urls only", *got)
+	}
+	if m.status != "copied 2 urls" {
+		t.Fatalf("status = %q, want the count to match what was copied", m.status)
+	}
+}
+
+func TestCopyClearsTheSelection(t *testing.T) {
+	copyCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want cleared after a successful copy", got)
+	}
+}
+
+// Failure is the one case where the user has to retry, so what they picked has
+// to still be there.
+func TestCopyFailureKeepsTheSelection(t *testing.T) {
+	copyCapture(t, errors.New("pbcopy exploded"))
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if !strings.Contains(m.status, "copy failed") {
+		t.Fatalf("status = %q, want the failure reported", m.status)
+	}
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v, want [1 2] kept so the user can retry", got)
+	}
+}
+
+// End-to-end on a full board: the thing the feature was asked for.
+func TestSelectAllRowsThenCopy(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := selectBoard(t)
+	m.cursor = 0
+	m = pressKey(m, "v")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	m = next.(Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	want := "https://x/1\nhttps://x/2\nhttps://x/3\nhttps://x/4\nhttps://x/5"
+	if *got != want {
+		t.Fatalf("copied:\n%q\nwant:\n%q", *got, want)
 	}
 }
