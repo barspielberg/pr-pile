@@ -214,10 +214,11 @@ var remoteActionFields = []string{
 	"Branches", "Bases", "URLs", "Authors", "Titles",
 }
 
-// A singular template in a multi action (or the reverse) is a config error
-// rather than an empty expansion: `{{.URL}}` in a multi action would render
-// nothing at all, and an action that silently does the wrong thing is worse
-// than one that refuses at startup.
+// A singular template in a multi action (or the reverse) is an error rather
+// than an empty expansion: `{{.URL}}` in a multi action would render nothing at
+// all, and an action that silently does the wrong thing is worse than one that
+// refuses. Checked when the action runs, not at startup -- these validators
+// live here and config cannot import ui.
 var singularActionFields = []string{"Number", "Branch", "Base", "URL", "Author", "Title"}
 var pluralActionFields = []string{"Numbers", "Branches", "Bases", "URLs", "Authors", "Titles"}
 

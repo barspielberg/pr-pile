@@ -846,8 +846,12 @@ A `multi: true` action gets the plural fields instead — `{{.Numbers}}`,
 `{{.URLs}}`, `{{.Branches}}`, `{{.Bases}}`, `{{.Authors}}`, `{{.Titles}}` —
 space-joined, each element quoted exactly as its singular counterpart is. Mixing
 singular and plural in one template is rejected rather than rendered as an empty
-string. With nothing selected, the cursor's row is passed as a list of one, so a
-`multi` template never needs a special case for the single-PR path.
+string — **when the action runs, not at startup**: the field validators live in
+`internal/ui` alongside the shell-safety checks, and `internal/config` cannot
+import `internal/ui` without a cycle, so `Validate` never sees `run` templates.
+A mixed template therefore fails on the first press of its key, with the error
+on the status line. With nothing selected, the cursor's row is passed as a list
+of one, so a `multi` template never needs a special case for the single-PR path.
 
 **The plural fields carry the same attacker-controlled data as the singular
 ones** — a branch name and a PR title are written by whoever opened the PR — so
@@ -1019,14 +1023,14 @@ output is piped, so test the resolved path rather than the exit code.
 | `g` `G` / home end | top / bottom. Documented as `g` rather than `gg`: bare `g` is the whole move, so advertising a chord that is one key repeated read as confusing. Typing `gg` still works — top is its own fixed point, so the second press lands in the same place, and there is no pending-key mode to wedge |
 | `enter` `o` | open in browser (reuses an existing Arc tab). Three or more at once asks first (§4.5) |
 | `y` | copy the url of every selected PR, or of the row under the cursor when nothing is selected. `y` because the board already speaks vim (`j`/`k`, `g`/`G`, `l`/`h`), so yank is the key those fingers already reach for. A clipboard write is invisible, so it is acknowledged on the status line. Several urls are joined with newlines — one per line is what pastes into a PR body, a ticket or a Slack message, and a shell can rejoin lines more easily than a user can split them |
-| `space` | select or deselect the PR under the cursor; a no-op on a header or a note. The cursor deliberately does **not** advance: it saves a keypress going down the board and costs one going up, which is why k9s closed the same request as not-planned |
+| `space` | select or deselect the PR under the cursor; a no-op on a header or a note. The cursor deliberately does **not** advance: it saves a keypress going down the board and costs one going up, which is why k9s closed the same request as not-planned. The selection is keyed by PR number, so a refresh that reorders a section keeps it pointing at the same PRs, and a PR that leaves the board drops out of it. A reload (`r`, or the refresh timer) clears the selection outright: rows move and PRs drop off, so a set carried across would be a claim about a board that no longer exists |
 | `v` | select a range from here. Contiguous only, following lazygit — a scattered range has no clear meaning for some actions, and `space` already covers the scattered case. `v` again leaves the mode and keeps what it marked; `esc` discards. A range drawn over a header collects only the PR rows inside it |
 | `r` | reload |
 | `/` | search |
 | `n` `N` | next / previous match, wrapping |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus the state block (any key closes; a movement key closes *and* moves) |
 | `?` | help and the glyph legend. It scrolls (`j`/`k`, arrows, `ctrl+d`/`ctrl+u`, page keys, `g`/`G`); `esc`, `q` and `?` close it, as does any key that is not a scroll key |
-| `q` `esc` `ctrl+c` | quit. `esc` has three rungs, highest-priority first: clear the selection, then clear the search, then quit — each only claims the key when it has something to clear, so a user who never selects anything still quits on the first press |
+| `q` `esc` `ctrl+c` | quit. `esc` has three rungs, highest-priority first: clear the selection, then clear the search, then quit — each only claims the key when it has something to clear, so a user who never selects anything still quits on the first press. **While a confirm prompt is up (§4.5) only `ctrl+c` quits**: every other key, `q` and `esc` included, cancels the prompt instead. A prompt guarding an unrecoverable action should not be dismissed by a keypress aimed at the board behind it, and cancelling is the safe reading of an ambiguous key |
 
 **Searching.** `/` is vim's `/`. The board does not move — no row hidden, no
 section hidden, nothing reordered, no stack glyph changed — and matches are

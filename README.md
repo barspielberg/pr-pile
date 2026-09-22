@@ -87,8 +87,9 @@ several PRs are selected, rather than quietly running on whichever one came
 first. A `multi` action gets the plural fields instead — `{{.Numbers}}`,
 `{{.URLs}}`, `{{.Branches}}`, `{{.Bases}}`, `{{.Authors}}`, `{{.Titles}}` —
 space-joined and individually quoted, and runs once. Mixing the two forms in
-one template is an error. With nothing selected, a `multi` action gets the row
-under the cursor as a list of one.
+one template is an error, reported on the status line the first time you press
+the action's key. With nothing selected, a `multi` action gets the row under
+the cursor as a list of one.
 
 Acting on three or more PRs at once asks first — both `enter`/`o` and any
 `multi` action. `y` or `enter` confirms, any other key cancels and keeps the
