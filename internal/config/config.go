@@ -262,6 +262,10 @@ func (c Config) Validate() error {
 
 var reservedActionKeys = map[string]bool{
 	"ctrl+c": true, "q": true, "esc": true, "/": true, "n": true, "N": true,
+	// The selection keys. A config that bound these would be dead config --
+	// the builtin wins -- and the guide's rule is that a taken key is refused
+	// loudly rather than silently ignored.
+	"v": true, " ": true, "space": true,
 	"enter": true, "o": true, "r": true, "d": true, "y": true, "?": true,
 	"j": true, "down": true, "k": true, "up": true, "l": true, "right": true,
 	"h": true, "left": true, "g": true, "home": true, "G": true, "end": true,

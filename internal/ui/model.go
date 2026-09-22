@@ -49,6 +49,11 @@ type Model struct {
 	// distinction, shrinking a range would eat marks it never made.
 	rangeOwned map[int]bool
 
+	// confirmOpen is how many PRs an `enter` is waiting to be confirmed for,
+	// 0 when no prompt is up. It is a count rather than a bool because the
+	// number is the question: "open 7 PRs?" is what the user has to answer.
+	confirmOpen int
+
 	searching bool
 	query     string
 	// searchOrigin is where the cursor was when / was pressed, so esc can put
