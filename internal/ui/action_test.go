@@ -139,6 +139,7 @@ func TestSecondPressWhileRunningIsRefused(t *testing.T) {
 	next, _, _ := m.actionFor("w")
 	m = next
 	seq, statusSeq := m.runSeq, m.statusSeq
+	m, _ = m.copySelected()
 
 	again, cmd, ok := m.actionFor("w")
 	if !ok {

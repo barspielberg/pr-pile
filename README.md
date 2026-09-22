@@ -145,7 +145,8 @@ GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, and `Title`)
 are already POSIX-shell-quoted; use those placeholders directly, without adding
 quotes around them. Each remote placeholder must be a standalone shell word;
 quoted, embedded, command-substitution, and heredoc contexts are rejected when
-the action is invoked. The trusted configured `Repo` and `RepoPath` values
+the action is invoked. Explicit shell evaluators such as `sh -c` and `eval` are
+also rejected when the template uses a remote field. The trusted configured `Repo` and `RepoPath` values
 remain shell text, as does the command itself, so expansions, pipes and
 redirects written in `run` still work.
 
