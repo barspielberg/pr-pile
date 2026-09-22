@@ -179,9 +179,8 @@ func TestNewStatusCannotBeClearedByOldActionTimer(t *testing.T) {
 	m := actionBoard(t, "true")
 	m.clearSeq = 7
 	m.status = "old action"
-	next, _ := m.Update(statusMsg("new status"))
-	m = next.(Model)
-	next, _ = m.Update(clearStatusMsg(7))
+	m = m.setStatus("new status")
+	next, _ := m.Update(clearStatusMsg(7))
 	if got := next.(Model).status; got != "new status" {
 		t.Fatalf("old action timer cleared newer status: %q", got)
 	}
@@ -202,8 +201,8 @@ func TestSupersededActionCompletionStillClearsRunning(t *testing.T) {
 	next, _, _ := m.actionFor("w")
 	m = next
 	seq, statusSeq := m.runSeq, m.statusSeq
-	nextModel, _ := m.Update(statusMsg("new status"))
-	m = nextModel.(Model)
+	m = m.setStatus("new status")
+	var nextModel tea.Model
 	nextModel, _ = m.Update(actionDoneMsg{name: "worktree", seq: seq, statusSeq: statusSeq})
 	m = nextModel.(Model)
 	if m.running != "" {

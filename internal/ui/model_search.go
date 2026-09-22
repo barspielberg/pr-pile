@@ -193,7 +193,7 @@ func (m Model) stepMatch(forward bool) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(m.query) == "" {
 			return m, nil
 		}
-		return m, func() tea.Msg { return statusMsg("no matches") }
+		return m.setStatus("no matches"), nil
 	}
 
 	cur := m.cursor
@@ -216,5 +216,5 @@ func (m Model) stepMatch(forward bool) (tea.Model, tea.Cmd) {
 	if !forward {
 		msg = "search hit TOP, continuing at BOTTOM"
 	}
-	return m, func() tea.Msg { return statusMsg(msg) }
+	return m.setStatus(msg), nil
 }

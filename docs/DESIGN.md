@@ -859,12 +859,13 @@ there when wanted.
 One failure mode worth knowing: `wt remove` deregisters a worktree but can leave
 the directory on disk (a `node_modules` from a post-start hook is enough), and
 the next `wt switch pr:<n>` then fails with *Directory already exists* instead of
-reusing it. This bit during testing and looks exactly like the action silently
-doing nothing, since a background action reports only its name.
+reusing it. This bit during testing; the footer now reports the command's last
+stderr line, so the leftover-directory error stays visible until the next
+status replaces it.
 
 **`background`, not `suspend`, for this one.** `suspend` hands the terminal over
 via `tea.ExecProcess` and repaints on exit, which is right for a pager or a
-review TUI. This command opens a herdr tab over a socket and exits — timed at
+review TUI. This command opens a herdr workspace over a socket and exits — timed at
 ~4s with no terminal output — so suspending would blank the board to run
 something that never wanted the terminal.
 

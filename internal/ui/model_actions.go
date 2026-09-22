@@ -24,11 +24,11 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 		// useful than silently doing nothing.
 		if m.running != "" {
 			running := m.running
-			return m, func() tea.Msg { return statusMsg(running + " still running") }, true
+			return m.setStatus(running + " still running"), nil, true
 		}
 		line, err := m.renderAction(a.Run, pr)
 		if err != nil {
-			return m, func() tea.Msg { return statusMsg("action: " + err.Error()) }, true
+			return m.setStatus("action: " + err.Error()), nil, true
 		}
 		m.runSeq++
 		m.statusSeq++
@@ -160,7 +160,7 @@ func shellSpace(b byte) bool {
 
 func topLevelShellContext(prefix string) bool {
 	var quote byte
-	parenDepth, braceDepth := 0, 0
+	parenDepth, braceDepth, bracketDepth := 0, 0, 0
 	for i := 0; i < len(prefix); i++ {
 		if i+1 < len(prefix) && prefix[i:i+2] == "{{" {
 			if end := strings.Index(prefix[i+2:], "}}"); end >= 0 {
@@ -200,6 +200,9 @@ func topLevelShellContext(prefix string) bool {
 			} else if i+1 < len(prefix) && prefix[i+1] == '{' {
 				braceDepth++
 				i++
+			} else if i+1 < len(prefix) && prefix[i+1] == '[' {
+				bracketDepth++
+				i++
 			}
 		case '(':
 			if parenDepth > 0 {
@@ -213,9 +216,13 @@ func topLevelShellContext(prefix string) bool {
 			if braceDepth > 0 {
 				braceDepth--
 			}
+		case ']':
+			if bracketDepth > 0 {
+				bracketDepth--
+			}
 		}
 	}
-	return quote == 0 && parenDepth == 0 && braceDepth == 0
+	return quote == 0 && parenDepth == 0 && braceDepth == 0 && bracketDepth == 0
 }
 
 func shellQuote(s string) string {

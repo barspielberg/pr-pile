@@ -1981,7 +1981,8 @@ func TestYCopiesTheSelectedURL(t *testing.T) {
 	m := loaded(t, 120, 20, mine, review)
 	m = onRow(t, m, 0)
 
-	_, cmd := m.handleKey(runeKey('y'))
+	next, cmd := m.handleKey(runeKey('y'))
+	m = next.(Model)
 	msg := runCmd(t, cmd)
 
 	if *got != "https://github.com/o/r/pull/3248" {
@@ -2016,14 +2017,15 @@ func TestYWithNothingSelectedDoesNotCrash(t *testing.T) {
 	got := withClipboard(t, nil)
 
 	m := loaded(t, 120, 20, nil, nil)
-	_, cmd := m.handleKey(runeKey('y'))
+	next, cmd := m.handleKey(runeKey('y'))
+	m = next.(Model)
 	msg := runCmd(t, cmd)
 
 	if *got != "" {
 		t.Errorf("copied %q from an empty board, want nothing", *got)
 	}
-	if s, ok := msg.(statusMsg); !ok || string(s) == "" {
-		t.Errorf("status was %v, want it to say nothing is selected", msg)
+	if msg != nil || m.status == "" {
+		t.Errorf("status=%q msg=%v, want a synchronous no-selection status", m.status, msg)
 	}
 }
 

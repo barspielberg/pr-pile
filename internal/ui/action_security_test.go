@@ -99,6 +99,7 @@ func TestRemoteTemplateFieldsRejectUnsafeShellContexts(t *testing.T) {
 		`printf '%s' prefix{{.Title}}`,
 		`printf '%s' {{.Title}}suffix`,
 		`printf '%s' $(printf '%s' {{.Title}})`,
+		`printf '%s' $[ {{.Title}} ]`,
 		"cat <<EOF\n{{.Title}}\nEOF",
 		`printf '%s' {{index . "Title"}}`,
 	} {
