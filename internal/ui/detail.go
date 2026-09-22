@@ -102,6 +102,7 @@ func (m Model) mergeLine(pr github.PR, d github.Detail, loaded bool) string {
 		if base == "" {
 			base = d.DefaultBranch
 		}
+		base = terminalText(base)
 		behind = fmt.Sprintf("%s behind %s", plural(d.BehindBy, "commit"), base)
 	}
 	switch {
@@ -151,6 +152,7 @@ func (m Model) reviewerLine(pr github.PR, d github.Detail, loaded bool) string {
 // 36% of this board's authors and for some reviewers too, so the login is
 // always carried -- it is also the string you would @-mention or search for.
 func person(name, login string) string {
+	name, login = terminalText(name), terminalText(login)
 	if name == "" {
 		return login
 	}

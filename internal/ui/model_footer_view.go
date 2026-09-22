@@ -142,6 +142,7 @@ func (m Model) footer(spin string) string {
 			right = fmt.Sprintf("%s · %d of %d", strings.ToUpper(name), pos, total)
 		}
 	}
+	right = terminalText(right)
 	if spin != "" {
 		right += " " + spin
 	}
