@@ -543,7 +543,7 @@ func pressEnter(t *testing.T, m Model) Model {
 func TestOpenOneSelectedDoesNotAsk(t *testing.T) {
 	got := openCapture(t, nil)
 	m := pressEnter(t, pressKey(selectBoard(t), " "))
-	if m.confirmOpen != 0 {
+	if len(m.confirmOpen) != 0 {
 		t.Fatal("one PR should open without a prompt")
 	}
 	if len(*got) != 1 {
@@ -557,7 +557,7 @@ func TestOpenTwoSelectedDoesNotAsk(t *testing.T) {
 	m := pressKey(selectBoard(t), "v")
 	m = pressKey(m, "j")
 	m = pressEnter(t, m)
-	if m.confirmOpen != 0 {
+	if len(m.confirmOpen) != 0 {
 		t.Fatal("two PRs should open without a prompt")
 	}
 	if len(*got) != 2 {
@@ -571,8 +571,8 @@ func TestOpenThreeSelectedAsks(t *testing.T) {
 	m := pressKey(selectBoard(t), "v")
 	m = pressKey(pressKey(m, "j"), "j")
 	m = pressEnter(t, m)
-	if m.confirmOpen != 3 {
-		t.Fatalf("confirmOpen = %d, want 3", m.confirmOpen)
+	if len(m.confirmOpen) != 3 {
+		t.Fatalf("confirmOpen = %d, want 3", len(m.confirmOpen))
 	}
 	if len(*got) != 0 {
 		t.Fatalf("opened %v before the prompt was answered -- the prompt must gate the action", *got)
@@ -591,7 +591,7 @@ func TestOpenConfirmAcceptOpensAll(t *testing.T) {
 	if len(*got) != 3 {
 		t.Fatalf("opened %v, want all three", *got)
 	}
-	if m.confirmOpen != 0 {
+	if len(m.confirmOpen) != 0 {
 		t.Fatal("the prompt should be gone once answered")
 	}
 }
@@ -606,7 +606,7 @@ func TestOpenConfirmRejectOpensNothing(t *testing.T) {
 	if len(*got) != 0 {
 		t.Fatalf("opened %v after cancelling", *got)
 	}
-	if m.confirmOpen != 0 {
+	if len(m.confirmOpen) != 0 {
 		t.Fatal("cancel should dismiss the prompt")
 	}
 	// The selection survives, so the user can adjust rather than rebuild.
@@ -630,7 +630,7 @@ func TestOpenConfirmUnrelatedKeyCancels(t *testing.T) {
 func TestOpenWithNothingSelectedNeverAsks(t *testing.T) {
 	got := openCapture(t, nil)
 	m := pressEnter(t, selectBoard(t))
-	if m.confirmOpen != 0 {
+	if len(m.confirmOpen) != 0 {
 		t.Fatal("the plain single-PR path must be untouched")
 	}
 	if len(*got) != 1 || (*got)[0] != "https://x/1" {
@@ -699,4 +699,35 @@ func TestSearchAndSelectionCoexist(t *testing.T) {
 	if got := selectedNumbers(m); !equalInts(got, []int{1}) {
 		t.Fatalf("selection = %v, want [1] -- a query must not disturb it", got)
 	}
+}
+
+// The prompt answers with the set it asked about, not with whatever the
+// selection happens to hold when the key arrives. Losing the selection
+// underneath the prompt is the case that used to open the cursor row while the
+// footer still said "open 3 PRs?".
+func TestConfirmOpensTheSetItAskedAbout(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+
+	m.clearSelection()
+	m.cursor = m.rowSlot(4)
+	m = pressEnter(t, m) // answer it
+
+	if want := []string{"https://x/1", "https://x/2", "https://x/3"}; !equalStrings(*got, want) {
+		t.Fatalf("opened %v, want %v -- the prompt and the action must agree", *got, want)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

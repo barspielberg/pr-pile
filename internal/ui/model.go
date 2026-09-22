@@ -49,10 +49,12 @@ type Model struct {
 	// distinction, shrinking a range would eat marks it never made.
 	rangeOwned map[int]bool
 
-	// confirmOpen is how many PRs an `enter` is waiting to be confirmed for,
-	// 0 when no prompt is up. It is a count rather than a bool because the
-	// number is the question: "open 7 PRs?" is what the user has to answer.
-	confirmOpen int
+	// confirmOpen is the PR set an `enter` is waiting to be confirmed for, nil
+	// when no prompt is up. It holds the PRs themselves rather than a count so
+	// the prompt and the action cannot disagree: a refresh landing mid-prompt
+	// clears the selection, and re-reading it at answer time would open the
+	// cursor row while the footer still said "open 7 PRs?".
+	confirmOpen []github.PR
 
 	searching bool
 	query     string
