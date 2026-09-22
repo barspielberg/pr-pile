@@ -84,6 +84,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
+		// Three rungs, highest-priority first: selection, then search, then
+		// quit. The selection goes first because it is the state that costs
+		// most to be wrong about -- an action fires on it -- and because a
+		// board with marks still on it is visibly holding something.
+		//
+		// A user who never selects anything still quits on the first press:
+		// each rung only claims esc when it has something to clear.
+		if len(m.selection) > 0 || m.ranging {
+			m.clearSelection()
+			return m, nil
+		}
 		// The :noh of this board. Strictly vim keeps the pattern for a later
 		// n; here it goes entirely, because a board with no visible highlights
 		// where n still jumps would be a mode with nothing on screen to say so.
@@ -129,6 +140,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, tea.Batch(cmd, spinTick())
+	case " ":
+		// Toggle the PR under the cursor. The cursor deliberately does NOT
+		// advance: it saves a keypress going down the board and costs one
+		// going up, and k9s closed that request as not-planned for exactly
+		// that reason. See docs/multi-select.md.
+		m.toggleSelect()
+		return m, nil
 	case "n":
 		return m.stepMatch(true)
 	case "N":
