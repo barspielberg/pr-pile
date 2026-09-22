@@ -110,6 +110,8 @@ rules:
 # Actions run a shell command for the selected PR. Available template fields:
 # {{.Number}} {{.Repo}} {{.RepoPath}} {{.Branch}} {{.Base}} {{.URL}}
 # {{.Author}} {{.Title}}
+# String fields are already shell-quoted; use their placeholders without
+# adding quotes around them. The run value itself remains shell syntax.
 # actions:
 #   - key: w
 #     name: worktree

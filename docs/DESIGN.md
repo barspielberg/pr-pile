@@ -761,13 +761,14 @@ a problem the ranking already handles.
 `~/Library/Application Support` — not where a terminal tool's config belongs.
 First run writes a commented starter config rather than failing, with the repo
 inferred via `gh repo view`. Config decodes *over* the defaults, so an absent key
-keeps its default; an explicit `rules:` list replaces them wholesale.
+keeps its default; an explicit `rules:` list replaces them wholesale. Decoding
+rejects unknown fields so a misspelling cannot silently become dead config.
 
 ### Config
 
 | field | type | meaning |
 |---|---|---|
-| `repo` | `owner/name` | required; the one value that cannot be guessed. `PILE_REPO` overrides it per invocation. |
+| `repo` | `owner/name` | required; exactly one nonempty owner and repository component. `PILE_REPO` overrides it per invocation. |
 | `repoPath` | path | local checkout, for `{{.RepoPath}}` in action templates |
 | `refresh` | duration | auto-refresh interval, default `3m`; `<= 0` disables |
 | `rules` | `[]Rule` | ordered; at least one required |
@@ -779,7 +780,7 @@ keeps its default; an explicit `rules:` list replaces them wholesale.
 |---|---|---|
 | `name` | string | required; the section header, uppercased on render |
 | `query` | string | required; GitHub search syntax. Scoped automatically: `repo:<repo> is:pr is:open <query>` — a rule carries only what distinguishes it. |
-| `limit` | int | page size, default 20. Applied as `first:N` on the search, so it truncates before `tree` groups anything |
+| `limit` | int | page size: `0` defaults to 20, otherwise `1..100`. Applied as `first:N` on the search, so it truncates before `tree` groups anything |
 | `tree` | bool | group stacked PRs into a chain. Chains are computed from the PRs *in that section*, so first-match-wins splits a stack into per-section sub-chains (§4.1) |
 | `author` | bool | show the author's initials column |
 
@@ -814,13 +815,16 @@ limit above the number of PRs they match.
 
 | field | type | meaning |
 |---|---|---|
-| `key` | string | bound key; matched *after* navigation keys so an action cannot shadow `j` |
+| `key` | string | required, unique bound key; built-in and duplicate keys are rejected |
 | `name` | string | shown in the `?` overlay and as the status message |
 | `run` | string | Go template, run via `sh -c` |
 | `mode` | string | `background` (default) or `suspend` — suspend hands the terminal over for a TUI command and repaints on exit. Background actions report their lifecycle on the status line (§4.2) and are reaped rather than left as zombies. |
 
 Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 `{{.Base}}` `{{.URL}}` `{{.Author}}` `{{.Title}}`.
+Every string field is POSIX-shell-quoted before template execution. Placeholders
+therefore appear directly, not inside author-supplied quotes; the surrounding
+configured command remains trusted shell syntax. `.Number` remains numeric.
 
 **No action is bound by default.** Actions are shell templates and the tool
 knows nothing about worktrees, editors or multiplexers, so a default that
@@ -995,9 +999,12 @@ Every printable key is query text while typing, so navigation moves to chords:
 |---|---|
 | `ctrl+n` `ctrl+p` / `ctrl+j` `ctrl+k` / `↓` `↑` | next / previous match |
 | `enter` | keep the query and the highlights, close the prompt |
-| `backspace` / `ctrl+u` | edit / clear the query |
+| `backspace` | edit the query |
 | `esc` | cancel, restoring the cursor to where `/` was pressed |
 | `ctrl+c` | quit |
+
+`ctrl+u` is not a query-editing chord. Outside the prompt it retains its
+board/help contract of scrolling half a page upward.
 
 From either overlay, **only `ctrl+c` quits** — `esc` and `q` mean "back to the
 board", so opening one can never cost you the session by reflex.
