@@ -43,6 +43,11 @@ type Model struct {
 	// ranging is whether `v` mode is on. Separate from anchor >= 0 so the
 	// footer has one thing to ask.
 	ranging bool
+	// rangeOwned is the PRs the CURRENT range selected, as opposed to ones the
+	// user marked with space beforehand. Walking the cursor back over a range
+	// has to release its own rows without touching the user's -- without this
+	// distinction, shrinking a range would eat marks it never made.
+	rangeOwned map[int]bool
 
 	searching bool
 	query     string
@@ -124,7 +129,7 @@ func New(cfg config.Config, client *github.Client) Model {
 	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
 		fetchGeneration: 1, refreshSeq: 1, detail: map[int]github.Detail{},
 		inflight: map[int]detailRequest{}, detailIdentity: map[int]detailRequest{},
-		selection: map[int]bool{}, anchor: -1}
+		selection: map[int]bool{}, rangeOwned: map[int]bool{}, anchor: -1}
 }
 
 func (m Model) Init() tea.Cmd {

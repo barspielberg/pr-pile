@@ -140,6 +140,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, tea.Batch(cmd, spinTick())
+	case "v":
+		// Range mode. Contiguous only, following lazygit: a scattered range has
+		// no clear meaning for some actions, and `space` already covers the
+		// scattered case.
+		m.startRange()
+		return m, nil
 	case " ":
 		// Toggle the PR under the cursor. The cursor deliberately does NOT
 		// advance: it saves a keypress going down the board and costs one

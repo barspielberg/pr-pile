@@ -244,3 +244,132 @@ func TestEscQuitsWhenNothingIsSelected(t *testing.T) {
 		t.Fatal("esc on a clean board should return tea.Quit")
 	}
 }
+
+func TestRangeSelectsFromAnchorToCursor(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2, 3}) {
+		t.Fatalf("selection = %v, want [1 2 3]", got)
+	}
+}
+
+// A range that only works downward is the obvious bug here.
+func TestRangeExtendsBackwards(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(2) // PR 3
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "k"), "k")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2, 3}) {
+		t.Fatalf("selection = %v, want [1 2 3]", got)
+	}
+}
+
+// The range tracks the cursor; it does not accumulate.
+func TestRangeShrinksWhenTheCursorComesBack(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(pressKey(m, "j"), "j"), "k")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v, want [1 2] -- the range must shrink, not trail", got)
+	}
+}
+
+func TestRangeSkipsHeadersAndNotes(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(2) // last row of section one
+	m = pressKey(m, "v")
+	// j crosses the section-two header and lands on its first row.
+	m = pressKey(pressKey(m, "j"), "j")
+	got := selectedNumbers(m)
+	if !equalInts(got, []int{3, 4}) {
+		t.Fatalf("selection = %v, want [3 4] -- the header between them is not a PR", got)
+	}
+}
+
+func TestRangeOverAHeaderOnlySelectsNothing(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.headerSlot(0)
+	m = pressKey(m, "v")
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want empty", got)
+	}
+}
+
+func TestVAgainEndsRangeAndKeepsSelection(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	m = pressKey(m, "v") // end the range
+	if m.ranging {
+		t.Fatal("v again should leave range mode")
+	}
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v, want [1 2] kept after leaving the mode", got)
+	}
+	// Moving now must not extend anything.
+	m = pressKey(m, "j")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v after moving outside the mode, want [1 2]", got)
+	}
+}
+
+func TestEscDuringRangeClearsIt(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want cleared", got)
+	}
+	if m.ranging {
+		t.Fatal("esc should leave range mode")
+	}
+}
+
+// The documented route to a scattered selection, so it has to actually work.
+func TestRangeAddsToAnExistingSelection(t *testing.T) {
+	m := selectBoard(t)
+	m = pressKey(m, " ") // PR 1 on its own
+	m.cursor = m.rowSlot(3)
+	m = pressKey(m, "v") // range over PR 4..5
+	m = pressKey(m, "j")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 4, 5}) {
+		t.Fatalf("selection = %v, want [1 4 5]", got)
+	}
+}
+
+// Shrinking a range must release only what the range selected, never a mark the
+// user made with space beforehand.
+func TestShrinkingARangeKeepsEarlierSpaceMarks(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(1)
+	m = pressKey(m, " ") // PR 2, by hand
+	m.cursor = m.rowSlot(0)
+	m = pressKey(m, "v")                // range from PR 1
+	m = pressKey(pressKey(m, "j"), "j") // covers 1,2,3
+	m = pressKey(pressKey(m, "k"), "k") // back to just 1
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v, want [1 2] -- the hand-made mark on 2 must survive", got)
+	}
+}
+
+func TestFooterShowsRangeKeysWhileRanging(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	if !strings.Contains(stripANSI(m.View()), "esc clear") {
+		t.Fatal("footer should say how to leave range mode:\n" + stripANSI(m.View()))
+	}
+}
+
+func TestFooterShowsTheSelectionCount(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	if !strings.Contains(stripANSI(m.View()), "y copy 3") {
+		t.Fatal("footer should show the count:\n" + stripANSI(m.View()))
+	}
+}
+
+func TestFooterReturnsToNormalWhenSelectionCleared(t *testing.T) {
+	m := pressKey(selectBoard(t), " ")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !strings.Contains(stripANSI(next.(Model).View()), "/ search") {
+		t.Fatal("footer should return to the default legend")
+	}
+}

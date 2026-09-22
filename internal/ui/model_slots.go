@@ -305,6 +305,12 @@ func (m *Model) clampCursor() {
 	}
 	m.cursor = clampIndex(m.cursor, n)
 	m.searchOrigin = clampIndex(m.searchOrigin, n)
+	// An open range follows the cursor. This lives here rather than at each
+	// movement key because clampCursor is already the one place every move
+	// funnels through -- nine call sites and counting -- and a range that had
+	// to be re-applied by hand at each of them would stop tracking the moment
+	// someone added a tenth.
+	m.applyRange()
 }
 
 func clampIndex(i, n int) int {

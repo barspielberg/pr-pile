@@ -106,6 +106,12 @@ func (m Model) cursorSection() (name string, pos, total int) {
 func (m Model) footer(spin string) string {
 	left := "  j/k move · l/h section · enter open · d detail · y copy · / search · ? help · q quit"
 	switch {
+	case m.ranging || len(m.selection) > 0:
+		// A selection is a mode the board is holding, so the footer has to say
+		// so and say how to leave. The count is the part that matters: it is
+		// the only confirmation that `v` picked up what the user thinks it did
+		// before they press `y`.
+		left = fmt.Sprintf("  space mark · v range · y copy %d · esc clear", len(m.selection))
 	case m.searching:
 		left = "  ctrl+n/p next · enter keep · esc cancel"
 	case m.query != "":
