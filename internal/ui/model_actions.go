@@ -24,7 +24,9 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 		// useful than silently doing nothing.
 		if m.running != "" {
 			running := m.running
-			return m.setStatus(running + " still running"), nil, true
+			m.status = running + " still running"
+			m.clearSeq = 0
+			return m, nil, true
 		}
 		line, err := m.renderAction(a.Run, pr)
 		if err != nil {
