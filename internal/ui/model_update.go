@@ -1,6 +1,9 @@
 package ui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"github.com/barspielberg/pr-pile/internal/github"
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -35,6 +38,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.refresh()
 
 	case detailMsg:
+		if msg.generation != m.fetchGeneration {
+			return m, nil
+		}
+		head, ok := m.currentHead(msg.detail.Number)
+		if !ok || head != msg.head {
+			return m, nil
+		}
 		delete(m.inflight, msg.detail.Number)
 		// A failed request costs the on-demand lines and nothing else: the
 		// overlay is already on screen and already useful without them, and
@@ -84,6 +94,8 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// collapse and re-expand under the cursor.
 	m.fetchGeneration++
 	m.board.Refetch()
+	m.detail = make(map[int]github.Detail)
+	m.inflight = make(map[int]bool)
 	m.fetching = true
 	m.status = ""
 	// A refresh does not kill the process, but the board it was launched from

@@ -50,15 +50,26 @@ func (m Model) fetchDetail(pr github.PR) tea.Cmd {
 	}
 	m.inflight[pr.Number] = true
 
-	repo, number, head := m.cfg.Repo, pr.Number, pr.HeadRefName
+	repo, number, head, generation := m.cfg.Repo, pr.Number, pr.HeadRefName, m.fetchGeneration
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		d, err := client.Detail(ctx, repo, number, head)
 		d.Number = number // so a failed response is still attributable
-		return detailMsg{detail: d, err: err}
+		return detailMsg{generation: generation, head: head, detail: d, err: err}
 	}
+}
+
+func (m Model) currentHead(number int) (string, bool) {
+	for _, section := range m.board.Sections() {
+		for _, row := range section.Rows {
+			if row.PR.Number == number {
+				return row.PR.HeadRefName, true
+			}
+		}
+	}
+	return "", false
 }
 
 func spinTick() tea.Cmd {
