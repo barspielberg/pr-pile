@@ -70,6 +70,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.seq != m.statusSeq {
 			return m, nil
 		}
+		// Only restore onto a board the user has not touched since: if they
+		// have started picking again, their new selection is the current one.
+		if msg.restore != nil && len(m.selection) == 0 {
+			m.selection = msg.restore
+		}
 		m.status = msg.text
 		m.clearSeq = 0
 		return m, nil

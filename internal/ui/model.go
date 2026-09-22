@@ -110,6 +110,11 @@ type refreshMsg struct{}
 type asyncStatusMsg struct {
 	seq  uint64
 	text string
+	// restore is the selection to put back, set only when an async action
+	// failed after the selection was optimistically cleared. Clearing on the
+	// way out keeps the footer honest while the copy is in flight; a failure
+	// hands the user back exactly what they picked, so retrying is one key.
+	restore map[int]bool
 }
 
 type actionDoneMsg struct {
