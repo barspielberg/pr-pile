@@ -2,12 +2,14 @@ package ui
 
 import (
 	"fmt"
-	"github.com/barspielberg/pr-pile/internal/github"
-	tea "github.com/charmbracelet/bubbletea"
 	"os/exec"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/barspielberg/pr-pile/internal/github"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
@@ -123,6 +125,7 @@ type actionTemplateData struct {
 }
 
 var remoteActionFields = []string{"Branch", "Base", "URL", "Author", "Title"}
+var indirectEvaluator = regexp.MustCompile(`(?:^|[\s;&|()])(?:(?:[^\s;&|()]+/)?(?:sh|bash|dash|zsh|ksh)\s+-[[:alpha:]]*c|eval)(?:\s|$)`)
 
 func validateRemoteActionFields(tmpl string) error {
 	for offset := 0; ; {
@@ -143,7 +146,8 @@ func validateRemoteActionFields(tmpl string) error {
 				continue
 			}
 			if action != token || !standaloneActionField(tmpl, start, end+2) ||
-				strings.Contains(tmpl, "<<") || !topLevelShellContext(tmpl[:start]) {
+				strings.Contains(tmpl, "<<") || indirectEvaluator.MatchString(tmpl) ||
+				!topLevelShellContext(tmpl[:start]) {
 				return fmt.Errorf("remote field %s must be an unquoted standalone placeholder", token)
 			}
 		}

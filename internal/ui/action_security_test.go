@@ -102,6 +102,9 @@ func TestRemoteTemplateFieldsRejectUnsafeShellContexts(t *testing.T) {
 		`printf '%s' $[ {{.Title}} ]`,
 		"cat <<EOF\n{{.Title}}\nEOF",
 		`printf '%s' {{index . "Title"}}`,
+		`sh -c {{.Title}}`,
+		`/bin/bash -ec {{.Title}}`,
+		`eval {{.Title}}`,
 	} {
 		t.Run(strconv.Quote(tmpl), func(t *testing.T) {
 			m := New(testCfg(), nil)

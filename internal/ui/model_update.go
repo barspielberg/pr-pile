@@ -81,7 +81,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.running = ""
-		if msg.statusSeq != m.statusSeq {
+		ownsStatus := msg.statusSeq == m.statusSeq || m.status == msg.name+" still running"
+		if !ownsStatus {
 			return m, nil
 		}
 		m.status = actionResult(msg)
