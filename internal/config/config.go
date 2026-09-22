@@ -2,12 +2,14 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -164,7 +166,9 @@ func Load() (Config, error) {
 
 	// Decode over the defaults so an absent key keeps its default rather than
 	// zeroing; an explicit `rules:` list replaces the defaults wholesale.
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if env := os.Getenv("PILE_REPO"); env != "" {
@@ -202,10 +206,9 @@ func detectRepo() (string, error) {
 }
 
 func (c Config) Validate() error {
-	if strings.TrimSpace(c.Repo) == "" {
-		return fmt.Errorf("repo is required (owner/name)")
-	}
-	if !strings.Contains(c.Repo, "/") {
+	parts := strings.Split(c.Repo, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" ||
+		strings.TrimSpace(c.Repo) != c.Repo || strings.IndexFunc(c.Repo, unicode.IsSpace) >= 0 {
 		return fmt.Errorf("repo %q must be owner/name", c.Repo)
 	}
 	if len(c.Rules) == 0 {
@@ -218,8 +221,41 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(r.Query) == "" {
 			return fmt.Errorf("rule %q: query is required", r.Name)
 		}
+		if r.Limit < 0 || r.Limit > 100 {
+			return fmt.Errorf("rule %q: limit must be 0 or between 1 and 100", r.Name)
+		}
+	}
+	seen := make(map[string]bool, len(c.Actions))
+	for i, a := range c.Actions {
+		if strings.TrimSpace(a.Key) == "" || strings.IndexFunc(a.Key, unicode.IsControl) >= 0 {
+			return fmt.Errorf("action %d: key is required and cannot contain control characters", i+1)
+		}
+		if reservedActionKeys[a.Key] {
+			return fmt.Errorf("action %q: key %q is reserved", a.Name, a.Key)
+		}
+		if seen[a.Key] {
+			return fmt.Errorf("action %q: key %q is already bound", a.Name, a.Key)
+		}
+		seen[a.Key] = true
+		if strings.TrimSpace(a.Name) == "" {
+			return fmt.Errorf("action %d: name is required", i+1)
+		}
+		if strings.TrimSpace(a.Run) == "" {
+			return fmt.Errorf("action %q: run is required", a.Name)
+		}
+		if a.Mode != "" && a.Mode != "background" && a.Mode != "suspend" {
+			return fmt.Errorf("action %q: mode must be background or suspend", a.Name)
+		}
 	}
 	return nil
+}
+
+var reservedActionKeys = map[string]bool{
+	"ctrl+c": true, "q": true, "esc": true, "/": true, "n": true, "N": true,
+	"enter": true, "o": true, "r": true, "d": true, "y": true, "?": true,
+	"j": true, "down": true, "k": true, "up": true, "l": true, "right": true,
+	"h": true, "left": true, "g": true, "home": true, "G": true, "end": true,
+	"ctrl+d": true, "ctrl+u": true, "pgdown": true, "pgup": true,
 }
 
 // SearchQuery scopes a rule to the configured repo and to open PRs. Rules only
@@ -229,7 +265,7 @@ func (c Config) SearchQuery(r Rule) string {
 }
 
 func (r Rule) PageSize() int {
-	if r.Limit <= 0 {
+	if r.Limit == 0 {
 		return 20
 	}
 	return r.Limit
