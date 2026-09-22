@@ -145,7 +145,7 @@ func TestActionTemplateRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "wt switch -x nvim pr:42 # o/r feat/x"; got != want {
+	if want := "wt switch -x nvim pr:42 # 'o/r' 'feat/x'"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }

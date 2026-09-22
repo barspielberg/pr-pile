@@ -48,17 +48,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 		return m, nil
 
-	case actionStartMsg:
-		m.running, m.status = msg.name, ""
-		// A board that has finished fetching has no live tick, so without this
-		// the running glyph would sit on one frame for the whole run. The
-		// still-fetching board already has its own tick; a second would run
-		// the spinner at double speed.
-		if m.fetching || len(m.inflight) > 0 {
-			return m, nil
-		}
-		return m, spinTick()
-
 	case actionDoneMsg:
 		// A result from a run the user has already superseded says nothing
 		// about what is on screen now.
@@ -99,6 +88,9 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// A refresh does not kill the process, but the board it was launched from
 	// is gone; keeping its name on the footer would attribute the fetch
 	// spinner to the action. Its result still lands, keyed by seq.
-	m.running = ""
+	if m.running != "" {
+		m.runSeq++
+		m.running = ""
+	}
 	return m, tea.Batch(append(m.fetchAll(), spinTick())...)
 }

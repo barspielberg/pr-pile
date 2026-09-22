@@ -79,13 +79,6 @@ type spinMsg time.Time
 type refreshMsg struct{}
 type statusMsg string
 
-// actionStartMsg and actionDoneMsg bracket a background action. Start carries
-// the name so the footer can say what is running; done carries the same seq so
-// a stale result cannot clobber a newer run's status.
-type actionStartMsg struct {
-	name string
-	seq  int
-}
 type actionDoneMsg struct {
 	name string
 	seq  int
