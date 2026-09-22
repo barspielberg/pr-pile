@@ -138,7 +138,7 @@ func TestSecondPressWhileRunningIsRefused(t *testing.T) {
 	m := actionBoard(t, "true")
 	next, _, _ := m.actionFor("w")
 	m = next
-	seq := m.runSeq
+	seq, statusSeq := m.runSeq, m.statusSeq
 
 	again, cmd, ok := m.actionFor("w")
 	if !ok {
@@ -153,9 +153,13 @@ func TestSecondPressWhileRunningIsRefused(t *testing.T) {
 	}
 
 	// The first result still lands and still clears the running state.
-	done, _ := m.Update(actionDoneMsg{name: "worktree", seq: seq})
-	if r := done.(Model).running; r != "" {
+	done, _ := m.Update(actionDoneMsg{name: "worktree", seq: seq, statusSeq: statusSeq})
+	got := done.(Model)
+	if r := got.running; r != "" {
 		t.Errorf("running state stranded after the result: %q", r)
+	}
+	if got.status != "worktree ✓" {
+		t.Errorf("completion did not replace still-running status: %q", got.status)
 	}
 }
 
