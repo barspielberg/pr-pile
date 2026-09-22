@@ -969,13 +969,15 @@ output is piped, so test the resolved path rather than the exit code.
 | `l` `h` / `→` `←` | next / previous section (empty sections skipped; `h` goes to the start of the current section first, then back) |
 | `g` `G` / home end | top / bottom. Documented as `g` rather than `gg`: bare `g` is the whole move, so advertising a chord that is one key repeated read as confusing. Typing `gg` still works — top is its own fixed point, so the second press lands in the same place, and there is no pending-key mode to wedge |
 | `enter` `o` | open in browser (reuses an existing Arc tab) |
-| `y` | copy the selected PR's url to the clipboard. `y` because the board already speaks vim (`j`/`k`, `g`/`G`, `l`/`h`), so yank is the key those fingers already reach for. A clipboard write is invisible, so it is acknowledged on the status line |
+| `y` | copy the url of every selected PR, or of the row under the cursor when nothing is selected. `y` because the board already speaks vim (`j`/`k`, `g`/`G`, `l`/`h`), so yank is the key those fingers already reach for. A clipboard write is invisible, so it is acknowledged on the status line. Several urls are joined with newlines — one per line is what pastes into a PR body, a ticket or a Slack message, and a shell can rejoin lines more easily than a user can split them |
+| `space` | select or deselect the PR under the cursor; a no-op on a header or a note. The cursor deliberately does **not** advance: it saves a keypress going down the board and costs one going up, which is why k9s closed the same request as not-planned |
+| `v` | select a range from here. Contiguous only, following lazygit — a scattered range has no clear meaning for some actions, and `space` already covers the scattered case. `v` again leaves the mode and keeps what it marked; `esc` discards. A range drawn over a header collects only the PR rows inside it |
 | `r` | reload |
 | `/` | search |
 | `n` `N` | next / previous match, wrapping |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus the state block (any key closes; a movement key closes *and* moves) |
 | `?` | help and the glyph legend. It scrolls (`j`/`k`, arrows, `ctrl+d`/`ctrl+u`, page keys, `g`/`G`); `esc`, `q` and `?` close it, as does any key that is not a scroll key |
-| `q` `esc` `ctrl+c` | quit |
+| `q` `esc` `ctrl+c` | quit. `esc` has three rungs, highest-priority first: clear the selection, then clear the search, then quit — each only claims the key when it has something to clear, so a user who never selects anything still quits on the first press |
 
 **Searching.** `/` is vim's `/`. The board does not move — no row hidden, no
 section hidden, nothing reordered, no stack glyph changed — and matches are
