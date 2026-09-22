@@ -125,7 +125,7 @@ type actionTemplateData struct {
 }
 
 var remoteActionFields = []string{"Branch", "Base", "URL", "Author", "Title"}
-var indirectEvaluator = regexp.MustCompile(`(?:^|[\s;&|()])(?:(?:[^\s;&|()]+/)?(?:sh|bash|dash|zsh|ksh)\s+-[[:alpha:]]*c|eval)(?:\s|$)`)
+var indirectEvaluator = regexp.MustCompile(`(?:^|[\s;&|()])(?:(?:[^\s;&|()]+/)?(?:sh|bash|dash|zsh|ksh)(?:\s+-[[:alnum:]_-]+)*\s+-[[:alpha:]]*c[[:alpha:]]*|eval)(?:\s|$)`)
 
 func validateRemoteActionFields(tmpl string) error {
 	for offset := 0; ; {
