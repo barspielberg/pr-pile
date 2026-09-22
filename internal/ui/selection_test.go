@@ -766,3 +766,22 @@ func TestRangeExtendsToTheTopWithG(t *testing.T) {
 		t.Fatalf("selection = %v, want every PR -- g must extend the range", got)
 	}
 }
+
+// The footer promises what `y` will actually copy. A PR still in the map but no
+// longer on the board is not copied, so it must not be counted.
+func TestFooterCountsOnlyPRsStillOnTheBoard(t *testing.T) {
+	m := pressKey(selectBoard(t), " ") // PR 1
+	m.cursor = m.rowSlot(1)
+	m = pressKey(m, " ") // PR 2
+
+	m.board.Refetch()
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 2, Title: "second", URL: "https://x/2"}}})
+	m.board.Apply(board.Result{Index: 1})
+
+	if n := len(m.selection); n != 2 {
+		t.Fatalf("precondition: map holds %d, want the dropped PR still in it", n)
+	}
+	if got := stripANSI(m.footer("")); !strings.Contains(got, "y copy 1") {
+		t.Fatalf("footer = %q, want it to count only what y would copy", got)
+	}
+}

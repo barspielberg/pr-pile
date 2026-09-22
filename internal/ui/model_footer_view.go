@@ -105,13 +105,18 @@ func (m Model) cursorSection() (name string, pos, total int) {
 
 func (m Model) footer(spin string) string {
 	left := "  j/k move · l/h section · enter open · d detail · y copy · / search · ? help · q quit"
+	// Counted the way the actions count: selectedPRs filters to PRs still on
+	// the board, while the map keeps any that dropped off between frames.
+	// len(m.selection) would promise "y copy 2" and copy one -- and would show
+	// the legend at all for a selection that has entirely left the board.
+	picked := len(m.selectedPRs())
 	switch {
-	case m.ranging || len(m.selection) > 0:
+	case m.ranging || picked > 0:
 		// A selection is a mode the board is holding, so the footer has to say
 		// so and say how to leave. The count is the part that matters: it is
 		// the only confirmation that `v` picked up what the user thinks it did
 		// before they press `y`.
-		left = fmt.Sprintf("  space mark · v range · y copy %d · esc clear", len(m.selection))
+		left = fmt.Sprintf("  space mark · v range · y copy %d · esc clear", picked)
 	case m.searching:
 		left = "  ctrl+n/p next · enter keep · esc cancel"
 	case m.query != "":
