@@ -91,7 +91,6 @@ type detailMsg struct {
 type tickMsg struct{ seq uint64 }
 type spinMsg time.Time
 type refreshMsg struct{}
-type statusMsg string
 type asyncStatusMsg struct {
 	seq  uint64
 	text string

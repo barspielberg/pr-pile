@@ -66,12 +66,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case statusMsg:
-		m.statusSeq++
-		m.status = string(msg)
-		m.clearSeq = 0
-		return m, nil
-
 	case asyncStatusMsg:
 		if msg.seq != m.statusSeq {
 			return m, nil
@@ -112,6 +106,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+func (m Model) setStatus(text string) Model {
+	m.statusSeq++
+	m.status = text
+	m.clearSeq = 0
+	return m
 }
 
 func (m Model) refresh() (tea.Model, tea.Cmd) {

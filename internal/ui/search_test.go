@@ -1221,8 +1221,8 @@ func TestNWrapsAtTheEnds(t *testing.T) {
 		t.Errorf("n at the end landed on %d, want the first match at slot %d",
 			m.cursor, matches[0])
 	}
-	if got := runCmd(t, cmd); got != statusMsg("search hit BOTTOM, continuing at TOP") {
-		t.Errorf("n did not announce the wrap, got %v", got)
+	if cmd != nil || m.status != "search hit BOTTOM, continuing at TOP" {
+		t.Errorf("n did not announce the wrap, status=%q cmd=%v", m.status, cmd)
 	}
 
 	next, cmd = m.handleKey(runeKey('N'))
@@ -1231,8 +1231,8 @@ func TestNWrapsAtTheEnds(t *testing.T) {
 		t.Errorf("N at the top landed on %d, want slot %d",
 			m.cursor, matches[len(matches)-1])
 	}
-	if got := runCmd(t, cmd); got != statusMsg("search hit TOP, continuing at BOTTOM") {
-		t.Errorf("N did not announce the wrap, got %v", got)
+	if cmd != nil || m.status != "search hit TOP, continuing at BOTTOM" {
+		t.Errorf("N did not announce the wrap, status=%q cmd=%v", m.status, cmd)
 	}
 }
 
