@@ -22,6 +22,15 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 	for _, a := range m.cfg.Actions {
 		if a.Key == key && strings.TrimSpace(a.Run) != "" &&
 			a.Multi && len(prs) >= confirmThreshold {
+			// Refuse here rather than after the answer: runAction would turn
+			// the confirmed `y` into "still running" with the prompt already
+			// gone, losing the action the user just agreed to. A prompt that
+			// appears is one that will be honoured.
+			if m.running != "" {
+				m.status = m.running + " still running"
+				m.clearSeq = 0
+				return m, nil, true
+			}
 			m.confirmOpen, m.confirmAction, m.confirmVerb = prs, key, a.Name
 			return m, nil, true
 		}
