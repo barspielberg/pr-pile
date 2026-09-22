@@ -819,6 +819,7 @@ limit above the number of PRs they match.
 | `name` | string | shown in the `?` overlay and as the status message |
 | `run` | string | Go template, run via `sh -c` |
 | `mode` | string | `background` (default) or `suspend` — suspend hands the terminal over for a TUI command and repaints on exit. Background actions report their lifecycle on the status line (§4.2) and are reaped rather than left as zombies. |
+| `multi` | bool | off by default; when on, the action runs **once** for the whole selection and takes the plural fields (§4.4) |
 
 Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 `{{.Base}}` `{{.URL}}` `{{.Author}}` `{{.Title}}`.
@@ -828,6 +829,32 @@ appear as standalone, unquoted shell words; quoted, embedded,
 command-substitution, and heredoc contexts are rejected. Configured `Repo` and
 `RepoPath`, the surrounding command, and numeric `.Number` remain trusted shell
 text.
+
+### 4.4 `multi` actions, and why opting in is required
+
+An action that does not set `multi` **refuses** when several PRs are selected:
+`worktree: one PR at a time`, and no process starts.
+
+The alternative — running on whichever PR came first — is the failure that takes
+longest to notice, because it looks like it worked. And the singular fields
+cannot quietly start meaning a list: they shipped before selections existed, so
+changing what `{{.Number}}` expands to would break every config already written.
+lazygit is stuck on exactly this problem with `{{.SelectedCommit}}`, having
+shipped the singular form first.
+
+A `multi: true` action gets the plural fields instead — `{{.Numbers}}`,
+`{{.URLs}}`, `{{.Branches}}`, `{{.Bases}}`, `{{.Authors}}`, `{{.Titles}}` —
+space-joined, each element quoted exactly as its singular counterpart is. Mixing
+singular and plural in one template is rejected rather than rendered as an empty
+string. With nothing selected, the cursor's row is passed as a list of one, so a
+`multi` template never needs a special case for the single-PR path.
+
+**The plural fields carry the same attacker-controlled data as the singular
+ones** — a branch name and a PR title are written by whoever opened the PR — so
+they go through the same validation and the same quoting. A list is a bigger
+surface, not a safer one; `TestInjectionFromASecondSelectedPR` exists because a
+validator that only checked the first element would pass every other test in the
+file.
 
 **No action is bound by default.** Actions are shell templates and the tool
 knows nothing about worktrees, editors or multiplexers, so a default that
