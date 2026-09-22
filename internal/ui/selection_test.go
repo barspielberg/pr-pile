@@ -657,3 +657,46 @@ func TestOpenReportsTheCount(t *testing.T) {
 		t.Fatalf("status = %q, want \"opened 2 PRs\"", m.status)
 	}
 }
+
+// The overlays own their keys; a selection sitting behind them must not change.
+func TestSelectionIsIgnoredInsideOverlays(t *testing.T) {
+	for _, overlay := range []string{"?", "d"} {
+		t.Run(overlay, func(t *testing.T) {
+			m := pressKey(selectBoard(t), " ")
+			before := selectedNumbers(m)
+			m = pressKey(m, overlay)
+			m = pressKey(m, " ")
+			m = pressKey(m, "v")
+			if got := selectedNumbers(m); !equalInts(got, before) {
+				t.Fatalf("selection = %v inside %s, want %v unchanged", got, overlay, before)
+			}
+		})
+	}
+}
+
+// From the plan's "not doing": a board that reloads into a selection made two
+// minutes ago is the stale-selection failure. Pinned so it is not added back.
+func TestSelectionClearedOnRefresh(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if got := selectedNumbers(next.(Model)); len(got) != 0 {
+		t.Fatalf("selection = %v, want cleared by a refresh", got)
+	}
+}
+
+func TestSearchAndSelectionCoexist(t *testing.T) {
+	m := selectBoard(t)
+	m.query = "second"
+	m = pressKey(m, " ")
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "•") {
+		t.Fatal("the selection mark should survive a live query:\n" + out)
+	}
+	if len(m.matchIndexes()) == 0 {
+		t.Fatal("the query should still be matching rows")
+	}
+	if got := selectedNumbers(m); !equalInts(got, []int{1}) {
+		t.Fatalf("selection = %v, want [1] -- a query must not disturb it", got)
+	}
+}
