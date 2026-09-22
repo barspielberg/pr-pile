@@ -360,3 +360,91 @@ func TestMultiActionConfirmUsesTheCapturedSet(t *testing.T) {
 		t.Fatalf("ran on %q, want \"1 2 3\" -- the captured set", got)
 	}
 }
+
+// A prompt that appears is a prompt that will be honoured. Raising one while an
+// action is already in flight meant the confirmed `y` hit runAction's
+// still-running guard with the prompt already cleared -- the action the user
+// explicitly agreed to never ran, and they had to raise the prompt again.
+func TestMultiActionRefusesWhileOneRunsInsteadOfPrompting(t *testing.T) {
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "runs")
+	m := multiBoard(t, "echo x >> "+counter, true)
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "j"), "j") // three PRs
+
+	m.running = "other"
+
+	next, _, ok := m.actionFor("x")
+	if !ok {
+		t.Fatal("the action key should have matched")
+	}
+	if len(next.confirmOpen) != 0 {
+		t.Fatalf("confirmOpen = %d, want no prompt while an action is in flight", len(next.confirmOpen))
+	}
+	if !strings.Contains(next.status, "still running") {
+		t.Fatalf("status = %q, want the refusal", next.status)
+	}
+}
+
+// The end-to-end shape of the same bug: raise the prompt, answer it, and the
+// action must either have run or still be offered -- never silently dropped.
+func TestConfirmedMultiActionIsNeverSilentlyDropped(t *testing.T) {
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "runs")
+	m := multiBoard(t, "echo x >> "+counter, true)
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "j"), "j")
+
+	// Busy when the key is pressed AND still busy when the answer arrives --
+	// the sequence where confirming used to drop the action on the floor.
+	m.running = "other"
+	m = pressAction(t, m, "x")
+
+	if len(m.confirmOpen) > 0 {
+		m = pressAction(t, m, "y") // answering must not silently lose it
+		if _, err := os.Stat(counter); err != nil {
+			t.Fatal("the confirmed action never ran: the prompt was cleared and runAction refused")
+		}
+		return
+	}
+
+	// Refused up front instead. The selection has to survive so the retry is
+	// one keypress once the other action finishes.
+	if !strings.Contains(m.status, "still running") {
+		t.Fatalf("status = %q, want a refusal when no prompt was raised", m.status)
+	}
+	if got := selectedNumbers(m); len(got) != 3 {
+		t.Fatalf("selection = %v, want it kept for the retry", got)
+	}
+	m.running = ""
+	m = pressAction(t, m, "x")
+	if len(m.confirmOpen) == 0 {
+		t.Fatal("no prompt on retry -- the action is unreachable")
+	}
+	m = pressAction(t, m, "y")
+	if _, err := os.Stat(counter); err != nil {
+		t.Fatalf("the confirmed action never ran: %v", err)
+	}
+}
+
+// The overlay is what a user reads mid-session, so a multi action has to
+// advertise the prompt there -- otherwise the guard arrives unannounced.
+func TestHelpOverlayAdvertisesTheMultiPrompt(t *testing.T) {
+	cfg := testCfg()
+	cfg.Actions = []config.Action{
+		{Key: "b", Name: "browse all", Run: "open {{.URLs}}", Multi: true},
+		{Key: "w", Name: "worktree", Run: "true"},
+	}
+	m := New(cfg, nil)
+	m.width, m.height = 120, 40
+	m.showHelp = true
+	view := stripANSI(m.View())
+
+	if !strings.Contains(view, "browse all ( whole selection; 3+ asks first )") {
+		t.Fatalf("multi action does not advertise the prompt:\n%s", view)
+	}
+	// A plain action keeps its bare row.
+	if strings.Contains(view, "worktree (") {
+		t.Fatalf("a non-multi action should carry no hint:\n%s", view)
+	}
+}

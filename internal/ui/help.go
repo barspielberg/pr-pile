@@ -69,7 +69,11 @@ func (m Model) helpBlocks() []helpBlock {
 	}}
 	for _, a := range m.cfg.Actions {
 		if a.Run != "" {
-			keys.rows = append(keys.rows, row(a.Key, a.Name))
+			name := a.Name
+			if a.Multi {
+				name += " ( whole selection; 3+ asks first )"
+			}
+			keys.rows = append(keys.rows, row(a.Key, name))
 		}
 	}
 
