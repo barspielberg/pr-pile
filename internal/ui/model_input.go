@@ -98,7 +98,11 @@ func (m Model) openSelected() (Model, tea.Cmd) {
 		// Ask first, and open NOTHING until the answer comes back. The prompt
 		// is the whole safeguard; opening optimistically behind it would make
 		// it decoration.
-		m.confirmOpen = len(prs)
+		//
+		// The set is captured here, not re-read when the answer comes: the
+		// board refetches on a timer and a refresh landing mid-prompt clears
+		// the selection underneath it.
+		m.confirmOpen = prs
 		return m, nil
 	}
 	return m.doOpen(prs)
@@ -124,7 +128,7 @@ func (m Model) doOpen(prs []github.PR) (Model, tea.Cmd) {
 	}
 	next := m
 	next.clearSelection()
-	next.confirmOpen = 0
+	next.confirmOpen = nil
 	return next, func() tea.Msg {
 		for _, url := range urls {
 			if err := openURL(url); err != nil {
@@ -157,7 +161,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.searching {
 		return m.handleSearchKey(msg)
 	}
-	if m.confirmOpen > 0 {
+	if len(m.confirmOpen) > 0 {
 		return m.handleConfirmKey(msg)
 	}
 	switch msg.String() {
@@ -383,12 +387,13 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "y", "enter":
-		m.confirmOpen = 0
-		return m.doOpen(m.actionPRs())
+		prs := m.confirmOpen
+		m.confirmOpen = nil
+		return m.doOpen(prs)
 	default:
 		// The selection survives a cancel, so the user can adjust it rather
 		// than rebuild it.
-		m.confirmOpen = 0
+		m.confirmOpen = nil
 		return m, nil
 	}
 }
