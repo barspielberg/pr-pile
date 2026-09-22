@@ -91,8 +91,6 @@ func TestActionReportsRunningThenSuccess(t *testing.T) {
 		t.Fatal("w did not match the configured action")
 	}
 	m = next
-	started, _ := m.Update(actionStartMsg{name: "worktree", seq: m.runSeq})
-	m = started.(Model)
 
 	if m.running != "worktree" {
 		t.Fatalf("running = %q, want the action name", m.running)
@@ -139,8 +137,7 @@ func TestSucceededActionClearsAndFailedActionPersists(t *testing.T) {
 func TestSecondPressWhileRunningIsRefused(t *testing.T) {
 	m := actionBoard(t, "true")
 	next, _, _ := m.actionFor("w")
-	started, _ := next.Update(actionStartMsg{name: "worktree", seq: next.runSeq})
-	m = started.(Model)
+	m = next
 	seq := m.runSeq
 
 	again, cmd, ok := m.actionFor("w")
@@ -183,8 +180,7 @@ func TestStaleResultIsIgnored(t *testing.T) {
 func TestRefreshDropsTheRunningIndicator(t *testing.T) {
 	m := actionBoard(t, "true")
 	next, _, _ := m.actionFor("w")
-	started, _ := next.Update(actionStartMsg{name: "worktree", seq: next.runSeq})
-	m = started.(Model)
+	m = next
 
 	refreshed, _ := m.refresh()
 	if r := refreshed.(Model).running; r != "" {

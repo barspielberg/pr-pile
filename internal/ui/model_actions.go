@@ -42,14 +42,13 @@ func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
 				return statusMsg("")
 			}), true
 		}
-		// Two messages, not one: the footer has to say "running" the moment
-		// the key is pressed, and the process may take seconds to answer. The
-		// wait happens inside a tea.Cmd so the board stays responsive.
+		m.running, m.status = a.Name, ""
 		seq := m.runSeq
-		return m, tea.Batch(
-			func() tea.Msg { return actionStartMsg{name: a.Name, seq: seq} },
-			runAction(cmd, a.Name, seq),
-		), true
+		work := runAction(cmd, a.Name, seq)
+		if m.fetching || len(m.inflight) > 0 {
+			return m, work, true
+		}
+		return m, tea.Batch(work, spinTick()), true
 	}
 	return m, nil, false
 }
@@ -100,11 +99,15 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	}
 	var b strings.Builder
 	err = t.Execute(&b, map[string]any{
-		"Number": pr.Number, "Repo": m.cfg.Repo, "RepoPath": m.cfg.RepoPath,
-		"Branch": pr.HeadRefName, "Base": pr.BaseRefName,
-		"URL": pr.URL, "Author": pr.Author, "Title": pr.Title,
+		"Number": pr.Number, "Repo": shellQuote(m.cfg.Repo), "RepoPath": shellQuote(m.cfg.RepoPath),
+		"Branch": shellQuote(pr.HeadRefName), "Base": shellQuote(pr.BaseRefName),
+		"URL": shellQuote(pr.URL), "Author": shellQuote(pr.Author), "Title": shellQuote(pr.Title),
 	})
 	return b.String(), err
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 type tailWriter struct {
