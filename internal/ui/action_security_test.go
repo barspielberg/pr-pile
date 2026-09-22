@@ -107,7 +107,10 @@ func TestRemoteTemplateFieldsRejectUnsafeShellContexts(t *testing.T) {
 		`sh -e -c {{.Title}}`,
 		`/bin/bash -ec {{.Title}}`,
 		`bash --noprofile -c {{.Title}}`,
+		`sh -o errexit -c {{.Title}}`,
 		`eval {{.Title}}`,
+		`"eval" {{.Title}}`,
+		`\eval {{.Title}}`,
 	} {
 		t.Run(strconv.Quote(tmpl), func(t *testing.T) {
 			m := New(testCfg(), nil)
