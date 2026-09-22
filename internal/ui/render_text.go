@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/barspielberg/pr-pile/internal/github"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"time"
 	"unicode"
@@ -155,13 +156,18 @@ func clipLeft(s string, w int) string {
 	return ""
 }
 
+// terminalText makes remote text safe to draw. Escape sequences go first and
+// whole: neutralising just the ESC rune would leave the payload behind, so a
+// title carrying "\x1b[31m" would render as a literal "[31m" and spend the
+// column's width on it. What survives is real text, and any control rune left
+// in it becomes visible rather than reaching the terminal.
 func terminalText(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return '\uFFFD'
 		}
 		return r
-	}, s)
+	}, ansi.Strip(s))
 }
 
 func pad(s string, w int) string {
