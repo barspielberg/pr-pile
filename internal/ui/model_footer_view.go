@@ -122,6 +122,12 @@ func (m Model) footer(spin string) string {
 	if m.status != "" {
 		left = "  " + m.status
 	}
+	// The confirm outranks the status and the selection legend: it is a
+	// question the board is waiting on, and nothing else on the line matters
+	// until it is answered.
+	if m.confirmOpen > 0 {
+		left = fmt.Sprintf("  open %d PRs in the browser?  y / enter to confirm · any other key cancels", m.confirmOpen)
+	}
 	// A running action outranks a status: the status line is history and this
 	// is happening now. The glyph is the board's own spinner rather than a
 	// static marker -- the tick is kept alive for the duration (see the

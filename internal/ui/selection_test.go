@@ -519,3 +519,141 @@ func TestSelectAllRowsThenCopy(t *testing.T) {
 		t.Fatalf("copied:\n%q\nwant:\n%q", *got, want)
 	}
 }
+
+// openCapture swaps the browser shell-out and returns the urls it was asked to
+// open, in order.
+func openCapture(t *testing.T, fail error) *[]string {
+	t.Helper()
+	var got []string
+	prev := openURL
+	openURL = func(u string) error {
+		got = append(got, u)
+		return fail
+	}
+	t.Cleanup(func() { openURL = prev })
+	return &got
+}
+
+func pressEnter(t *testing.T, m Model) Model {
+	t.Helper()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return drain(t, next.(Model), cmd)
+}
+
+func TestOpenOneSelectedDoesNotAsk(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressEnter(t, pressKey(selectBoard(t), " "))
+	if m.confirmOpen != 0 {
+		t.Fatal("one PR should open without a prompt")
+	}
+	if len(*got) != 1 {
+		t.Fatalf("opened %v, want exactly one url", *got)
+	}
+}
+
+// Two tabs is a normal thing to want.
+func TestOpenTwoSelectedDoesNotAsk(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	m = pressEnter(t, m)
+	if m.confirmOpen != 0 {
+		t.Fatal("two PRs should open without a prompt")
+	}
+	if len(*got) != 2 {
+		t.Fatalf("opened %v, want two urls", *got)
+	}
+}
+
+// The prompt is the safeguard, so nothing may open behind it.
+func TestOpenThreeSelectedAsks(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+	if m.confirmOpen != 3 {
+		t.Fatalf("confirmOpen = %d, want 3", m.confirmOpen)
+	}
+	if len(*got) != 0 {
+		t.Fatalf("opened %v before the prompt was answered -- the prompt must gate the action", *got)
+	}
+	if !strings.Contains(stripANSI(m.View()), "open 3 PRs") {
+		t.Fatal("the prompt should be on screen:\n" + stripANSI(m.View()))
+	}
+}
+
+func TestOpenConfirmAcceptOpensAll(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+	m = pressEnter(t, m) // answer it
+	if len(*got) != 3 {
+		t.Fatalf("opened %v, want all three", *got)
+	}
+	if m.confirmOpen != 0 {
+		t.Fatal("the prompt should be gone once answered")
+	}
+}
+
+func TestOpenConfirmRejectOpensNothing(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if len(*got) != 0 {
+		t.Fatalf("opened %v after cancelling", *got)
+	}
+	if m.confirmOpen != 0 {
+		t.Fatal("cancel should dismiss the prompt")
+	}
+	// The selection survives, so the user can adjust rather than rebuild.
+	if n := selectedNumbers(m); !equalInts(n, []int{1, 2, 3}) {
+		t.Fatalf("selection = %v, want it kept after a cancel", n)
+	}
+}
+
+// A stray key must not be read as consent.
+func TestOpenConfirmUnrelatedKeyCancels(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+	m = pressKey(m, "j") // aimed at the board, not the prompt
+	if len(*got) != 0 {
+		t.Fatalf("opened %v -- only y/enter may confirm", *got)
+	}
+}
+
+func TestOpenWithNothingSelectedNeverAsks(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressEnter(t, selectBoard(t))
+	if m.confirmOpen != 0 {
+		t.Fatal("the plain single-PR path must be untouched")
+	}
+	if len(*got) != 1 || (*got)[0] != "https://x/1" {
+		t.Fatalf("opened %v, want the cursor row only", *got)
+	}
+}
+
+func TestOpenClearsTheSelectionAfterOpening(t *testing.T) {
+	openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	m = pressEnter(t, m)
+	if n := selectedNumbers(m); len(n) != 0 {
+		t.Fatalf("selection = %v, want cleared after opening", n)
+	}
+}
+
+func TestOpenReportsTheCount(t *testing.T) {
+	openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	m = pressEnter(t, m)
+	if m.status != "opened 2 PRs" {
+		t.Fatalf("status = %q, want \"opened 2 PRs\"", m.status)
+	}
+}

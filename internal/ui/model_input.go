@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"github.com/barspielberg/pr-pile/internal/browser"
+	"github.com/barspielberg/pr-pile/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
 	"os/exec"
 	"strings"
@@ -73,19 +74,64 @@ func (m Model) copySelected() (Model, tea.Cmd) {
 	}
 }
 
+// openURL is browser.Open behind a var, so a test can watch what would be
+// opened without taking over the developer's screen. Same trade as
+// copyToClipboard.
+var openURL = browser.Open
+
+// confirmThreshold is where opening a selection starts asking first.
+//
+// Two tabs is a normal thing to want and prompting for it would be friction on
+// the common case. Three is where a mistyped key stops being recoverable: esc
+// closes a prompt, but nothing closes the tabs an accidental `enter` on a
+// forty-row board would spray across the browser.
+const confirmThreshold = 3
+
+// openSelected opens every selected PR, or the row under the cursor when
+// nothing is selected.
 func (m Model) openSelected() (Model, tea.Cmd) {
-	pr, ok := m.selected()
-	if !ok {
+	prs := m.actionPRs()
+	if len(prs) == 0 {
 		return m, nil
 	}
-	url := pr.URL
+	if len(prs) >= confirmThreshold {
+		// Ask first, and open NOTHING until the answer comes back. The prompt
+		// is the whole safeguard; opening optimistically behind it would make
+		// it decoration.
+		m.confirmOpen = len(prs)
+		return m, nil
+	}
+	return m.doOpen(prs)
+}
+
+// doOpen fires the opens and clears the selection. Split out so the confirm
+// path and the straight-through path cannot drift.
+func (m Model) doOpen(prs []github.PR) (Model, tea.Cmd) {
+	var urls []string
+	for _, pr := range prs {
+		if pr.URL != "" {
+			urls = append(urls, pr.URL)
+		}
+	}
+	if len(urls) == 0 {
+		return m.setStatus("no URL for this PR"), nil
+	}
 	m.statusSeq++
 	seq := m.statusSeq
-	return m, func() tea.Msg {
-		if err := browser.Open(url); err != nil {
-			return asyncStatusMsg{seq: seq, text: "open failed: " + err.Error()}
+	text := ""
+	if len(urls) > 1 {
+		text = fmt.Sprintf("opened %d PRs", len(urls))
+	}
+	next := m
+	next.clearSelection()
+	next.confirmOpen = 0
+	return next, func() tea.Msg {
+		for _, url := range urls {
+			if err := openURL(url); err != nil {
+				return asyncStatusMsg{seq: seq, text: "open failed: " + err.Error()}
+			}
 		}
-		return asyncStatusMsg{seq: seq}
+		return asyncStatusMsg{seq: seq, text: text}
 	}
 }
 
@@ -110,6 +156,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.searching {
 		return m.handleSearchKey(msg)
+	}
+	if m.confirmOpen > 0 {
+		return m.handleConfirmKey(msg)
 	}
 	switch msg.String() {
 	case "esc":
@@ -321,3 +370,25 @@ func (m Model) closeHelp() Model {
 func fullPage(height int) int { return max(1, height-2) }
 
 func halfPage(height int) int { return max(1, (height-2)/2) }
+
+// handleConfirmKey answers the open-this-many prompt. `y` and `enter` go ahead;
+// anything else does not.
+//
+// The default is NO: every key that is not an explicit yes cancels, rather than
+// only esc cancelling and stray keys falling through to the board. A prompt
+// guarding an unrecoverable action should not be dismissable by a keypress
+// aimed at something else.
+func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "y", "enter":
+		m.confirmOpen = 0
+		return m.doOpen(m.actionPRs())
+	default:
+		// The selection survives a cancel, so the user can adjust it rather
+		// than rebuild it.
+		m.confirmOpen = 0
+		return m, nil
+	}
+}
