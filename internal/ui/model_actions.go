@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -125,7 +124,6 @@ type actionTemplateData struct {
 }
 
 var remoteActionFields = []string{"Branch", "Base", "URL", "Author", "Title"}
-var indirectEvaluator = regexp.MustCompile(`(?:^|[\s;&|()])(?:(?:[^\s;&|()]+/)?(?:sh|bash|dash|zsh|ksh)(?:\s+-[[:alnum:]_-]+)*\s+-[[:alpha:]]*c[[:alpha:]]*|eval)(?:\s|$)`)
 
 func validateRemoteActionFields(tmpl string) error {
 	for offset := 0; ; {
@@ -146,13 +144,37 @@ func validateRemoteActionFields(tmpl string) error {
 				continue
 			}
 			if action != token || !standaloneActionField(tmpl, start, end+2) ||
-				strings.Contains(tmpl, "<<") || indirectEvaluator.MatchString(tmpl) ||
+				strings.Contains(tmpl, "<<") || usesIndirectEvaluator(tmpl) ||
 				!topLevelShellContext(tmpl[:start]) {
 				return fmt.Errorf("remote field %s must be an unquoted standalone placeholder", token)
 			}
 		}
 		offset = end + 2
 	}
+}
+
+func usesIndirectEvaluator(tmpl string) bool {
+	normalized := strings.NewReplacer("'", "", `"`, "", `\`, "").Replace(tmpl)
+	words := strings.FieldsFunc(normalized, func(r rune) bool {
+		return strings.ContainsRune(" \t\r\n;&|()", r)
+	})
+	for i, word := range words {
+		if slash := strings.LastIndexByte(word, '/'); slash >= 0 {
+			word = word[slash+1:]
+		}
+		if word == "eval" {
+			return true
+		}
+		if word != "sh" && word != "bash" && word != "dash" && word != "zsh" && word != "ksh" {
+			continue
+		}
+		for _, option := range words[i+1:] {
+			if strings.HasPrefix(option, "-") && strings.Contains(strings.TrimLeft(option, "-"), "c") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func standaloneActionField(tmpl string, start, end int) bool {
