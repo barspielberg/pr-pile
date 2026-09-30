@@ -73,7 +73,7 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | No CODEOWNERS path matching | GitHub already turns CODEOWNERS into team review requests, so `team-review-requested:` covers it for free. No per-PR file-list fetch. |
 | Actions are shell templates | The tool knows nothing about worktrees, editors or multiplexers; it renders a template and runs what it gets. |
 | `y` copies via `pbcopy`, not a clipboard library | The same trade `browser.Open` already makes with `open`: a pipe to a binary that ships with the OS, against a dependency and its transitive tree. `bubbles/textinput` was turned down partly *because* it drags in a clipboard shell-out for a paste binding we do not want — the objection was to the dependency carrying it, not to the shell-out, so doing it directly costs nothing new. It is a `var` so tests never touch the real clipboard. |
-| Arc tab reuse built into `open` | Plain `open <url>` always spawns a new Arc tab, so opening the same PR twice buries the window in duplicates. Non-Arc browsers fall through to `open`. |
+| Plain `open`, no tab reuse | Finding an existing tab needs per-browser scripting, and Firefox exposes none. A dedupe extension in the browser solves it for every tool, not just this one. |
 
 ---
 
@@ -1021,7 +1021,7 @@ output is piped, so test the resolved path rather than the exit code.
 | `j` `k` / `↓` `↑` | move |
 | `l` `h` / `→` `←` | next / previous section (empty sections skipped; `h` goes to the start of the current section first, then back) |
 | `g` `G` / home end | top / bottom. Documented as `g` rather than `gg`: bare `g` is the whole move, so advertising a chord that is one key repeated read as confusing. Typing `gg` still works — top is its own fixed point, so the second press lands in the same place, and there is no pending-key mode to wedge |
-| `enter` `o` | open in browser (reuses an existing Arc tab). Three or more at once asks first (§4.5) |
+| `enter` `o` | open in the default browser. Three or more at once asks first (§4.5) |
 | `y` | copy the url of every selected PR, or of the row under the cursor when nothing is selected; several are joined one per line |
 | `space` | select or deselect the PR under the cursor |
 | `v` | select a contiguous range from here; `v` again leaves the mode |
