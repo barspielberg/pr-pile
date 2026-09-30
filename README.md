@@ -21,9 +21,14 @@ make check     # build, test, vet
 make install   # check, then put this checkout on PATH as pile
 ```
 
-Currently requires macOS: browser integration uses `open`/`osascript`, and
+Currently requires macOS: browser integration uses `open`, and
 clipboard integration uses `pbcopy`. It also needs `gh` installed and logged in
 (used only for the token) and a Nerd Font for the glyphs.
+
+`enter` opens a new tab every time, so opening the same PR twice leaves two
+tabs. To avoid that, install a tab dedupe extension in your browser (for
+example "Don't open duplicate tabs" in Firefox), which focuses the tab you
+already have instead.
 
 ## How it works
 
@@ -186,7 +191,7 @@ authors.
 | `l` / `h` | next / previous section (also `→` / `←`) |
 | `g` / `G` | top / bottom (also `home` / `end`) |
 | `ctrl+d` / `ctrl+u` | down / up half a page (`pgdn` / `pgup` move a full page) |
-| `enter` / `o` | open in browser (reuses an existing Arc tab) |
+| `enter` / `o` | open in the default browser |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus conflict, unresolved comments, author, reviewer, size and branches |
 | `y` | copy the PR url to the clipboard (`pbcopy`) |
 | `/` | search |
