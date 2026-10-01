@@ -1023,6 +1023,7 @@ output is piped, so test the resolved path rather than the exit code.
 | `g` `G` / home end | top / bottom. Documented as `g` rather than `gg`: bare `g` is the whole move, so advertising a chord that is one key repeated read as confusing. Typing `gg` still works — top is its own fixed point, so the second press lands in the same place, and there is no pending-key mode to wedge |
 | `enter` `o` | open in the default browser. Three or more at once asks first (§4.5) |
 | `y` | copy the url of every selected PR, or of the row under the cursor when nothing is selected; several are joined one per line |
+| `Y` | copy menu, after lazygit's: number, title, url, branch, author login or a markdown link, each on its own letter with a preview. It acts on the same PRs as `y`, one value per line; any key that is not a field or `j`/`k`/`enter` closes it |
 | `space` | select or deselect the PR under the cursor |
 | `v` | select a contiguous range from here; `v` again leaves the mode |
 | `r` | reload |
