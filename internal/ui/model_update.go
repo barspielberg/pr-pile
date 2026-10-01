@@ -141,6 +141,9 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// The prompt goes with it. A question about a selection that no longer
 	// exists has nothing left to answer, and leaving it up would mean the next
 	// keypress is eaten by a confirm the user can no longer reason about.
+	// The copy menu stays. It holds its own PRs, and closing it under a
+	// timed refresh would hand the next letter, meant for the menu, to the
+	// board -- where `a` or `m` may be a configured action.
 	m.clearConfirm()
 	// A refresh does not kill the process, but the board it was launched from
 	// is gone; keeping its name on the footer would attribute the fetch

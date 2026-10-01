@@ -271,7 +271,7 @@ var reservedActionKeys = map[string]bool{
 	// the builtin wins -- and the guide's rule is that a taken key is refused
 	// loudly rather than silently ignored.
 	"v": true, " ": true, "space": true,
-	"enter": true, "o": true, "r": true, "d": true, "y": true, "?": true,
+	"enter": true, "o": true, "r": true, "d": true, "y": true, "Y": true, "?": true,
 	"j": true, "down": true, "k": true, "up": true, "l": true, "right": true,
 	"h": true, "left": true, "g": true, "home": true, "G": true, "end": true,
 	"ctrl+d": true, "ctrl+u": true, "pgdown": true, "pgup": true,

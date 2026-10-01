@@ -50,6 +50,11 @@ type Model struct {
 	confirmAction string
 	confirmVerb   string
 
+	// The open `Y` menu: the PRs it copies from (nil when closed) and the
+	// highlighted field.
+	copyMenu   []github.PR
+	copyCursor int
+
 	searching bool
 	query     string
 	// searchOrigin is where the cursor was when / was pressed, so esc can put

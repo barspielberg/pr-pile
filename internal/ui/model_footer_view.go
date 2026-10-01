@@ -116,7 +116,7 @@ func (m Model) footer(spin string) string {
 		// so and say how to leave. The count is the part that matters: it is
 		// the only confirmation that `v` picked up what the user thinks it did
 		// before they press `y`.
-		left = fmt.Sprintf("  space mark · v range · y copy %d · esc clear", picked)
+		left = fmt.Sprintf("  space mark · v range · y copy %d · Y copy menu · esc clear", picked)
 	case m.searching:
 		left = "  ctrl+n/p next · enter keep · esc cancel"
 	case m.query != "":
@@ -130,6 +130,9 @@ func (m Model) footer(spin string) string {
 	// The confirm outranks the status and the selection legend: it is a
 	// question the board is waiting on, and nothing else on the line matters
 	// until it is answered.
+	if len(m.copyMenu) > 0 {
+		left = "  press a letter to copy · j/k move · enter copy · any other key closes"
+	}
 	if len(m.confirmOpen) > 0 {
 		what := "open %d PRs in the browser?"
 		if m.confirmVerb != "" {
@@ -217,6 +220,9 @@ func (m Model) View() string {
 		for len(lines) < avail {
 			lines = append(lines, "")
 		}
+	}
+	if len(m.copyMenu) > 0 {
+		lines = m.overlayCopyMenu(lines)
 	}
 	return strings.Join(lines, "\n") + "\n" + foot
 }
