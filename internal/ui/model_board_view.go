@@ -93,17 +93,13 @@ const scrollOff = 2
 // world by 0 to 3 lines depending on what happened to be nearby, which is what
 // read as jumping. Now every line on the board is addressable -- gate names
 // live in the `d` overlay and the section name lives in its own header row the
-// cursor can sit on -- so the clamp below is the whole of it. See
+// cursor can sit on -- so the clamp in scrollTop is the whole of it. See
 // docs/uniform-rows.md.
-//
-// Clamping both edges rather than pinning one means the board does not move at
-// all while the cursor crosses the middle, which is the conventional behaviour
-// (vim's scrolloff, less, fzf).
 //
 // It also reports the index of the top visible line, which the top row needs to
 // name the section of the row you are actually looking at -- not knowable
 // before the slice is chosen.
-func window(lines []string, cursorRow, height int, rowStarts []int) ([]string, int) {
+func window(lines []string, cursorRow, height int, rowStarts []int, top int) ([]string, int) {
 	if height <= 0 || len(lines) <= height {
 		return lines, 0
 	}
@@ -113,27 +109,41 @@ func window(lines []string, cursorRow, height int, rowStarts []int) ([]string, i
 	if cursorRow >= len(rowStarts) {
 		cursorRow = len(rowStarts) - 1
 	}
-	cur := rowStarts[cursorRow]
+	start := scrollTop(len(lines), rowStarts[cursorRow], height, top)
+	return lines[start : start+height], start
+}
 
+// scrollTop moves the previous top line just far enough that the cursor line
+// cur keeps scrollOff lines of context, in a body of n lines shown height at a
+// time.
+//
+// The previous top is what makes the board hold still while the cursor crosses
+// the middle (vim's scrolloff, less, fzf). Without it the top was derived from
+// the cursor alone, which pinned the cursor scrollOff lines from the bottom:
+// walking back up from the end scrolled on every keypress instead of waiting
+// for the top edge.
+func scrollTop(n, cur, height, top int) int {
+	if height <= 0 || n <= height {
+		return 0
+	}
 	// The margin has to fit above and below the cursor or the two clamps fight
 	// and the viewport oscillates; a very short pane centres instead.
 	off := scrollOff
 	if 2*off+1 > height {
 		off = (height - 1) / 2
 	}
-
 	// Two bounds on the top line, each shifting by exactly one when the cursor
-	// does. Between them the top is free, so the board holds still through the
-	// middle of the viewport and only moves at the edges.
-	start := cur - (height - 1 - off)
-	if lo := cur - off; start > lo {
-		start = lo
+	// does, so a keypress never scrolls by more than a line.
+	top = min(top, cur-off)
+	top = max(top, cur-(height-1-off))
+	return min(max(top, 0), n-height)
+}
+
+// bodyHeight is how many lines the board gets once the footer, and the search
+// prompt when it is open, have taken theirs.
+func (m Model) bodyHeight() int {
+	if m.searching {
+		return m.height - 2
 	}
-	if last := len(lines) - height; start > last {
-		start = last
-	}
-	if start < 0 {
-		start = 0
-	}
-	return lines[start : start+height], start
+	return m.height - 1
 }

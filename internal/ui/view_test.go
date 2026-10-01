@@ -1193,6 +1193,46 @@ func TestScrollKeepsCursorVisible(t *testing.T) {
 	}
 }
 
+// Walking back up from the end must not scroll until the cursor nears the top
+// edge, and walking down from the start not until it nears the bottom. The top
+// line used to be derived from the cursor alone, which pinned the cursor
+// scrollOff lines from the bottom, so every k from the end scrolled the board.
+func TestBoardHoldsStillUntilTheCursorNearsAnEdge(t *testing.T) {
+	const height = 12
+	m := New(testCfg(), nil)
+	var prs []github.PR
+	for i := 0; i < 30; i++ {
+		prs = append(prs, github.PR{
+			Number: 100 + i, Title: fmt.Sprintf("pr %d", 100+i),
+			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
+		})
+	}
+	m.board.Apply(board.Result{Index: 0, PRs: prs})
+	m.board.Apply(board.Result{Index: 1})
+	m, _ = drive(m, tea.WindowSizeMsg{Width: 120, Height: height}, keyRune('G'))
+	body := height - 1
+
+	for range len(m.slots()) - 1 {
+		before := m.top
+		m, _ = drive(m, keyRune('k'))
+		if line := m.cursor - before; line >= scrollOff && m.top != before {
+			t.Fatalf("k to slot %d (line %d of %d) scrolled the board from %d to %d",
+				m.cursor, line, body, before, m.top)
+		}
+		if m.cursor-m.top < min(scrollOff, m.cursor) {
+			t.Fatalf("k to slot %d left only %d lines above the cursor", m.cursor, m.cursor-m.top)
+		}
+	}
+	for range len(m.slots()) - 1 {
+		before := m.top
+		m, _ = drive(m, keyRune('j'))
+		if line := m.cursor - before; line <= body-1-scrollOff && m.top != before {
+			t.Fatalf("j to slot %d (line %d of %d) scrolled the board from %d to %d",
+				m.cursor, line, body, before, m.top)
+		}
+	}
+}
+
 // The author column costs 4 cells, so a rule that shows one needs FULL to
 // start 4 columns later -- otherwise the title falls below the readable floor
 // that the breakpoint exists to guarantee.
@@ -2329,10 +2369,10 @@ func TestOneKeypressScrollsAtMostOneLineAcrossSectionStates(t *testing.T) {
 							start, stop = len(slotStarts)-1, 0
 						}
 						m.cursor = start
-						_, prev = window(lines, m.cursor, h-1, slotStarts)
+						_, prev = window(lines, m.cursor, h-1, slotStarts, 0)
 						for cur := start; cur != stop; cur += dir {
 							m.cursor = cur + dir
-							_, now := window(lines, m.cursor, h-1, slotStarts)
+							_, now := window(lines, m.cursor, h-1, slotStarts, prev)
 							if d := now - prev; d < -1 || d > 1 {
 								t.Fatalf("%s h=%d: slot %d -> %d scrolled %d lines, want at most 1",
 									label, h, cur, m.cursor, d)

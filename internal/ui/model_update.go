@@ -5,7 +5,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Update records the board's top line after every message, because View has a
+// value receiver and cannot: the scroll position has to outlive the frame for
+// the board to hold still while the cursor crosses the middle.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if nm, ok := next.(Model); ok {
+		nm.top = scrollTop(len(nm.slots()), nm.cursor, nm.bodyHeight(), nm.top)
+		next = nm
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
