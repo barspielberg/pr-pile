@@ -84,7 +84,8 @@ actions:
 ```
 
 Select PRs with `space` (one) or `v` (a range), then `y` copies every selected
-url, one per line.
+url, one per line. `Y` opens a copy menu for the number, title, url, branch,
+author or a markdown link instead, also one per line.
 
 An action only sees a selection if it says `multi: true`. Without it the action
 keeps the singular fields (`{{.Number}}`, `{{.URL}}`, ...) and refuses when
