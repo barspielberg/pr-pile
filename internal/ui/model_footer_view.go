@@ -204,17 +204,14 @@ func (m Model) View() string {
 	}
 
 	foot := m.footer(spin)
-	chrome := 1
 	if m.searching {
-		// The prompt is a second chrome row, so the body has one line less.
 		foot = m.promptLine() + "\n" + foot
-		chrome = 2
 	}
 
 	lines, slotStarts := m.body(spin)
 	if m.height > 0 {
-		avail := m.height - chrome
-		lines, _ = window(lines, m.cursor, avail, slotStarts)
+		avail := m.bodyHeight()
+		lines, _ = window(lines, m.cursor, avail, slotStarts, m.top)
 		// Pad to the full height so the prompt and footer stay pinned to the
 		// bottom edge instead of floating under a short result set.
 		for len(lines) < avail {

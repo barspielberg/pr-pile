@@ -15,6 +15,7 @@ type Model struct {
 
 	width, height   int
 	cursor          int // index into the flattened visible rows
+	top             int // the board's top visible line, kept across frames
 	spinner         int
 	status          string
 	statusSeq       uint64
