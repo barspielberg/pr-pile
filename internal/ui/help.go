@@ -61,6 +61,7 @@ func (m Model) helpBlocks() []helpBlock {
 		row("v", "select a range"),
 		row("esc", "clear the selection"),
 		row("y", "copy the url ( every selected one )"),
+		row("Y", "copy menu: number, title, url, branch, author, markdown"),
 		row("/", "search"),
 		row("n / N", "next / previous match"),
 		row("r", "reload"),

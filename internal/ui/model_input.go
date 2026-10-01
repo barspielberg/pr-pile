@@ -24,50 +24,13 @@ var copyToClipboard = func(s string) error {
 }
 
 // copySelected yanks the url of every selected PR, or of the row under the
-// cursor when nothing is selected. Urls are joined with newlines: one per line
-// is what pastes into a PR description, a ticket or a Slack message.
+// cursor when nothing is selected.
 func (m Model) copySelected() (Model, tea.Cmd) {
 	prs := m.actionPRs()
 	if len(prs) == 0 {
 		return m.setStatus("no PR selected"), nil
 	}
-	var urls []string
-	for _, pr := range prs {
-		// A PR with no url contributes nothing rather than an empty line, and
-		// the reported count follows what was actually copied.
-		if pr.URL != "" {
-			urls = append(urls, pr.URL)
-		}
-	}
-	if len(urls) == 0 {
-		if len(prs) == 1 {
-			return m.setStatus("no URL for this PR"), nil
-		}
-		return m.setStatus("no URLs to copy"), nil
-	}
-
-	payload := strings.Join(urls, "\n")
-	// A single PR still names itself: "copied #3248 url" is the confirmation
-	// this board has always given, and a count would be a downgrade for the
-	// case that has not changed.
-	text := fmt.Sprintf("copied #%d url", prs[0].Number)
-	if len(urls) > 1 {
-		text = fmt.Sprintf("copied %d urls", len(urls))
-	}
-
-	m.statusSeq++
-	seq := m.statusSeq
-	// The selection is dropped on success only. A failed copy is the one case
-	// where the user has to try again, and clearing what they picked would
-	// make them pick it a second time.
-	cleared := m
-	cleared.clearSelection()
-	return cleared, func() tea.Msg {
-		if err := copyToClipboard(payload); err != nil {
-			return asyncStatusMsg{seq: seq, text: "copy failed: " + err.Error(), restore: m.selection}
-		}
-		return asyncStatusMsg{seq: seq, text: text}
-	}
+	return m.copyField(prs, urlField)
 }
 
 // A var so a test can watch what would be opened.
@@ -153,6 +116,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if len(m.confirmOpen) > 0 {
 		return m.handleConfirmKey(msg)
+	}
+	if len(m.copyMenu) > 0 {
+		return m.handleCopyMenuKey(msg)
 	}
 	switch msg.String() {
 	case "esc":
@@ -275,6 +241,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		next, cmd := m.copySelected()
 		return next, cmd
+	case "Y":
+		return m.openCopyMenu(), nil
 	default:
 		// User-configured actions are matched last so they cannot shadow
 		// navigation keys.
