@@ -98,8 +98,8 @@ the action's key. With nothing selected, a `multi` action gets the row under
 the cursor as a list of one.
 
 Acting on three or more PRs at once asks first — both `enter`/`o` and any
-`multi` action. `y` or `enter` confirms, any other key cancels and keeps the
-selection.
+`multi` action, in a box over the middle of the board. `y` or `enter` confirms,
+any other key cancels and keeps the selection.
 
 No actions are bound by default. The tool knows nothing about worktrees,
 editors or multiplexers — it renders a template and runs what it gets — so a

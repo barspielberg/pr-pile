@@ -863,8 +863,8 @@ file.
 ### 4.5 The three-or-more confirm
 
 Acting on three or more PRs at once asks first: `enter`/`o` and every
-`multi: true` action stop and put a question on the footer, and `y` or `enter`
-goes ahead while any other key cancels. Two is a normal thing to want, so
+`multi: true` action stop and ask in a box over the middle of the board, listing
+the PRs it is about, and `y` or `enter` goes ahead while any other key cancels. Two is a normal thing to want, so
 prompting there would be friction on the common case; three is where a mistyped
 key stops being recoverable, because nothing closes the forty tabs — or undoes
 the forty `gh` calls — that an accidental keypress on a full board would fire.

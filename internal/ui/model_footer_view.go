@@ -134,11 +134,9 @@ func (m Model) footer(spin string) string {
 		left = "  press a letter to copy · j/k move · enter copy · any other key closes"
 	}
 	if len(m.confirmOpen) > 0 {
-		what := "open %d PRs in the browser?"
-		if m.confirmVerb != "" {
-			what = m.confirmVerb + " on %d PRs?"
-		}
-		left = fmt.Sprintf("  "+what+"  y / enter to confirm · any other key cancels", len(m.confirmOpen))
+		// The whole question, not just the keys: a pane too short for the
+		// box has only this line to ask it.
+		left = "  " + terminalText(m.confirmQuestion()) + "  y / enter to confirm · any other key cancels"
 	}
 	// A running action outranks a status: the status line is history and this
 	// is happening now. The glyph is the board's own spinner rather than a
@@ -218,7 +216,9 @@ func (m Model) View() string {
 			lines = append(lines, "")
 		}
 	}
-	if len(m.copyMenu) > 0 {
+	if len(m.confirmOpen) > 0 {
+		lines = m.overlayConfirm(lines)
+	} else if len(m.copyMenu) > 0 {
 		lines = m.overlayCopyMenu(lines)
 	}
 	return strings.Join(lines, "\n") + "\n" + foot
