@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"time"
+
 	"github.com/barspielberg/pr-pile/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -120,6 +122,26 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case expireStatusMsg:
+		if msg.seq == m.statusSeq {
+			m.status = ""
+		}
+		return m, nil
+
+	case watchMsg:
+		return m.applyWatch(msg)
+
+	case notifyFailedMsg:
+		// Beside the news, not over it: the line may be the only place the
+		// change was told.
+		text := "notify failed: " + terminalText(msg.err.Error())
+		if m.watchNews != "" {
+			text = m.watchNews + " · " + text
+		}
+		m = m.setStatus(text)
+		m.watchNews = m.status
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -138,13 +160,16 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// collapse and re-expand under the cursor.
 	m.fetchGeneration++
 	m.refreshSeq++
+	m.boardAt = time.Now()
 	m.statusSeq++
 	m.board.Refetch()
 	m.detail = make(map[int]github.Detail)
 	m.inflight = make(map[int]detailRequest)
 	m.detailIdentity = make(map[int]detailRequest)
 	m.fetching = true
-	m.status = ""
+	if m.status != m.watchNews {
+		m.status = ""
+	}
 	m.clearSeq = 0
 	// The selection goes with the board it was made on. Rows move and PRs drop
 	// off across a refetch, so a set that survived would be a claim about a
@@ -155,7 +180,7 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	// keypress is eaten by a confirm the user can no longer reason about.
 	// The copy menu stays. It holds its own PRs, and closing it under a
 	// timed refresh would hand the next letter, meant for the menu, to the
-	// board -- where `a` or `m` may be a configured action.
+	// board -- where `a` or `x` may be a configured action.
 	m.clearConfirm()
 	// A refresh does not kill the process, but the board it was launched from
 	// is gone; keeping its name on the footer would attribute the fetch
@@ -164,5 +189,7 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 		m.runSeq++
 		m.running = ""
 	}
-	return m, tea.Batch(append(m.fetchAll(), spinTick())...)
+	// The watch polls with the board, so `r` answers for watched PRs too.
+	m, poll := m.pollNow()
+	return m, tea.Batch(append(m.fetchAll(), spinTick(), poll)...)
 }

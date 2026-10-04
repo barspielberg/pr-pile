@@ -19,9 +19,11 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	spans := m.matchSpans(r, showAuthor, m.query)
 	_, cells := m.searchText(r, showAuthor)
 
-	ci, ciStyle := ciCell(r.PR)
-	rev, revStyle := reviewCell(r.PR)
-	blocker, blockerStyle := blockerCell(r.PR)
+	live := m.statusPR(r.PR)
+	ci, ciStyle := ciCell(live)
+	rev, revStyle := reviewCell(live)
+	blocker, blockerStyle := blockerCell(live)
+	watch, watchStyle := m.watchCell(r.PR.Number)
 
 	titleStyle := fgStyle
 	if r.PR.IsDraft {
@@ -70,14 +72,19 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 
 	// A glyph rather than a hue, so the mark survives NO_COLOR and a light
 	// theme: colour is never the sole carrier.
-	pick := " "
+	// The pick column doubles as the watch's sign column, like vim's: a fixed
+	// column far from the status cluster, so the flag never reads as GitHub
+	// state. A pick is short-lived, so it wins the cell while it lasts.
+	pick, pickStyle := " ", accent
 	if picked {
 		pick = "•"
+	} else if watch != " " {
+		pick, pickStyle = watch, watchStyle
 	}
 
 	var b strings.Builder
 	b.WriteString(paint(accent).Render(mark))
-	b.WriteString(paint(accent).Render(pick))
+	b.WriteString(paint(pickStyle).Render(pick))
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
 	b.WriteString(hitRuns(pad("#"+fmt.Sprint(r.PR.Number), numberWidth),
 		cellHits(spans, cells.number), accent, paint))

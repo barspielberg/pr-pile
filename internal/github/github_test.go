@@ -2,8 +2,10 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -73,5 +75,79 @@ func TestSearchBucketsChecksByState(t *testing.T) {
 	}
 	if pr.SkippedCount != 1 {
 		t.Errorf("skipped count = %d, want 1", pr.SkippedCount)
+	}
+}
+
+// A PR that no longer resolves comes back null beside the others, with an
+// error in the same body; the rest of the poll still counts.
+func TestWatchParsesEachAliasAndSkipsMissing(t *testing.T) {
+	const body = `{"data":{"repository":{
+	  "p7":{"number":7,"title":"t","state":"MERGED","reviewDecision":"APPROVED",
+	    "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[]}}}}]}},
+	  "p8":null
+	}},"errors":[{"message":"Could not resolve to a PullRequest with the number of 8."}]}`
+
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Query string }
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		query = in.Query
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	got, err := c.Watch(context.Background(), "o/r", []int{7, 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "p7: pullRequest(number: 7)") || !strings.Contains(query, "p8: pullRequest(number: 8)") {
+		t.Errorf("query is missing an alias:\n%s", query)
+	}
+	w, ok := got[7]
+	if !ok || w.State != "MERGED" || w.CIState != "SUCCESS" || w.Review != "APPROVED" {
+		t.Errorf("got %+v", got)
+	}
+	if _, ok := got[8]; ok {
+		t.Error("a missing PR should be left out")
+	}
+}
+
+func TestWatchFailsWhenNothingCameBack(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":null,"errors":[{"message":"bad credentials"}]}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	if _, err := c.Watch(context.Background(), "o/r", []int{1}); err == nil {
+		t.Error("expected an error")
+	}
+}
+
+// Every watched PR gone is still an answer, not a failed poll, or the watches
+// would stay forever.
+func TestWatchSucceedsWhenEveryPRIsMissing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"repository":{"p8":null}},"errors":[{"type":"NOT_FOUND","path":["repository","p8"],"message":"Could not resolve to a PullRequest with the number of 8."}]}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	got, err := c.Watch(context.Background(), "o/r", []int{8})
+	if err != nil || len(got) != 0 {
+		t.Errorf("got %v, %v", got, err)
+	}
+}
+
+func TestWatchFailsWhenTheRepoIsMissing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository."}]}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	if _, err := c.Watch(context.Background(), "o/r", []int{1}); err == nil {
+		t.Error("a missing repo should fail the poll, not drop every watch")
 	}
 }

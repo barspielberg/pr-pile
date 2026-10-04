@@ -47,3 +47,40 @@ func TestLive(t *testing.T) {
 		}
 	}
 }
+
+// Polls a handful of real PRs the way `m` does. Run with -run TestLiveWatch.
+func TestLiveWatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live API test")
+	}
+	repo := os.Getenv("PILE_REPO")
+	if repo == "" {
+		t.Skip("set PILE_REPO to the repo to test against")
+	}
+	c, err := github.New()
+	if err != nil {
+		t.Skip("no gh token:", err)
+	}
+	prs, err := c.Search(context.Background(), "repo:"+repo+" is:pr sort:updated-desc", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	numbers := make([]int, 0, len(prs))
+	for _, pr := range prs {
+		numbers = append(numbers, pr.Number)
+	}
+	start := time.Now()
+	got, err := c.Watch(context.Background(), repo, numbers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%d PRs in %.2fs", len(numbers), time.Since(start).Seconds())
+	for _, n := range numbers {
+		w, ok := got[n]
+		if !ok {
+			t.Errorf("#%d missing from the poll", n)
+			continue
+		}
+		t.Logf("#%d %-6s ci=%-7s review=%-17s mergeable=%s", n, w.State, w.CIState, w.Review, w.Mergeable)
+	}
+}

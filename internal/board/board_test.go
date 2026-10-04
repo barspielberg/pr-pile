@@ -203,3 +203,28 @@ func TestLoneStackTopDrawsNoGlyph(t *testing.T) {
 		t.Errorf("a stack top with no parent here should draw no glyph, got %q", rows[0].Prefix)
 	}
 }
+
+// A hidden PR stays off while a lagging search still returns it, and comes
+// back once the hold expires, so one closed by mistake and reopened returns.
+func TestHideExpires(t *testing.T) {
+	clock := time.Now()
+	orig := now
+	now = func() time.Time { return clock }
+	t.Cleanup(func() { now = orig })
+
+	b := New(cfg("a"))
+	b.Apply(Result{Index: 0, PRs: []github.PR{pr(1), pr(2)}})
+	b.Hide(1)
+	if got := nums(b.Sections()[0]); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("after Hide: %v", got)
+	}
+	b.Apply(Result{Index: 0, PRs: []github.PR{pr(1), pr(2)}})
+	if got := nums(b.Sections()[0]); len(got) != 1 {
+		t.Errorf("a fetch inside the hold brought it back: %v", got)
+	}
+	clock = clock.Add(hideFor)
+	b.Apply(Result{Index: 0, PRs: []github.PR{pr(1), pr(2)}})
+	if got := nums(b.Sections()[0]); len(got) != 2 {
+		t.Errorf("still hidden after the hold: %v", got)
+	}
+}

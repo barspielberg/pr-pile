@@ -4,6 +4,7 @@ package board
 
 import (
 	"sort"
+	"time"
 
 	"github.com/barspielberg/pr-pile/internal/config"
 	"github.com/barspielberg/pr-pile/internal/github"
@@ -47,10 +48,21 @@ type Board struct {
 	cfg      config.Config
 	results  []*Result
 	sections []Section
+	// hidden is PRs the watch saw merge or close, and when. The search index
+	// can lag a merge, so a fetch soon after must not bring one back; the
+	// hold expires so a PR closed by mistake and reopened does come back.
+	hidden map[int]time.Time
 }
 
+// hideFor outlasts the search index's lag behind a merge, which is seconds to
+// a minute, by a wide margin.
+const hideFor = 10 * time.Minute
+
+// now is a var so a test can move the clock past hideFor.
+var now = time.Now
+
 func New(cfg config.Config) *Board {
-	b := &Board{cfg: cfg, results: make([]*Result, len(cfg.Rules))}
+	b := &Board{cfg: cfg, results: make([]*Result, len(cfg.Rules)), hidden: map[int]time.Time{}}
 	b.sections = make([]Section, len(cfg.Rules))
 	for i, r := range cfg.Rules {
 		b.sections[i] = Section{Rule: r, State: Pending}
@@ -70,6 +82,34 @@ func (b *Board) Refetch() {
 		s.State, s.Err = Pending, nil
 		s.Stale = len(s.Rows) > 0
 	}
+}
+
+// Hide takes a PR off the board now, without waiting for the next fetch to
+// stop returning it.
+func (b *Board) Hide(number int) {
+	b.hidden[number] = now()
+	b.rebuild()
+	// A section still waiting on its fetch keeps last time's rows, which
+	// rebuild leaves alone, so the PR comes out of those here.
+	for i := range b.sections {
+		s := &b.sections[i]
+		rows := s.Rows[:0:0]
+		for _, r := range s.Rows {
+			if r.PR.Number != number {
+				rows = append(rows, r)
+			}
+		}
+		s.Rows = rows
+	}
+}
+
+func (b *Board) isHidden(number int) bool {
+	at, ok := b.hidden[number]
+	if ok && now().Sub(at) >= hideFor {
+		delete(b.hidden, number)
+		return false
+	}
+	return ok
 }
 
 func (b *Board) Apply(res Result) {
@@ -122,7 +162,7 @@ func (b *Board) rebuild() {
 		}
 		var own []github.PR
 		for _, pr := range res.PRs {
-			if claimed[pr.Number] {
+			if claimed[pr.Number] || b.isHidden(pr.Number) {
 				continue
 			}
 			claimed[pr.Number] = true

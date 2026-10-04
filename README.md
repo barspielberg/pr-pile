@@ -87,6 +87,30 @@ Select PRs with `space` (one) or `v` (a range), then `y` copies every selected
 url, one per line. `Y` opens a copy menu for the number, title, url, branch,
 author or a markdown link instead, also one per line.
 
+`m` watches the selected PRs (or the one under the cursor) and `m` again stops.
+Watched PRs are checked on every refresh: the timed one (`refresh`) and `r`.
+When CI passes or first fails, a review lands, conflicts appear or clear, or the
+PR merges or closes, the status line says so and a desktop notification goes
+out. A merged or closed PR leaves the board straight away. A watched row shows
+`⚐` in the column left of its number, and `⚑` until you open it with `enter` or
+`d`. Watches end when pile quits, so `q` asks first while any are running, in the same box as the 3+ confirm, listing the watched PRs.
+
+Notifications default to OSC 9, which Ghostty, iTerm2, kitty and WezTerm show
+with nothing to install. A terminal multiplexer may not pass OSC 9 through; use
+`notify: command` with its own notifier instead. The command runs through
+`sh -c` with the change in `$PILE_TITLE`, `$PILE_MESSAGE` (the PR title),
+`$PILE_URL` and `$PILE_NUMBER`. Quote them, and keep them out of the command
+text itself, since titles are written by other people.
+
+```yaml
+watch:
+  notify: command          # osc (default) | command | none
+  # herdr
+  command: herdr notification show "$PILE_TITLE" --body "$PILE_MESSAGE"
+  # macOS, outside a multiplexer
+  # command: terminal-notifier -title "$PILE_TITLE" -message "$PILE_MESSAGE" -open "$PILE_URL"
+```
+
 An action only sees a selection if it says `multi: true`. Without it the action
 keeps the singular fields (`{{.Number}}`, `{{.URL}}`, ...) and refuses when
 several PRs are selected, rather than quietly running on whichever one came
@@ -166,7 +190,9 @@ exists* rather than reusing it. If the key stops working on a PR you have
 removed before, clear the leftover directory.
 
 Action keys cannot shadow a built-in key, and duplicate action keys are rejected
-when the configuration loads. Pick a key the table above does not use.
+when the configuration loads. Pick a key the table above does not use. `m` is
+taken by watching, so a config that bound an action to `m` before watching
+existed now fails to load; move that action to another key.
 
 Action templates get `{{.Number}}`, `{{.Repo}}`, `{{.RepoPath}}`, `{{.Branch}}`, `{{.Base}}`, `{{.URL}}`, `{{.Author}}`, `{{.Title}}`.
 GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, and `Title`)
@@ -195,6 +221,7 @@ authors.
 | `enter` / `o` | open in the default browser |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus conflict, unresolved comments, author, reviewer, size and branches |
 | `y` | copy the PR url to the clipboard (`pbcopy`) |
+| `m` | watch / stop watching |
 | `/` | search |
 | `n` / `N` | next / previous match |
 | `r` | reload |

@@ -94,6 +94,20 @@ type Model struct {
 	// fire the same request twice while the first is still out.
 	inflight       map[int]detailRequest
 	detailIdentity map[int]detailRequest
+
+	// Watches outlive a refresh, unlike the selection: they are keyed by
+	// number and nothing about a refetch makes them stale. See watch.go.
+	watched map[int]*watchEntry
+	// One poll at a time: two out at once would diff against the same
+	// baseline and report the same change twice.
+	watchInflight bool
+	// watchNews is the last poll's status text, kept through a refresh that
+	// would otherwise wipe it seconds after it appeared.
+	watchNews string
+	// boardAt is when the board's current fetch was sent, what a watch
+	// poll's copy has to be newer than to be drawn.
+	boardAt     time.Time
+	confirmQuit bool
 }
 
 type detailRequest struct {
@@ -141,7 +155,8 @@ func New(cfg config.Config, client *github.Client) Model {
 	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
 		fetchGeneration: 1, refreshSeq: 1, detail: map[int]github.Detail{},
 		inflight: map[int]detailRequest{}, detailIdentity: map[int]detailRequest{},
-		selection: map[int]bool{}, rangeOwned: map[int]bool{}, anchor: -1}
+		selection: map[int]bool{}, rangeOwned: map[int]bool{}, anchor: -1,
+		watched: map[int]*watchEntry{}, boardAt: time.Now()}
 }
 
 func (m Model) Init() tea.Cmd {

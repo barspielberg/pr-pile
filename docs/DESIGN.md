@@ -89,7 +89,7 @@ cursor can occupy (§3.5).
 | # | field | offset | width | align | content |
 |---|---|---|---|---|---|
 | 1 | mark | 0 | 1 | — | `▌` when selected, else space |
-| 2 | gutter | 1 | 1 | — | space |
+| 2 | sign | 1 | 1 | — | `•` when picked, else the watch flag (below), else space |
 | 3 | tree | 2 | 2 | left | `╭╴` `│ ` `╰╴` or two spaces |
 | 4 | number | 4 | 6 | left | `#3248`, padded right |
 | 5 | gutter | 10 | 1 | — | space |
@@ -112,6 +112,20 @@ cursor can occupy (§3.5).
 **Exactly one column flexes: title.** Everything else is fixed, which is the
 mechanical fix for "columns spread across the terminal" — slack has only one
 place to go, so the status cluster is pinned at columns 11–17 at every width.
+
+**The sign column** (column 1) carries the user's own marks, like vim's: `•`
+for a pick, else `⚐` U+2690 watched (`muted`) or `⚑` U+2691 something changed
+you have not looked at (`attention`, cleared by `enter`/`o` or `d`). A pick
+wins the cell: it is short-lived and acted on next, and the flag is back once
+the selection clears. The flag is kept out of the status cluster and away from
+the number because both were tried. After the number, one space short of CI, it
+read as a seventh status glyph, its column shifted with the number's length,
+and it pushed the cluster right on every row. A Nerd Font eye before the number
+overhung its cell and left an uneven gap. Here the column is fixed, it scans as
+one vertical strip, and an unwatched row is exactly what it was before
+watching existed. While a watch's poll is newer than the board's last fetch,
+the row's CI, review and blocker cells draw from the poll, so a row does not
+say `◐` for minutes after the footer said CI passed.
 
 **Every line is exactly one line, and every line is a slot.** Row height does
 not depend on the data, and there is no line in the list the cursor cannot
@@ -770,9 +784,11 @@ rejects unknown fields so a misspelling cannot silently become dead config.
 |---|---|---|
 | `repo` | `owner/name` | required; exactly one nonempty owner and repository component. `PILE_REPO` overrides it per invocation. |
 | `repoPath` | path | local checkout, for `{{.RepoPath}}` in action templates |
-| `refresh` | duration | auto-refresh interval, default `3m`; `<= 0` disables |
+| `refresh` | duration | auto-refresh interval, default `3m`; `<= 0` disables. Watched PRs are checked on the same refresh, so there is no second interval |
 | `rules` | `[]Rule` | ordered; at least one required |
 | `actions` | `[]Action` | key-bound shell commands |
+| `watch.notify` | `osc` \| `command` \| `none` | how a change is announced beyond the status line, default `osc` (OSC 9). No mode per multiplexer: one that swallows OSC 9 gets `command` with its own notifier |
+| `watch.command` | shell | required for `notify: command`; the change arrives in `$PILE_TITLE`, `$PILE_MESSAGE`, `$PILE_URL`, `$PILE_NUMBER`, never in the command text |
 
 ### Rule
 
@@ -1031,7 +1047,8 @@ output is piped, so test the resolved path rather than the exit code.
 | `n` `N` | next / previous match, wrapping |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus the state block (any key closes; a movement key closes *and* moves) |
 | `?` | help and the glyph legend. It scrolls (`j`/`k`, arrows, `ctrl+d`/`ctrl+u`, page keys, `g`/`G`); `esc`, `q` and `?` close it, as does any key that is not a scroll key |
-| `q` `esc` `ctrl+c` | quit. `esc` first clears a selection, then a search, then quits |
+| `m` | watch the selected PRs, or the row under the cursor; `m` again stops. Watched PRs are checked in one batched query on every refresh, timed or `r` (and once when a watch starts), and what changed (CI passed or first failure, approved, changes requested, conflicts, merged, closed) goes on the status line and out as one notification per PR. A merged or closed PR stops being watched and leaves the board at once, and stays off it even if a lagging search returns it. Watches survive a refresh and end when pile quits |
+| `q` `esc` `ctrl+c` | quit. `esc` first clears a selection, then a search, then quits. `q` and `esc` ask first while anything is watched or an action is running, in the §4.5 box, listing the action and the watched PRs; `ctrl+c` never asks |
 
 **Selecting.** `esc` discards a selection; leaving `v` keeps what it marked. A
 range is drawn over slots, so one crossing a header collects only the PR rows
