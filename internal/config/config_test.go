@@ -108,3 +108,33 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 		}
 	}
 }
+
+func TestWatchNotify(t *testing.T) {
+	for _, tc := range []struct {
+		watch Watch
+		valid bool
+	}{
+		{Watch{}, true},
+		{Watch{Notify: "osc"}, true},
+		{Watch{Notify: "none"}, true},
+		{Watch{Notify: "command", Command: "notify-send x"}, true},
+		{Watch{Notify: "command"}, false},
+		{Watch{Notify: "herdr"}, false},
+	} {
+		cfg := Default()
+		cfg.Repo = "o/r"
+		cfg.Watch = tc.watch
+		if err := cfg.Validate(); (err == nil) != tc.valid {
+			t.Errorf("%+v: err=%v, want valid=%v", tc.watch, err, tc.valid)
+		}
+	}
+}
+
+func TestWatchKeyIsReserved(t *testing.T) {
+	cfg := Default()
+	cfg.Repo = "o/r"
+	cfg.Actions = []Action{{Key: "m", Name: "mine", Run: "true"}}
+	if err := cfg.Validate(); err == nil {
+		t.Error("binding m to an action should be refused")
+	}
+}

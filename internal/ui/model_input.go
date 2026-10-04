@@ -80,6 +80,7 @@ func (m Model) doOpen(prs []github.PR) (Model, tea.Cmd) {
 		text = fmt.Sprintf("opened %d PRs", len(urls))
 	}
 	next := m
+	next.markSeen(prs...)
 	next.clearSelection()
 	next.clearConfirm()
 	return next, func() tea.Msg {
@@ -114,6 +115,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.searching {
 		return m.handleSearchKey(msg)
 	}
+	if m.confirmQuit {
+		return m.handleQuitKey(msg)
+	}
 	if len(m.confirmOpen) > 0 {
 		return m.handleConfirmKey(msg)
 	}
@@ -140,9 +144,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.query = ""
 			return m, nil
 		}
+		return m.quit()
+	case "q":
+		return m.quit()
+	case "ctrl+c":
 		return m, tea.Quit
-	case "q", "ctrl+c":
-		return m, tea.Quit
+	case "m":
+		return m.toggleWatch()
 	case "/":
 		m.searching = true
 		// The cursor stays where it is: a search does not narrow the board, so
@@ -165,6 +173,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.showChecks = true
+		m.markSeen(pr)
 		cmd := m.fetchDetail(pr)
 		if cmd == nil {
 			return m, nil

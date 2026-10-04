@@ -62,6 +62,7 @@ func (m Model) helpBlocks() []helpBlock {
 		row("esc", "clear the selection"),
 		row("y", "copy the url ( every selected one )"),
 		row("Y", "copy menu: number, title, url, branch, author, markdown"),
+		row("m", "watch, or stop watching ( every selected one )"),
 		row("/", "search"),
 		row("n / N", "next / previous match"),
 		row("r", "reload"),
@@ -118,6 +119,10 @@ func (m Model) helpBlocks() []helpBlock {
 			glyph("╭╴│╰╴", "a stack: each PR targets the one above", mutedStyle),
 			row("abc", "author initials, on rules with author: true"),
 			row("2h", "last updated"),
+		}},
+		{"WATCH", []helpRow{
+			glyph(watchGlyph, "watched", mutedStyle),
+			glyph(newsGlyph, "something changed; enter or d clears it", attentionStyle),
 		}},
 	}
 }

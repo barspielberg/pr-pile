@@ -146,6 +146,12 @@ func (m Model) footer(spin string) string {
 	if m.running != "" {
 		left = "  " + string(spinFrames[m.spinner%len(spinFrames)]) + " " + m.running
 	}
+	// The quit prompt outranks even a running action, which is often what it
+	// is asking about. The whole question, as for the confirm: a pane too short
+	// for the box has only this line to ask it.
+	if m.confirmQuit {
+		left = "  " + m.quitQuestion() + "  y / enter to quit · any other key cancels"
+	}
 	// One line, clipped not wrapped: a second row would break the board's
 	// one-line-per-row invariant, and stderr from a failing script is
 	// arbitrarily long.
@@ -216,7 +222,9 @@ func (m Model) View() string {
 			lines = append(lines, "")
 		}
 	}
-	if len(m.confirmOpen) > 0 {
+	if m.confirmQuit {
+		lines = m.overlayQuit(lines)
+	} else if len(m.confirmOpen) > 0 {
 		lines = m.overlayConfirm(lines)
 	} else if len(m.copyMenu) > 0 {
 		lines = m.overlayCopyMenu(lines)

@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"github.com/barspielberg/pr-pile/internal/board"
+	"github.com/barspielberg/pr-pile/internal/github"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"strconv"
@@ -81,10 +82,9 @@ func (m Model) confirmQuestion() string {
 	return fmt.Sprintf("open %d PRs in the browser?", len(m.confirmOpen))
 }
 
-// confirmLines lists the PRs the question is about, drawn the way the board
-// draws them so each line can be matched to a marked row at a glance.
-func (m Model) confirmLines(inner int) []string {
-	prs := m.confirmOpen
+// prLines lists the PRs a question is about, drawn the way the board draws
+// them so each line can be matched to a row at a glance.
+func (m Model) prLines(prs []github.PR, inner int) []string {
 	shown := prs
 	if len(prs) > confirmListed {
 		// One row goes to the count, so a list one over the limit still fits.
@@ -114,20 +114,26 @@ func (m Model) confirmLines(inner int) []string {
 // from the bottom, and below three rows there is no box at all -- the footer
 // carries the question at every height.
 func (m Model) confirmBox(rows int) []string {
+	hint := " y / enter " + m.confirmVerbOrOpen() + " · any other key cancels "
+	return m.questionBox(rows, m.confirmQuestion(), m.prLines(m.confirmOpen, m.dialogWidth()-2), hint)
+}
+
+// questionBox is the shape every yes/no question takes: the question, a blank
+// row, what it is about, and the keys in the bottom border.
+func (m Model) questionBox(rows int, question string, list []string, hint string) []string {
 	if rows < 3 {
 		return nil
 	}
 	inner := m.dialogWidth() - 2
 	body := append([]string{
-		fgStyle.Bold(true).Render(pad(clip("  "+m.confirmQuestion(), inner), inner)),
+		fgStyle.Bold(true).Render(pad(clip("  "+question, inner), inner)),
 		strings.Repeat(" ", inner),
-	}, m.confirmLines(inner)...)
+	}, list...)
 	body = body[:min(len(body), rows-2)]
 	out := []string{dialogTop("", inner)}
 	for _, l := range body {
 		out = append(out, mutedStyle.Render("│")+l+mutedStyle.Render("│"))
 	}
-	hint := " y / enter " + m.confirmVerbOrOpen() + " · any other key cancels "
 	return append(out, dialogBottom(clip(hint, inner-1), inner))
 }
 

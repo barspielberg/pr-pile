@@ -49,6 +49,19 @@ type Config struct {
 	Refresh  time.Duration `yaml:"refresh"`
 	Rules    []Rule        `yaml:"rules"`
 	Actions  []Action      `yaml:"actions"`
+	Watch    Watch         `yaml:"watch"`
+}
+
+// Watch configures how `m` announces changes. It has no interval of its own:
+// watched PRs are checked on every refresh, so `refresh` is the one clock.
+type Watch struct {
+	// Notify is where a change is announced beyond the status line: osc (the
+	// default, OSC 9 to the terminal), command or none.
+	Notify string `yaml:"notify"`
+	// Command runs through sh -c for notify: command, with the change in
+	// PILE_TITLE, PILE_MESSAGE, PILE_URL and PILE_NUMBER rather than in the
+	// command text, since titles are remote text.
+	Command string `yaml:"command"`
 }
 
 // Rule queries are fetched in parallel but revealed in order, so a slow rule
@@ -262,6 +275,15 @@ func (c Config) Validate() error {
 			return fmt.Errorf("action %q: mode must be background or suspend", a.Name)
 		}
 	}
+	switch c.Watch.Notify {
+	case "", "osc", "none":
+	case "command":
+		if strings.TrimSpace(c.Watch.Command) == "" {
+			return fmt.Errorf("watch.notify is command but watch.command is empty")
+		}
+	default:
+		return fmt.Errorf("watch.notify must be osc, command or none")
+	}
 	return nil
 }
 
@@ -270,7 +292,7 @@ var reservedActionKeys = map[string]bool{
 	// The selection keys. A config that bound these would be dead config --
 	// the builtin wins -- and the guide's rule is that a taken key is refused
 	// loudly rather than silently ignored.
-	"v": true, " ": true, "space": true,
+	"v": true, " ": true, "space": true, "m": true,
 	"enter": true, "o": true, "r": true, "d": true, "y": true, "Y": true, "?": true,
 	"j": true, "down": true, "k": true, "up": true, "l": true, "right": true,
 	"h": true, "left": true, "g": true, "home": true, "G": true, "end": true,

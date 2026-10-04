@@ -78,11 +78,9 @@ type PR struct {
 	SkippedCount int
 }
 
-const searchQuery = `
-query($q: String!, $n: Int!) {
-  search(query: $q, type: ISSUE, first: $n) {
-    nodes {
-      ... on PullRequest {
+// prFields is everything a row draws. The watch poll asks for the same fields
+// so a watched PR parses into the same PR the board holds.
+const prFields = `
         number title url isDraft reviewDecision mergeable updatedAt createdAt
         headRefName baseRefName
         additions deletions changedFiles
@@ -102,7 +100,13 @@ query($q: String!, $n: Int!) {
               }
             }
           }
-        }
+        }`
+
+const searchQuery = `
+query($q: String!, $n: Int!) {
+  search(query: $q, type: ISSUE, first: $n) {
+    nodes {
+      ... on PullRequest {` + prFields + `
       }
     }
   }
@@ -248,6 +252,90 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]PR, err
 		prs = append(prs, n.toPR())
 	}
 	return prs, nil
+}
+
+// Watched is a PR as the watch poll saw it. State is OPEN, MERGED or CLOSED:
+// the board only searches open PRs, so once one merges this is the only
+// request that still sees it.
+type Watched struct {
+	PR
+	State string
+}
+
+// Watch fetches every watched PR in one request, one alias per PR. A PR that
+// no longer resolves is left out of the result rather than failing the rest.
+func (c *Client) Watch(ctx context.Context, repo string, numbers []int) (map[int]Watched, error) {
+	if len(numbers) == 0 {
+		return nil, nil
+	}
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return nil, fmt.Errorf("repo %q must be owner/name", repo)
+	}
+	var q strings.Builder
+	q.WriteString("query($o: String!, $r: String!) {\n  repository(owner: $o, name: $r) {\n")
+	for _, n := range numbers {
+		fmt.Fprintf(&q, "    p%d: pullRequest(number: %d) { state %s\n    }\n", n, n, prFields)
+	}
+	q.WriteString("  }\n}")
+
+	body, err := json.Marshal(map[string]any{
+		"query":     q.String(),
+		"variables": map[string]any{"o": owner, "r": name},
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github returned %s", resp.Status)
+	}
+	var out struct {
+		Data struct {
+			Repository map[string]*struct {
+				prNode
+				State string `json:"state"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string   `json:"message"`
+			Type    string   `json:"type"`
+			Path    []string `json:"path"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+
+	got := make(map[int]Watched, len(numbers))
+	for _, n := range out.Data.Repository {
+		if n != nil && n.Number != 0 {
+			got[n.Number] = Watched{PR: n.toPR(), State: n.State}
+		}
+	}
+	// A missing PR is a NOT_FOUND on its own alias, so a poll where every PR
+	// is missing still succeeds and the caller can drop them. Anything else
+	// fails the poll when nothing came back.
+	if len(got) == 0 {
+		for _, e := range out.Errors {
+			if e.Type != "NOT_FOUND" || len(e.Path) != 2 {
+				return nil, fmt.Errorf("github: %s", e.Message)
+			}
+		}
+	}
+	return got, nil
 }
 
 func (n prNode) toPR() PR {
