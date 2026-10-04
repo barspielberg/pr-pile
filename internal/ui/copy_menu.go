@@ -5,7 +5,6 @@ import (
 	"github.com/barspielberg/pr-pile/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	"strconv"
 	"strings"
 )
@@ -137,28 +136,20 @@ func (m Model) pickCopyField(f copyField) (Model, tea.Cmd) {
 // first value and a count of the rest.
 //
 // It is at most rows tall. A short pane gets a window of fields around the
-// cursor, and below three rows the borders go too, so the frame never grows
-// past the pane and pushes the footer off.
+// cursor, and below three rows the borders go too.
 func (m Model) copyMenuBox(rows int) []string {
 	prs := m.copyMenu
 	title := fmt.Sprintf(" copy #%d ", prs[0].Number)
 	if len(prs) > 1 {
 		title = fmt.Sprintf(" copy %d PRs ", len(prs))
 	}
-	hint := " j/k · enter · esc "
 
-	width := min(72, m.width-4)
-	inner := width - 2
+	inner := m.dialogWidth() - 2
 	nameW := 0
 	for _, f := range copyFields {
 		nameW = max(nameW, len(f.name))
 	}
 
-	border := func(left, label, right string) string {
-		fill := max(0, inner-1-lipgloss.Width(label))
-		return mutedStyle.Render(left+"─") + headerStyle.Render(label) +
-			mutedStyle.Render(strings.Repeat("─", fill)+right)
-	}
 	shown := min(len(copyFields), max(1, rows-2))
 	from := min(max(0, m.copyCursor-shown/2), len(copyFields)-shown)
 	var lines []string
@@ -175,7 +166,6 @@ func (m Model) copyMenuBox(rows int) []string {
 		}
 		lead := fmt.Sprintf("  %s  %s  ", f.key, pad(f.name, nameW))
 		room := max(0, inner-lipgloss.Width(lead)-len(more)-1)
-		text := pad(lead+clip(preview, room)+more, inner)
 
 		st := fgStyle
 		if len(values) == 0 {
@@ -184,43 +174,14 @@ func (m Model) copyMenuBox(rows int) []string {
 		if i == m.copyCursor {
 			st = st.Background(selBg)
 		}
-		lines = append(lines, mutedStyle.Render("│")+st.Render(text)+mutedStyle.Render("│"))
+		lines = append(lines, dialogRow(lead+clip(preview, room)+more, inner, st))
 	}
 	if rows < shown+2 {
 		return lines[:min(len(lines), max(0, rows))]
 	}
-	fill := max(0, inner-1-lipgloss.Width(hint))
-	bottom := mutedStyle.Render("╰" + strings.Repeat("─", fill) + hint + "─╯")
-	return append(append([]string{border("╭", title, "╮")}, lines...), bottom)
+	return append(append([]string{dialogTop(title, inner)}, lines...), dialogBottom(clip(" j/k · enter copy · any other key closes ", inner-1), inner))
 }
 
-// overlayCopyMenu lays the box over the middle of the board. The board stays
-// visible around it, so the menu reads as a question about the board rather
-// than a page of its own.
 func (m Model) overlayCopyMenu(lines []string) []string {
-	rows := len(lines)
-	if m.height <= 0 {
-		// No known height, so nothing to fit: draw the whole box.
-		rows = len(copyFields) + 2
-		for len(lines) < rows {
-			lines = append(lines, "")
-		}
-	}
-	box := m.copyMenuBox(rows)
-	if len(box) == 0 {
-		return lines
-	}
-	top := (len(lines) - len(box)) / 2
-	left := max(0, (m.width-lipgloss.Width(box[0]))/2)
-	boxW := lipgloss.Width(box[0])
-	out := append([]string(nil), lines...)
-	for i, b := range box {
-		under := out[top+i]
-		before := pad(ansi.Truncate(under, left, ""), left)
-		after := ansi.TruncateLeft(under, left+boxW, "")
-		// The reset stops a cut style, like the cursor row's fill, running on
-		// into the box.
-		out[top+i] = before + ansi.ResetStyle + b + after
-	}
-	return out
+	return m.overlayDialog(lines, len(copyFields)+2, m.copyMenuBox)
 }
