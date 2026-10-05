@@ -8,7 +8,6 @@ import (
 	"github.com/barspielberg/pr-pile/internal/board"
 	"github.com/barspielberg/pr-pile/internal/config"
 	"github.com/barspielberg/pr-pile/internal/github"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // multiRepoBoard is a board over o/r, o/api and x/lib, with #1 in both o/r
@@ -106,11 +105,22 @@ func TestSameNumberFromTwoReposSelectsSeparately(t *testing.T) {
 	}
 }
 
-func TestDetailHeaderNamesTheRepo(t *testing.T) {
+// The header stays #N; the page names the repo in full.
+func TestDetailListsTheRepo(t *testing.T) {
 	m := multiRepoBoard(t)
 	m = pressKey(m, "j")
-	if out := stripANSI(m.detailOverlay()); !strings.HasPrefix(out, "  api#1 ") {
-		t.Errorf("detail header: want api#1, got %q", strings.SplitN(out, "\n", 2)[0])
+	out := stripANSI(m.detailOverlay())
+	if !strings.HasPrefix(out, "  #1 ") {
+		t.Errorf("detail header: want #1, got %q", strings.SplitN(out, "\n", 2)[0])
+	}
+	if !strings.Contains(out, "repo      o/api") {
+		t.Errorf("detail page should list o/api:\n%s", out)
+	}
+	single := New(testCfg(), nil)
+	for _, line := range single.stateLines(github.PR{Repo: testRepo, Number: 1, Author: "a"}) {
+		if strings.Contains(stripANSI(line), "repo") {
+			t.Errorf("a single-repo board should not list the repo: %q", line)
+		}
 	}
 }
 
@@ -236,19 +246,5 @@ func TestWatchKeepsHealthyReposWhenOneFails(t *testing.T) {
 	}
 	if !strings.Contains(m.status, "CI passed") || !strings.Contains(m.status, "watch failed: o/api") {
 		t.Errorf("status should carry both the news and the failure: %q", m.status)
-	}
-}
-
-func TestDetailHeaderFitsWithARepoTag(t *testing.T) {
-	m := multiRepoBoard(t)
-	m.width = 60
-	m.cfg.Repos = append(m.cfg.Repos, config.Repo{Name: "x/a-much-longer-repo-name"})
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Repo: "x/a-much-longer-repo-name", Number: 1234, Title: strings.Repeat("long title ", 10)},
-	}})
-	m.cursor = m.firstRowSlot()
-	head := strings.SplitN(m.detailOverlay(), "\n", 2)[0]
-	if w := lipgloss.Width(head); w > m.width {
-		t.Errorf("header is %d wide on a %d-wide pane: %q", w, m.width, stripANSI(head))
 	}
 }

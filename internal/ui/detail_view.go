@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"github.com/barspielberg/pr-pile/internal/github"
-	"github.com/charmbracelet/lipgloss"
 	"strings"
 )
 
@@ -27,12 +26,9 @@ func (m Model) detailOverlay() string {
 		return ""
 	}
 
-	// The title gets what the header leaves: a repo tag makes the header wider
-	// than a bare number, and a header that wraps pushes itself off the top.
-	head := "  " + m.prRef(pr)
 	lines := []string{
-		headerStyle.Render(head) + " " +
-			mutedStyle.Render(clip(pr.Title, max(0, m.width-lipgloss.Width(head)-5))),
+		headerStyle.Render(fmt.Sprintf("  #%d", pr.Number)) + " " +
+			mutedStyle.Render(clip(pr.Title, max(0, m.width-12))),
 		"",
 	}
 	lines = append(lines, m.overlayBody(pr)...)

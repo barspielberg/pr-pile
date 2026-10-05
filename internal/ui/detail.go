@@ -35,6 +35,10 @@ func (m Model) stateLines(pr github.PR) []string {
 	if s := m.pendingLine(pr); s != "" {
 		out = append(out, s)
 	}
+	// Only with several repos: with one it would be a constant.
+	if m.multiRepo() {
+		out = append(out, label("repo", terminalText(pr.Repo)))
+	}
 	if pr.Author != "" {
 		out = append(out, label("author", person(pr.AuthorName, pr.Author)))
 	}
