@@ -46,7 +46,7 @@ func TestRemoteTextCannotEmitTerminalControls(t *testing.T) {
 	bad := "visible\x1b[31m\a\r\n\u0085text"
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 30
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number:       7,
 		Title:        bad,
 		Author:       bad,
@@ -58,7 +58,7 @@ func TestRemoteTextCannotEmitTerminalControls(t *testing.T) {
 	}}})
 	m.board.Apply(board.Result{Index: 1})
 	m.cursor = m.firstRowSlot()
-	m.detail[7] = github.Detail{
+	m.detail[prKey(7)] = github.Detail{Repo: testRepo,
 		Number:        7,
 		DefaultBranch: "main",
 		Reviewers:     []github.Reviewer{{Name: bad, Login: bad}},

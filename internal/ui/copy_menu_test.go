@@ -16,9 +16,9 @@ func copyMenuBoard(t *testing.T) Model {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "first", URL: "https://x/1", HeadRefName: "feat/one", Author: "ann"},
-		{Number: 2, Title: "second", URL: "https://x/2", HeadRefName: "feat/two", Author: "bob"},
-		{Number: 3, Title: "third"},
+		{Repo: testRepo, Number: 1, Title: "first", URL: "https://x/1", HeadRefName: "feat/one", Author: "ann"},
+		{Repo: testRepo, Number: 2, Title: "second", URL: "https://x/2", HeadRefName: "feat/two", Author: "bob"},
+		{Repo: testRepo, Number: 3, Title: "third"},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m.fetching = false

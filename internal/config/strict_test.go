@@ -9,8 +9,8 @@ import (
 
 func TestLoadRejectsUnknownConfigFields(t *testing.T) {
 	for _, body := range []string{
-		"repo: o/r\nruless: []\n",
-		"repo: o/r\nrules:\n  - name: mine\n    query: author:@me\n    limti: 20\n",
+		"repos:\n  - name: o/r\nruless: []\n",
+		"repos:\n  - name: o/r\nrules:\n  - name: mine\n    query: author:@me\n    limti: 20\n",
 	} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "config.yml")
@@ -27,7 +27,7 @@ func TestLoadRejectsUnknownConfigFields(t *testing.T) {
 func TestLoadRejectsTrailingYAMLDocument(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yml")
-	body := "repo: o/r\nrules:\n  - name: mine\n    query: author:@me\n---\nrepo: ignored/repo\n"
+	body := "repos:\n  - name: o/r\nrules:\n  - name: mine\n    query: author:@me\n---\nrepo: ignored/repo\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestLoadRejectsTrailingYAMLDocument(t *testing.T) {
 func TestValidateRejectsMalformedRepo(t *testing.T) {
 	for _, repo := range []string{"owner", "/repo", "owner/", "a/b/c", " owner/repo", "owner /repo", "owner/re po"} {
 		cfg := Default()
-		cfg.Repo = repo
+		cfg.Repos = []Repo{{Name: repo}}
 		if err := cfg.Validate(); err == nil {
 			t.Errorf("repo %q validated", repo)
 		}
@@ -59,7 +59,7 @@ func TestValidateRuleLimitBounds(t *testing.T) {
 		{limit: 101, valid: false},
 	} {
 		cfg := Default()
-		cfg.Repo = "owner/repo"
+		cfg.Repos = []Repo{{Name: "owner/repo"}}
 		cfg.Rules[0].Limit = tc.limit
 		err := cfg.Validate()
 		if (err == nil) != tc.valid {
@@ -70,7 +70,7 @@ func TestValidateRuleLimitBounds(t *testing.T) {
 
 func TestValidateActionContracts(t *testing.T) {
 	base := Default()
-	base.Repo = "owner/repo"
+	base.Repos = []Repo{{Name: "owner/repo"}}
 	for _, tc := range []struct {
 		name    string
 		actions []Action
@@ -109,7 +109,7 @@ func TestPageSizeDefaultsOnlyZero(t *testing.T) {
 
 func TestValidateRejectsWhitespaceActionFields(t *testing.T) {
 	cfg := Default()
-	cfg.Repo = "owner/repo"
+	cfg.Repos = []Repo{{Name: "owner/repo"}}
 	for _, action := range []Action{
 		{Key: " ", Name: "name", Run: "true"},
 		{Key: "w", Name: " ", Run: "true"},
@@ -128,7 +128,7 @@ func TestValidateRejectsWhitespaceActionFields(t *testing.T) {
 func TestSelectionKeysAreReserved(t *testing.T) {
 	for _, key := range []string{"v", " ", "space"} {
 		c := Config{
-			Repo:    "o/r",
+			Repos:   []Repo{{Name: "o/r"}},
 			Rules:   []Rule{{Name: "Mine", Query: "author:@me"}},
 			Actions: []Action{{Key: key, Name: "clash", Run: "true"}},
 		}

@@ -40,7 +40,7 @@ func TestActionTemplateStringsAreShellQuoted(t *testing.T) {
 	for _, value := range values {
 		t.Run(strconv.Quote(value), func(t *testing.T) {
 			m := New(testCfg(), nil)
-			line, err := m.renderAction("printf '%s' {{.Title}}", github.PR{Title: value})
+			line, err := m.renderAction("printf '%s' {{.Title}}", github.PR{Repo: testRepo, Title: value})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -63,7 +63,7 @@ func TestEveryRemoteStringTemplateFieldCannotInjectShell(t *testing.T) {
 			output := filepath.Join(dir, "output")
 			value := "literal; touch " + marker
 			m := New(testCfg(), nil)
-			pr := github.PR{
+			pr := github.PR{Repo: testRepo,
 				HeadRefName: value,
 				BaseRefName: value,
 				URL:         value,
@@ -113,7 +113,7 @@ func TestRemoteTemplateFieldsRejectUnsafeShellContexts(t *testing.T) {
 	} {
 		t.Run(strconv.Quote(tmpl), func(t *testing.T) {
 			m := New(testCfg(), nil)
-			if _, err := m.renderAction(tmpl, github.PR{Title: "remote"}); err == nil {
+			if _, err := m.renderAction(tmpl, github.PR{Repo: testRepo, Title: "remote"}); err == nil {
 				t.Fatalf("renderAction accepted unsafe remote-field context %q", tmpl)
 			}
 		})

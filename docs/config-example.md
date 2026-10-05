@@ -9,12 +9,12 @@ counts are real measurements from the board this was developed against, taken
 section swallows the one below it. They will drift; treat them as illustrative
 proportions rather than numbers to reproduce.
 
-Copy this into `~/.config/pile/config.yml`, editing `repo`, `repoPath` and
-the logins.
+Copy this into `~/.config/pile/config.yml`, editing `repos` and the logins.
 
 ```yaml
-repo: acme/monorepo
-repoPath: ~/Repos/acme
+repos:
+  - name: acme/monorepo
+    path: ~/Repos/acme
 refresh: 3m
 
 rules:
