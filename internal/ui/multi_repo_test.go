@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -166,14 +168,54 @@ func TestActionRefusesARepoNotInRepos(t *testing.T) {
 	}
 }
 
-func TestMultiActionAcrossReposRefusesOnlyWhenItNamesTheRepo(t *testing.T) {
+// Numbers and branches repeat across repos, so a selection that spans them
+// only runs an action that does not depend on which repo it is in.
+func TestMultiActionAcrossReposRefusesRepoBoundFields(t *testing.T) {
 	m := multiRepoBoard(t)
-	prs := []github.PR{{Repo: "o/r", Number: 1}, {Repo: "o/api", Number: 1}}
-	if _, err := m.renderMultiAction("echo {{.Repo}} {{.Numbers}}", prs); err == nil {
-		t.Error("a .Repo action over two repos should refuse")
+	prs := []github.PR{{Repo: "o/r", Number: 1, URL: "u1"}, {Repo: "o/api", Number: 1, URL: "u2"}}
+	for _, tmpl := range []string{"echo {{.Repo}} {{.Numbers}}", "gh pr merge {{.Numbers}}", "echo {{.Branches}}"} {
+		if _, err := m.renderMultiAction(tmpl, prs); err == nil {
+			t.Errorf("%q over two repos should refuse", tmpl)
+		}
 	}
-	if got, err := m.renderMultiAction("echo {{.Numbers}}", prs); err != nil || got != "echo 1 1" {
-		t.Errorf("an action without .Repo should run: %q, %v", got, err)
+	if got, err := m.renderMultiAction("open {{.URLs}}", prs); err != nil || got != "open 'u1' 'u2'" {
+		t.Errorf("a URL-only action should run: %q, %v", got, err)
+	}
+}
+
+// An action runs in its PR's checkout, so `tuicr pr {{.Number}}` finds the
+// right #12 whichever repo pile was started from.
+func TestActionRunsInThePRsCheckout(t *testing.T) {
+	m := multiRepoBoard(t)
+	home, _ := os.UserHomeDir()
+	m.cfg.Repos[0].Path = "~/src/r"
+	for _, c := range []struct {
+		tmpl string
+		prs  []github.PR
+		dir  string
+		ok   bool
+	}{
+		{"tuicr pr {{.Number}}", []github.PR{{Repo: "o/r", Number: 1}}, filepath.Join(home, "src/r"), true},
+		// o/api has no path: #1 alone would be a guess at which repo.
+		{"tuicr pr {{.Number}}", []github.PR{{Repo: "o/api", Number: 1}}, "", false},
+		// Naming the repo makes the command say where it acts.
+		{"gh pr view {{.Number}} -R {{.Repo}}", []github.PR{{Repo: "o/api", Number: 1}}, "", true},
+		{"open {{.URL}}", []github.PR{{Repo: "o/api", Number: 1}}, "", true},
+		{"open {{.URLs}}", []github.PR{{Repo: "o/r", Number: 1}, {Repo: "o/api", Number: 1}}, "", true},
+	} {
+		dir, err := m.actionDir(c.tmpl, c.prs)
+		if (err == nil) != c.ok || dir != c.dir {
+			t.Errorf("%q on %v: got dir %q, err %v; want dir %q, ok %v", c.tmpl, c.prs[0].Key(), dir, err, c.dir, c.ok)
+		}
+	}
+}
+
+// One repo is what every config was before repos:, so a repo without a path
+// keeps running where pile was started.
+func TestSingleRepoActionRunsWherePileStarted(t *testing.T) {
+	m := New(testCfg(), nil)
+	if dir, err := m.actionDir("tuicr pr {{.Number}}", []github.PR{{Repo: testRepo, Number: 1}}); err != nil || dir != "" {
+		t.Errorf("got dir %q, err %v", dir, err)
 	}
 }
 

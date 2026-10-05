@@ -226,8 +226,16 @@ also rejected when the template uses a remote field. `Repo` and `RepoPath` are
 the PR's own repo's `name` and `path` from `repos`, so they are trusted config
 text and remain shell text, as does the command itself, so expansions, pipes and
 redirects written in `run` still work. An action that uses `{{.RepoPath}}`
-refuses a PR whose repo has no `path`, and a `multi` action that uses
-`{{.Repo}}` or `{{.RepoPath}}` refuses a selection that spans repos.
+refuses a PR whose repo has no `path`.
+
+An action runs in its PR's checkout when that repo has a `path`, so
+`tuicr pr {{.Number}}` reviews the right #12 whichever directory pile was
+started from. Without a `path` it runs where pile was started. On a board with
+several repos that would be a guess, so an action using a number, branch or base
+refuses there unless it names the repo with `{{.Repo}}` or `{{.RepoPath}}`.
+Numbers and branches repeat across repos, so a `multi` action using any of
+those, or `{{.Repo}}`/`{{.RepoPath}}`, refuses a selection that spans repos;
+one using only `{{.URLs}}`, `{{.Authors}}` or `{{.Titles}}` still runs.
 
 [docs/config-example.md](docs/config-example.md) works a five-section team board
 through end to end: what each rule claims versus what it actually shows once the
