@@ -55,7 +55,9 @@ func TestFirstRunWritesStarterConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "config.yml")
 	withConfigPath(t, path)
-	t.Setenv("PILE_REPO", "inferred/repo")
+	orig := detectRepo
+	detectRepo = func() (string, error) { return "inferred/repo", nil }
+	t.Cleanup(func() { detectRepo = orig })
 
 	cfg, err := Load()
 	if err != nil {

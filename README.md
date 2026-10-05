@@ -47,8 +47,8 @@ exactly `owner/name`, rule limits are `1` through `100` (`0` means the default
 `20`), and action mode is either `background` or `suspend`.
 
 On first run inside a GitHub checkout, the repo is inferred with `gh` and a
-commented starter config is written. Outside a checkout, `PILE_REPO=owner/name`
-names the repo for that starter config instead.
+commented starter config is written. Outside a checkout, write the config
+yourself with a `repos:` list.
 
 `repos` lists every repo the board reads. Each has a `name`, an optional `path`
 where it is checked out (for `{{.RepoPath}}`), and an optional `label`, which
