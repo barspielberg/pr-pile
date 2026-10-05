@@ -44,6 +44,7 @@ func TestWatchEvents(t *testing.T) {
 	}{
 		{"nothing changed", open(base), ""},
 		{"ci passed", open(with(func(p *github.PR) { p.CIState = "SUCCESS" })), "CI passed"},
+		{"ci cancelled", open(with(func(p *github.PR) { p.CIState = "CANCELLED" })), "CI cancelled"},
 		// The first failing check is the news, while the rest still run.
 		{"first failure while running", open(with(func(p *github.PR) { p.FailedGates = []string{"lint"} })), "CI failed: lint"},
 		{"approved", open(with(func(p *github.PR) { p.Review = "APPROVED" })), "approved"},

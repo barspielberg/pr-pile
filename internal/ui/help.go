@@ -104,6 +104,7 @@ func (m Model) helpBlocks() []helpBlock {
 			glyph("✓", "passing", okStyle),
 			glyph("✗2", "2 checks failing", errorStyle),
 			glyph("◐", "running", attentionStyle),
+			glyph("⊘", "cancelled, nothing failing", mutedStyle),
 			glyph("·", "no checks", mutedStyle),
 		}},
 		{"REVIEW", []helpRow{

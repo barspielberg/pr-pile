@@ -10,7 +10,7 @@ import (
 	"unicode"
 )
 
-// ciCell returns the 2-cell CI glyph plus count. Four distinct silhouettes so
+// ciCell returns the 2-cell CI glyph plus count. Five distinct silhouettes so
 // the state survives losing colour.
 func ciCell(pr github.PR) (string, lipgloss.Style) {
 	switch pr.CIState {
@@ -28,6 +28,8 @@ func ciCell(pr github.PR) (string, lipgloss.Style) {
 		}
 	case "PENDING", "EXPECTED":
 		return "◐ ", attentionStyle
+	case "CANCELLED":
+		return "⊘ ", mutedStyle
 	default:
 		return "· ", mutedStyle
 	}

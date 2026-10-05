@@ -1332,6 +1332,28 @@ func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
 	}
 }
 
+// A cancelled check is named so a blocked PR never reads as green, but in the
+// muted glyph rather than the failure one: it wants a re-run, not a fix.
+func TestChecksOverlayNamesCancelledChecksApartFromFailures(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 24
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
+		Number: 7, Title: "t", CIState: "CANCELLED", UpdatedAt: time.Now(),
+		CancelledGates: []string{"Build"}, PassedCount: 3,
+	}}})
+	m.board.Apply(board.Result{Index: 1})
+	m = onRow(t, m, 0)
+	m.showChecks = true
+
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "⊘ Build (cancelled)") {
+		t.Errorf("cancelled check not named:\n%s", out)
+	}
+	if strings.Contains(out, "✗ Build") || strings.Contains(out, "all 3 checks passing") {
+		t.Errorf("a cancelled check read as failing or as all green:\n%s", out)
+	}
+}
+
 // Nearly half the live board sits in PENDING rollup state, where there is
 // nothing failing at all. Before pending gates were carried, `d` answered
 // "no failing checks" on all of them, which is a dead end.
