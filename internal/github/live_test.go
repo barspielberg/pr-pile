@@ -16,10 +16,10 @@ func TestLive(t *testing.T) {
 		t.Skip("live API test")
 	}
 	cfg := config.Default()
-	repo := os.Getenv("PILE_REPO")
+	repo := os.Getenv("PILE_LIVE_REPO")
 	cfg.Repos = []config.Repo{{Name: repo}}
 	if repo == "" {
-		t.Skip("set PILE_REPO to the repo to test against")
+		t.Skip("set PILE_LIVE_REPO to the repo to test against")
 	}
 	c, err := github.New()
 	if err != nil {
@@ -54,9 +54,9 @@ func TestLiveWatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live API test")
 	}
-	repo := os.Getenv("PILE_REPO")
+	repo := os.Getenv("PILE_LIVE_REPO")
 	if repo == "" {
-		t.Skip("set PILE_REPO to the repo to test against")
+		t.Skip("set PILE_LIVE_REPO to the repo to test against")
 	}
 	c, err := github.New()
 	if err != nil {
