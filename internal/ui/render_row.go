@@ -88,6 +88,9 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	// The repo leads the row, before the tree prefix: a chain never crosses
 	// repos, and a column of its own keeps it from reading as part of the title.
 	if rw := m.repoWidth(); rw > 0 {
+		// Without the tree prefix's blank cells between them, the pick and
+		// watch signs would touch the label.
+		b.WriteString(paint(fgStyle).Render(" "))
 		b.WriteString(hitRuns(pad(clip(m.repoTag(r.PR), rw), rw),
 			cellHits(spans, cells.repo), mutedStyle, paint))
 		b.WriteString(paint(fgStyle).Render(" "))
