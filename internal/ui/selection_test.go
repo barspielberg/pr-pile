@@ -18,13 +18,13 @@ func selectBoard(t *testing.T) Model {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "first", URL: "https://x/1"},
-		{Number: 2, Title: "second", URL: "https://x/2"},
-		{Number: 3, Title: "third", URL: "https://x/3"},
+		{Repo: testRepo, Number: 1, Title: "first", URL: "https://x/1"},
+		{Repo: testRepo, Number: 2, Title: "second", URL: "https://x/2"},
+		{Repo: testRepo, Number: 3, Title: "third", URL: "https://x/3"},
 	}})
 	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{
-		{Number: 4, Title: "fourth", URL: "https://x/4"},
-		{Number: 5, Title: "fifth", URL: "https://x/5"},
+		{Repo: testRepo, Number: 4, Title: "fourth", URL: "https://x/4"},
+		{Repo: testRepo, Number: 5, Title: "fifth", URL: "https://x/5"},
 	}})
 	m.fetching = false
 	m.cursor = m.firstRowSlot()
@@ -82,7 +82,7 @@ func TestSpaceOnAHeaderSelectsNothing(t *testing.T) {
 func TestSpaceOnANoteSelectsNothing(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 1, Title: "a"}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 1, Title: "a"}}})
 	m.board.Apply(board.Result{Index: 1}) // resolves empty, so it draws a note
 	m.fetching = false
 	for i, s := range m.slots() {
@@ -126,11 +126,11 @@ func TestSelectionSurvivesRowsMovingOnRefresh(t *testing.T) {
 
 	m.board.Refetch()
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 9, Title: "new arrival", URL: "https://x/9"},
-		{Number: 1, Title: "first", URL: "https://x/1"},
-		{Number: 2, Title: "second", URL: "https://x/2"},
+		{Repo: testRepo, Number: 9, Title: "new arrival", URL: "https://x/9"},
+		{Repo: testRepo, Number: 1, Title: "first", URL: "https://x/1"},
+		{Repo: testRepo, Number: 2, Title: "second", URL: "https://x/2"},
 	}})
-	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{{Number: 4, Title: "fourth"}}})
+	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{{Repo: testRepo, Number: 4, Title: "fourth"}}})
 
 	if got := selectedNumbers(m); !equalInts(got, []int{2}) {
 		t.Fatalf("selection = %v after reorder, want [2] -- selection must key on PR number", got)
@@ -141,7 +141,7 @@ func TestSelectionDropsPRsThatLeftTheBoard(t *testing.T) {
 	m := selectBoard(t)
 	m = pressKey(m, " ") // PR 1
 	m.board.Refetch()
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 2, Title: "second"}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 2, Title: "second"}}})
 	m.board.Apply(board.Result{Index: 1})
 	if got := selectedNumbers(m); len(got) != 0 {
 		t.Fatalf("selection = %v, want empty once the PR left the board", got)
@@ -429,9 +429,9 @@ func TestCopySkipsSelectedPRsWithNoURL(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "a", URL: "https://x/1"},
-		{Number: 2, Title: "b"}, // no url
-		{Number: 3, Title: "c", URL: "https://x/3"},
+		{Repo: testRepo, Number: 1, Title: "a", URL: "https://x/1"},
+		{Repo: testRepo, Number: 2, Title: "b"}, // no url
+		{Repo: testRepo, Number: 3, Title: "c", URL: "https://x/3"},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m.fetching = false
@@ -746,7 +746,7 @@ func TestFooterCountsOnlyPRsStillOnTheBoard(t *testing.T) {
 	m = pressKey(m, " ") // PR 2
 
 	m.board.Refetch()
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 2, Title: "second", URL: "https://x/2"}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 2, Title: "second", URL: "https://x/2"}}})
 	m.board.Apply(board.Result{Index: 1})
 
 	if n := len(m.selection); n != 2 {

@@ -78,6 +78,27 @@ func TestSearchBucketsChecksByState(t *testing.T) {
 	}
 }
 
+// A rule can search several repos, so each PR carries the repo it came from.
+func TestSearchCarriesEachPRsRepo(t *testing.T) {
+	const body = `{"data":{"search":{"nodes":[
+	  {"number":1,"repository":{"nameWithOwner":"o/r"}},
+	  {"number":1,"repository":{"nameWithOwner":"o/api"}}
+	]}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	prs, err := c.Search(context.Background(), "q", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 2 || prs[0].Key() != (Key{"o/r", 1}) || prs[1].Key() != (Key{"o/api", 1}) {
+		t.Errorf("want o/r#1 and o/api#1, got %+v", prs)
+	}
+}
+
 // A PR that no longer resolves comes back null beside the others, with an
 // error in the same body; the rest of the poll still counts.
 func TestWatchParsesEachAliasAndSkipsMissing(t *testing.T) {
@@ -149,5 +170,29 @@ func TestWatchFailsWhenTheRepoIsMissing(t *testing.T) {
 	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
 	if _, err := c.Watch(context.Background(), "o/r", []int{1}); err == nil {
 		t.Error("a missing repo should fail the poll, not drop every watch")
+	}
+}
+
+// A fork's branch is not in the base repo, so compare needs owner:branch.
+func TestSearchCarriesAForksHeadOwner(t *testing.T) {
+	const body = `{"data":{"search":{"nodes":[
+	  {"number":1,"headRefName":"feat","isCrossRepository":true,"headRepositoryOwner":{"login":"fork"},"repository":{"nameWithOwner":"o/r"}},
+	  {"number":2,"headRefName":"fix","isCrossRepository":false,"headRepositoryOwner":{"login":"o"},"repository":{"nameWithOwner":"o/r"}}
+	]}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	prs, err := c.Search(context.Background(), "q", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prs[0].CompareRef(); got != "fork:feat" {
+		t.Errorf("fork: got %q, want fork:feat", got)
+	}
+	if got := prs[1].CompareRef(); got != "fix" {
+		t.Errorf("same repo: got %q, want fix", got)
 	}
 }

@@ -9,7 +9,7 @@ import (
 )
 
 func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
-	picked := m.isSelected(r.PR.Number)
+	picked := m.isSelected(r.PR.Key())
 	t := widthTierFor(m.width, showAuthor)
 	tw := m.searchTitleWidth(showAuthor)
 
@@ -23,7 +23,7 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	ci, ciStyle := ciCell(live)
 	rev, revStyle := reviewCell(live)
 	blocker, blockerStyle := blockerCell(live)
-	watch, watchStyle := m.watchCell(r.PR.Number)
+	watch, watchStyle := m.watchCell(r.PR.Key())
 
 	titleStyle := fgStyle
 	if r.PR.IsDraft {
@@ -85,6 +85,13 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	var b strings.Builder
 	b.WriteString(paint(accent).Render(mark))
 	b.WriteString(paint(pickStyle).Render(pick))
+	// The repo leads the row, before the tree prefix: a chain never crosses
+	// repos, and a column of its own keeps it from reading as part of the title.
+	if rw := m.repoWidth(); rw > 0 {
+		b.WriteString(hitRuns(pad(clip(m.repoTag(r.PR), rw), rw),
+			cellHits(spans, cells.repo), mutedStyle, paint))
+		b.WriteString(paint(fgStyle).Render(" "))
+	}
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
 	b.WriteString(hitRuns(pad("#"+fmt.Sprint(r.PR.Number), numberWidth),
 		cellHits(spans, cells.number), accent, paint))

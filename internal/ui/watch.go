@@ -28,9 +28,12 @@ type watchEntry struct {
 
 type watchMsg struct {
 	sent  time.Time
-	asked []int
-	got   map[int]github.Watched
+	asked []github.Key
+	got   map[github.Key]github.Watched
 	err   error
+	// failed is the repos whose poll errored. Their PRs are absent from got
+	// without being gone, so they keep their watches and wait for the next poll.
+	failed map[string]bool
 }
 
 // A mixed set is watched rather than flipped PR by PR, so one press never
@@ -42,23 +45,23 @@ func (m Model) toggleWatch() (Model, tea.Cmd) {
 	}
 	all := true
 	for _, pr := range prs {
-		if m.watched[pr.Number] == nil {
+		if m.watched[pr.Key()] == nil {
 			all = false
 		}
 	}
 	m.clearSelection()
 	if all {
 		for _, pr := range prs {
-			delete(m.watched, pr.Number)
+			delete(m.watched, pr.Key())
 		}
-		return m.setBriefStatus("stopped watching " + prCount(prs))
+		return m.setBriefStatus("stopped watching " + m.prCount(prs))
 	}
 	for _, pr := range prs {
-		if m.watched[pr.Number] == nil {
-			m.watched[pr.Number] = &watchEntry{pr: pr}
+		if m.watched[pr.Key()] == nil {
+			m.watched[pr.Key()] = &watchEntry{pr: pr}
 		}
 	}
-	m, expire := m.setBriefStatus("watching " + prCount(prs))
+	m, expire := m.setBriefStatus("watching " + m.prCount(prs))
 	m, poll := m.pollNow()
 	return m, tea.Batch(expire, poll)
 }
@@ -80,9 +83,9 @@ var fetchWatched = func(ctx context.Context, c *github.Client, repo string, numb
 	return c.Watch(ctx, repo, numbers)
 }
 
-func prCount(prs []github.PR) string {
+func (m Model) prCount(prs []github.PR) string {
 	if len(prs) == 1 {
-		return fmt.Sprintf("#%d", prs[0].Number)
+		return m.prRef(prs[0])
 	}
 	return fmt.Sprintf("%d PRs", len(prs))
 }
@@ -96,30 +99,47 @@ func (m Model) pollNow() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.watchInflight = true
-	numbers := make([]int, 0, len(m.watched))
-	for n := range m.watched {
-		numbers = append(numbers, n)
+	asked := make([]github.Key, 0, len(m.watched))
+	byRepo := map[string][]int{}
+	for key := range m.watched {
+		asked = append(asked, key)
+		byRepo[key.Repo] = append(byRepo[key.Repo], key.Number)
 	}
-	sort.Ints(numbers)
-	client, repo := m.client, m.cfg.Repo
+	for _, numbers := range byRepo {
+		sort.Ints(numbers)
+	}
+	client := m.client
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		sent := time.Now()
-		got, err := fetchWatched(ctx, client, repo, numbers)
-		return watchMsg{sent: sent, asked: numbers, got: got, err: err}
+		msg := watchMsg{sent: time.Now(), asked: asked,
+			got: make(map[github.Key]github.Watched, len(asked)), failed: map[string]bool{}}
+		for repo, numbers := range byRepo {
+			polled, err := fetchWatched(ctx, client, repo, numbers)
+			if err != nil {
+				msg.failed[repo] = true
+				if msg.err == nil {
+					msg.err = fmt.Errorf("%s: %w", repo, err)
+				}
+				continue
+			}
+			for n, w := range polled {
+				msg.got[github.Key{Repo: repo, Number: n}] = w
+			}
+		}
+		return msg
 	}
 }
 
 // pollMissed polls again when a watch started while the last poll was out,
 // so the new row does not wait for the next refresh.
-func (m Model) pollMissed(asked []int) (Model, tea.Cmd) {
-	was := make(map[int]bool, len(asked))
-	for _, n := range asked {
-		was[n] = true
+func (m Model) pollMissed(asked []github.Key) (Model, tea.Cmd) {
+	was := make(map[github.Key]bool, len(asked))
+	for _, key := range asked {
+		was[key] = true
 	}
-	for n := range m.watched {
-		if !was[n] {
+	for key := range m.watched {
+		if !was[key] {
 			return m.pollNow()
 		}
 	}
@@ -135,59 +155,66 @@ type notice struct {
 
 func (m Model) applyWatch(msg watchMsg) (Model, tea.Cmd) {
 	m.watchInflight = false
+	var failure string
 	if msg.err != nil {
-		if m.status == "" {
-			m = m.setStatus("watch failed: " + terminalText(msg.err.Error()))
-		}
-		return m.pollMissed(msg.asked)
+		failure = "watch failed: " + terminalText(msg.err.Error())
 	}
 
 	var news []notice
 	var gone []string
-	for _, n := range msg.asked {
-		e := m.watched[n]
-		if e == nil {
-			// Unwatched while the poll was out.
+	for _, key := range msg.asked {
+		e := m.watched[key]
+		if e == nil || msg.failed[key.Repo] {
+			// Unwatched while the poll was out, or its repo did not answer.
 			continue
 		}
-		now, ok := msg.got[n]
+		now, ok := msg.got[key]
 		if !ok {
 			// Deleted, transferred or no longer visible to this token. It may
 			// already be off the board, where `m` cannot reach it to stop.
-			delete(m.watched, n)
-			gone = append(gone, fmt.Sprintf("#%d not found, stopped watching", n))
+			delete(m.watched, key)
+			gone = append(gone, m.prRef(e.pr)+" not found, stopped watching")
 			continue
 		}
 		if events := watchEvents(e.pr, now); len(events) > 0 {
 			e.unseen = true
-			news = append(news, notice{number: n, url: now.URL, title: terminalText(now.Title),
-				text: fmt.Sprintf("#%d %s", n, strings.Join(events, ", "))})
+			news = append(news, notice{number: key.Number, url: now.URL, title: terminalText(now.Title),
+				text: m.prRef(e.pr) + " " + strings.Join(events, ", ")})
 		}
 		// mergeable is UNKNOWN while GitHub recomputes it, so a flip through
 		// UNKNOWN is not a change; keep the last answer it actually gave.
 		if !knownMergeable(now.Mergeable) {
 			now.Mergeable = e.pr.Mergeable
 		}
+		// The board's copy keeps its own repo, so the row's key does not change.
+		now.PR.Repo = e.pr.Repo
 		e.pr, e.at = now.PR, msg.sent
 		if now.State != "OPEN" {
 			// Off the board now rather than at the next refresh: the search
 			// only returns open PRs, so the row has nothing left to say.
-			delete(m.watched, n)
-			delete(m.selection, n)
-			delete(m.rangeOwned, n)
-			m.board.Hide(n)
+			delete(m.watched, key)
+			delete(m.selection, key)
+			delete(m.rangeOwned, key)
+			m.board.Hide(key)
 			m.clampCursor()
 		}
 	}
 	m, poll := m.pollMissed(msg.asked)
 	if len(news) == 0 && len(gone) == 0 {
+		if failure != "" && m.status == "" {
+			m = m.setStatus(failure)
+		}
 		return m, poll
 	}
 	var texts []string
 	for _, n := range news {
 		texts = append(texts, n.text)
 	}
-	m = m.setStatus(strings.Join(append(texts, gone...), " · "))
+	texts = append(texts, gone...)
+	if failure != "" {
+		texts = append(texts, failure)
+	}
+	m = m.setStatus(strings.Join(texts, " · "))
 	m.watchNews = m.status
 	return m, tea.Batch(poll, m.notify(news))
 }
@@ -253,7 +280,7 @@ func ciOutcome(pr github.PR) string {
 // when that is fresher than the board, so a row does not say ◐ for minutes
 // after the status line said CI passed.
 func (m Model) statusPR(pr github.PR) github.PR {
-	if e := m.watched[pr.Number]; e != nil && e.at.After(m.boardAt) {
+	if e := m.watched[pr.Key()]; e != nil && e.at.After(m.boardAt) {
 		return e.pr
 	}
 	return pr
@@ -266,8 +293,8 @@ const (
 	newsGlyph  = "⚑"
 )
 
-func (m Model) watchCell(number int) (string, lipgloss.Style) {
-	e := m.watched[number]
+func (m Model) watchCell(key github.Key) (string, lipgloss.Style) {
+	e := m.watched[key]
 	switch {
 	case e == nil:
 		return " ", fgStyle
@@ -280,7 +307,7 @@ func (m Model) watchCell(number int) (string, lipgloss.Style) {
 
 func (m Model) markSeen(prs ...github.PR) {
 	for _, pr := range prs {
-		if e := m.watched[pr.Number]; e != nil {
+		if e := m.watched[pr.Key()]; e != nil {
 			e.unseen = false
 		}
 	}
@@ -330,7 +357,12 @@ func (m Model) watchedPRs() []github.PR {
 	for _, e := range m.watched {
 		prs = append(prs, e.pr)
 	}
-	sort.Slice(prs, func(i, j int) bool { return prs[i].Number < prs[j].Number })
+	sort.Slice(prs, func(i, j int) bool {
+		if prs[i].Repo != prs[j].Repo {
+			return prs[i].Repo < prs[j].Repo
+		}
+		return prs[i].Number < prs[j].Number
+	})
 	return prs
 }
 

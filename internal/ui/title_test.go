@@ -119,7 +119,7 @@ func TestTitlesWithoutAPrefixRenderUntouched(t *testing.T) {
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	for _, title := range []string{"Use mobile as brand name", "Fix location widget"} {
-		m := loaded(t, 100, 20, []github.PR{{
+		m := loaded(t, 100, 20, []github.PR{{Repo: testRepo,
 			Number: 3248, Title: title, CIState: "SUCCESS", UpdatedAt: time.Now(),
 		}}, nil)
 		m.cursor = -1
@@ -142,7 +142,7 @@ func TestSearchFillWinsOverPrefixColour(t *testing.T) {
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	title := "fix(ordering): AF-13043 wizard dependency modal"
-	mine := []github.PR{{
+	mine := []github.PR{{Repo: testRepo,
 		Number: 3248, Title: title, CIState: "SUCCESS", UpdatedAt: time.Now(),
 	}}
 	fill := hitFill()
@@ -264,7 +264,7 @@ func TestEveryTypeSharesOneColour(t *testing.T) {
 
 	seg := func(word string) string {
 		t.Helper()
-		m := loaded(t, 120, 20, []github.PR{{
+		m := loaded(t, 120, 20, []github.PR{{Repo: testRepo,
 			Number: 3248, Title: word + "(ordering): do the thing",
 			CIState: "SUCCESS", UpdatedAt: time.Now(),
 		}}, nil)
@@ -303,7 +303,7 @@ func TestPrefixColourLayersOntoTheRowStyle(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	m := loaded(t, 120, 20, []github.PR{{
+	m := loaded(t, 120, 20, []github.PR{{Repo: testRepo,
 		Number: 3248, Title: "feat(ordering): add the thing",
 		CIState: "SUCCESS", IsDraft: true, UpdatedAt: time.Now(),
 	}}, nil)
