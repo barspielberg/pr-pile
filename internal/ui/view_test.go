@@ -15,9 +15,13 @@ import (
 	"github.com/muesli/termenv"
 )
 
+// testRepo is the configured repo of every test board, and the repo of every
+// test PR unless a test is about another one.
+const testRepo = "o/r"
+
 func testCfg() config.Config {
 	return config.Config{
-		Repo: "o/r",
+		Repo: testRepo,
 		Rules: []config.Rule{
 			{Name: "Mine", Query: "author:@me", Tree: true},
 			{Name: "Review requested", Query: "review-requested:@me", Author: true},
@@ -31,7 +35,7 @@ func TestViewShowsLoadingUntilFirstSectionResolves(t *testing.T) {
 
 	// Second rule arrives first; it must not render yet.
 	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{
-		{Number: 99, Title: "should not be visible yet", UpdatedAt: time.Now()},
+		{Repo: testRepo, Number: 99, Title: "should not be visible yet", UpdatedAt: time.Now()},
 	}})
 	if out := m.View(); strings.Contains(out, "should not be visible yet") {
 		t.Error("section 2 rendered before section 1 resolved:\n" + out)
@@ -43,7 +47,7 @@ func TestViewShowsLoadingUntilFirstSectionResolves(t *testing.T) {
 	}
 
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "my pr", CIState: "SUCCESS", UpdatedAt: time.Now()},
+		{Repo: testRepo, Number: 1, Title: "my pr", CIState: "SUCCESS", UpdatedAt: time.Now()},
 	}})
 	out := m.View()
 	for _, want := range []string{"my pr", "should not be visible yet", "#1", "#99"} {
@@ -56,7 +60,7 @@ func TestViewShowsLoadingUntilFirstSectionResolves(t *testing.T) {
 func TestViewRendersStatesAndGates(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width = 140
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 7, Title: "red pr", CIState: "FAILURE", Mergeable: "CONFLICTING",
 		Review: "CHANGES_REQUESTED", FailedGates: []string{"webapp_e2e"}, UpdatedAt: time.Now(),
 	}}})
@@ -86,7 +90,7 @@ func TestViewRendersStatesAndGates(t *testing.T) {
 func TestLongTitleDoesNotOverflowWidth(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width = 100
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 1, Title: strings.Repeat("very long title ", 40), CIState: "SUCCESS", UpdatedAt: time.Now(),
 	}}})
 	m.board.Apply(board.Result{Index: 1})
@@ -118,7 +122,7 @@ func TestCursorSurvivesSectionsResolving(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width = 120
 	m.cursor = 5 // stale cursor from a previous, longer board
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 1, UpdatedAt: time.Now()}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 1, UpdatedAt: time.Now()}}})
 	m.board.Apply(board.Result{Index: 1})
 	m.clampCursor()
 
@@ -141,7 +145,7 @@ func TestActionTemplateRenders(t *testing.T) {
 	cfg.RepoPath = "~/Repos/acme/monorepo"
 	m := New(cfg, nil)
 	got, err := m.renderAction("wt switch -x nvim pr:{{.Number}} # {{.Repo}} {{.RepoPath}} {{.Branch}}",
-		github.PR{Number: 42, HeadRefName: "feat/x"})
+		github.PR{Repo: testRepo, Number: 42, HeadRefName: "feat/x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +158,7 @@ func TestActionTemplateRenders(t *testing.T) {
 func TestDraftAndReviewAreSeparateColumns(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width = 150
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 1, Title: "draft but approved", IsDraft: true,
 		Review: "APPROVED", CIState: "SUCCESS", UpdatedAt: time.Now(),
 	}}})
@@ -177,7 +181,7 @@ func TestCursorStaysVisibleInShortTerminal(t *testing.T) {
 
 	var prs []github.PR
 	for i := 1; i <= 40; i++ {
-		prs = append(prs, github.PR{
+		prs = append(prs, github.PR{Repo: testRepo,
 			Number: i, Title: fmt.Sprintf("pr number %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(100-i), 0),
 		})
@@ -207,7 +211,7 @@ func TestStatusClusterIsPinnedAcrossWidths(t *testing.T) {
 	for _, w := range []int{80, 100, 120, 200} {
 		m := New(testCfg(), nil)
 		m.width = w
-		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 			Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
 			CIState: "SUCCESS", Review: "REVIEW_REQUIRED", UpdatedAt: time.Now(),
 		}}})
@@ -229,7 +233,7 @@ func TestStatusClusterIsPinnedAcrossWidths(t *testing.T) {
 }
 
 func TestNarrowWidthsDropFieldsInOrder(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3248, Title: "feat(api-service): refuse order plan writes",
 		CIState: "SUCCESS", Review: "REVIEW_REQUIRED", UpdatedAt: time.Now().Add(-2 * time.Hour),
 	}
@@ -278,7 +282,7 @@ func TestNoRowOverflowsAtAnyWidth(t *testing.T) {
 		m := New(testCfg(), nil)
 		m.width = w
 		m.cursor = -1
-		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 			Number: 3248, Title: strings.Repeat("long title ", 30),
 			CIState: "FAILURE", FailedGates: []string{"a", "b"},
 			Mergeable: "CONFLICTING", IsDraft: true, UpdatedAt: time.Now(),
@@ -318,8 +322,8 @@ func TestSelectedRowIsFilledEdgeToEdge(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width = 60
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "selected", CIState: "FAILURE", FailedGates: []string{"g"}, UpdatedAt: time.Now()},
-		{Number: 2, Title: "not selected", UpdatedAt: time.Now().Add(-time.Hour)},
+		{Repo: testRepo, Number: 1, Title: "selected", CIState: "FAILURE", FailedGates: []string{"g"}, UpdatedAt: time.Now()},
+		{Repo: testRepo, Number: 2, Title: "not selected", UpdatedAt: time.Now().Add(-time.Hour)},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m = onRow(t, m, 0)
@@ -375,8 +379,8 @@ func TestAccentIsThemedAndDoesNotChangeOnSelection(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width = 60
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "selected", UpdatedAt: time.Now()},
-		{Number: 2, Title: "not selected", UpdatedAt: time.Now().Add(-time.Hour)},
+		{Repo: testRepo, Number: 1, Title: "selected", UpdatedAt: time.Now()},
+		{Repo: testRepo, Number: 2, Title: "not selected", UpdatedAt: time.Now().Add(-time.Hour)},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m = onRow(t, m, 0)
@@ -413,7 +417,7 @@ func TestRefreshDoesNotChangeLayout(t *testing.T) {
 	mk := func(n, base int) []github.PR {
 		var out []github.PR
 		for i := 0; i < n; i++ {
-			out = append(out, github.PR{
+			out = append(out, github.PR{Repo: testRepo,
 				Number: base + i, Title: fmt.Sprintf("pr %d", base+i),
 				CIState: "SUCCESS", UpdatedAt: time.Unix(int64(1000-i), 0),
 			})
@@ -457,7 +461,7 @@ func TestFooterStaysPinnedToTheBottom(t *testing.T) {
 
 		var prs []github.PR
 		for i := 0; i < n; i++ {
-			prs = append(prs, github.PR{
+			prs = append(prs, github.PR{Repo: testRepo,
 				Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
 				CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 			})
@@ -496,10 +500,10 @@ func TestFooterStaysPinnedToTheBottom(t *testing.T) {
 func TestAuthorColumnIsPerRule(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 30
-	pr := github.PR{Number: 1, Title: "a title", Author: "octocat",
+	pr := github.PR{Repo: testRepo, Number: 1, Title: "a title", Author: "octocat",
 		CIState: "SUCCESS", UpdatedAt: time.Now()}
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{pr}})
-	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{{Repo: testRepo,
 		Number: 2, Title: "another", Author: "octocat",
 		CIState: "SUCCESS", UpdatedAt: time.Now(),
 	}}})
@@ -539,7 +543,7 @@ func TestAuthorColumnIsMutedLikeAge(t *testing.T) {
 		m := New(cfg, nil)
 		m.width, m.height = 120, 20
 		m.cursor = -1
-		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 			Number: 1, Title: "a title", Author: login,
 			CIState: "SUCCESS", UpdatedAt: time.Now(),
 		}}})
@@ -579,7 +583,7 @@ func TestAuthorColumnDoesNotOverflow(t *testing.T) {
 		m := New(cfg, nil)
 		m.width, m.height = w, 30
 		m.cursor = -1
-		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 			Number: 3248, Title: strings.Repeat("long title ", 20),
 			Author: "verylongusername", CIState: "SUCCESS", UpdatedAt: time.Now(),
 		}}})
@@ -597,8 +601,8 @@ func TestAuthorColumnDoesNotOverflow(t *testing.T) {
 // whole login finds nothing, because the rest of it is not on the row.
 func TestSearchMatchesAuthorInitials(t *testing.T) {
 	m := loaded(t, 120, 24, []github.PR{
-		{Number: 1, Title: "fix the thing", Author: "immanuel", UpdatedAt: time.Unix(900, 0)},
-		{Number: 2, Title: "unrelated work", Author: "someoneelse", UpdatedAt: time.Unix(800, 0)},
+		{Repo: testRepo, Number: 1, Title: "fix the thing", Author: "immanuel", UpdatedAt: time.Unix(900, 0)},
+		{Repo: testRepo, Number: 2, Title: "unrelated work", Author: "someoneelse", UpdatedAt: time.Unix(800, 0)},
 	}, nil)
 	rows := m.board.Sections()[0].Rows
 
@@ -632,7 +636,7 @@ func TestResolvingASectionDoesNotMoveTheOnesAboveIt(t *testing.T) {
 	m.width, m.height = 120, 40
 
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "first section row", CIState: "SUCCESS", UpdatedAt: time.Now()},
+		{Repo: testRepo, Number: 1, Title: "first section row", CIState: "SUCCESS", UpdatedAt: time.Now()},
 	}})
 
 	lineOf := func(needle string) int {
@@ -654,7 +658,7 @@ func TestResolvingASectionDoesNotMoveTheOnesAboveIt(t *testing.T) {
 		t.Errorf("an empty section landing below moved the row above it: %d -> %d", before, got)
 	}
 	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{
-		{Number: 2, Title: "third section row", CIState: "SUCCESS", UpdatedAt: time.Now()},
+		{Repo: testRepo, Number: 2, Title: "third section row", CIState: "SUCCESS", UpdatedAt: time.Now()},
 	}})
 	if got := lineOf("first section row"); got != before {
 		t.Errorf("a later section landing moved the row above it: %d -> %d", before, got)
@@ -671,11 +675,11 @@ func TestResolvedEmptySectionIsOneLine(t *testing.T) {
 	m := New(cfg, nil)
 	m.width, m.height = 120, 40
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Now()},
+		{Repo: testRepo, Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Now()},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{
-		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Now()},
+		{Repo: testRepo, Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Now()},
 	}})
 
 	lines := strings.Split(m.View(), "\n")
@@ -873,7 +877,7 @@ func TestBoardPageScrolling(t *testing.T) {
 
 	var prs []github.PR
 	for i := 0; i < 60; i++ {
-		prs = append(prs, github.PR{Number: 100 + i, Title: "t", UpdatedAt: time.Unix(int64(9000-i), 0)})
+		prs = append(prs, github.PR{Repo: testRepo, Number: 100 + i, Title: "t", UpdatedAt: time.Unix(int64(9000-i), 0)})
 	}
 	m.board.Apply(board.Result{Index: 0, PRs: prs})
 	m.board.Apply(board.Result{Index: 1, PRs: nil})
@@ -947,7 +951,7 @@ func TestSectionJumpNavigation(t *testing.T) {
 	mk := func(base, n int) []github.PR {
 		var out []github.PR
 		for i := 0; i < n; i++ {
-			out = append(out, github.PR{Number: base + i, Title: "t", UpdatedAt: time.Unix(int64(9000-i), 0)})
+			out = append(out, github.PR{Repo: testRepo, Number: base + i, Title: "t", UpdatedAt: time.Unix(int64(9000-i), 0)})
 		}
 		return out
 	}
@@ -1016,9 +1020,9 @@ func TestSectionJumpLandsOnEveryHeaderIncludingEmptyOnes(t *testing.T) {
 	m := New(cfg, nil)
 	m.width, m.height = 120, 40
 
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 1, UpdatedAt: time.Now()}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 1, UpdatedAt: time.Now()}}})
 	m.board.Apply(board.Result{Index: 1})
-	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{{Number: 2, UpdatedAt: time.Now()}}})
+	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{{Repo: testRepo, Number: 2, UpdatedAt: time.Now()}}})
 
 	starts := m.sectionStarts()
 	if len(starts) != 3 {
@@ -1051,7 +1055,7 @@ func TestCursorKeepsContextBelowIt(t *testing.T) {
 
 	var prs []github.PR
 	for i := 1; i <= 40; i++ {
-		prs = append(prs, github.PR{
+		prs = append(prs, github.PR{Repo: testRepo,
 			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 		})
@@ -1086,7 +1090,7 @@ func TestCursorReachesBothEndsOfTheList(t *testing.T) {
 	m.width, m.height = 120, 12
 	var prs []github.PR
 	for i := 1; i <= 30; i++ {
-		prs = append(prs, github.PR{
+		prs = append(prs, github.PR{Repo: testRepo,
 			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 		})
@@ -1115,7 +1119,7 @@ func TestFailingRowIsOneLineAndItsGatesAreInTheOverlay(t *testing.T) {
 
 	var prs []github.PR
 	for i := 1; i <= 20; i++ {
-		pr := github.PR{
+		pr := github.PR{Repo: testRepo,
 			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 		}
@@ -1160,7 +1164,7 @@ func TestScrollKeepsCursorVisible(t *testing.T) {
 			mk := func(base, n int) []github.PR {
 				var out []github.PR
 				for i := 0; i < n; i++ {
-					pr := github.PR{
+					pr := github.PR{Repo: testRepo,
 						Number: base + i, Title: fmt.Sprintf("pr %d", base+i),
 						CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 					}
@@ -1202,7 +1206,7 @@ func TestBoardHoldsStillUntilTheCursorNearsAnEdge(t *testing.T) {
 	m := New(testCfg(), nil)
 	var prs []github.PR
 	for i := 0; i < 30; i++ {
-		prs = append(prs, github.PR{
+		prs = append(prs, github.PR{Repo: testRepo,
 			Number: 100 + i, Title: fmt.Sprintf("pr %d", 100+i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 		})
@@ -1262,8 +1266,8 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "a", CIState: "FAILURE", FailedGates: []string{"gate-one"}, UpdatedAt: time.Unix(9000, 0)},
-		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
+		{Repo: testRepo, Number: 1, Title: "a", CIState: "FAILURE", FailedGates: []string{"gate-one"}, UpdatedAt: time.Unix(9000, 0)},
+		{Repo: testRepo, Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m = onRow(t, m, 0)
@@ -1302,7 +1306,7 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 24
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 7, Title: "t", CIState: "FAILURE", UpdatedAt: time.Now(),
 		FailedGates:  []string{"build-push-image webapp"},
 		PendingGates: []string{"webapp_e2e"},
@@ -1334,7 +1338,7 @@ func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
 func TestChecksOverlayOnPendingPRNamesWhatIsRunning(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 24
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 8, Title: "t", CIState: "PENDING", UpdatedAt: time.Now(),
 		PendingGates: []string{"run platform e2e"},
 		PassedCount:  9, SkippedCount: 12,
@@ -1357,7 +1361,7 @@ func TestChecksOverlayOnPendingPRNamesWhatIsRunning(t *testing.T) {
 func TestChecksOverlayOnGreenPRIsOneLine(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 24
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 9, Title: "t", CIState: "SUCCESS", UpdatedAt: time.Now(),
 		PassedCount: 22, SkippedCount: 10,
 	}}})
@@ -1380,7 +1384,7 @@ func TestChecksOverlayFitsThePane(t *testing.T) {
 	for _, height := range []int{8, 12, 20, 24, 50} {
 		m := New(testCfg(), nil)
 		m.width, m.height = 120, height
-		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 			Number: 1, Title: "t", CIState: "FAILURE", FailedGates: gates, UpdatedAt: time.Now(),
 		}}})
 		m.board.Apply(board.Result{Index: 1})
@@ -1414,7 +1418,7 @@ func TestChecksOverlayTallySurvivesClipping(t *testing.T) {
 	}
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 12
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 1, Title: "t", CIState: "FAILURE", FailedGates: gates,
 		PassedCount: 9, SkippedCount: 12, UpdatedAt: time.Now(),
 	}}})
@@ -1444,14 +1448,14 @@ func TestNoChromeLineAboveTheList(t *testing.T) {
 
 	var mine []github.PR
 	for i := 1; i <= 5; i++ {
-		mine = append(mine, github.PR{
+		mine = append(mine, github.PR{Repo: testRepo,
 			Number: 3000 + i, Title: fmt.Sprintf("mine %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 		})
 	}
 	m.board.Apply(board.Result{Index: 0, PRs: mine})
 	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{
-		{Number: 4001, Title: "theirs", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
+		{Repo: testRepo, Number: 4001, Title: "theirs", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
 	}})
 
 	lines := strings.Split(m.View(), "\n")
@@ -1483,7 +1487,7 @@ func TestSectionHeaderScrollsWithItsSection(t *testing.T) {
 
 	var prs []github.PR
 	for i := 1; i <= 30; i++ {
-		prs = append(prs, github.PR{
+		prs = append(prs, github.PR{Repo: testRepo,
 			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 		})
@@ -1516,7 +1520,7 @@ func TestSectionHeaderCarriesTheRowCount(t *testing.T) {
 	m.width, m.height = 120, 40
 	var mine []github.PR
 	for i := 1; i <= 4; i++ {
-		mine = append(mine, github.PR{
+		mine = append(mine, github.PR{Repo: testRepo,
 			Number: 3000 + i, Title: fmt.Sprintf("pr %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 		})
@@ -1549,10 +1553,10 @@ func TestNoBlankRowBetweenSections(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
+		{Repo: testRepo, Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
 	}})
 	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{
-		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8999, 0)},
+		{Repo: testRepo, Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8999, 0)},
 	}})
 
 	lines, slotStarts := m.body("")
@@ -1578,11 +1582,11 @@ func TestFooterNamesTheCursorSection(t *testing.T) {
 
 	var mine, review []github.PR
 	for i := 1; i <= 5; i++ {
-		mine = append(mine, github.PR{Number: 3000 + i, Title: fmt.Sprintf("mine %d", i),
+		mine = append(mine, github.PR{Repo: testRepo, Number: 3000 + i, Title: fmt.Sprintf("mine %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0)})
 	}
 	for i := 1; i <= 7; i++ {
-		review = append(review, github.PR{Number: 4000 + i, Title: fmt.Sprintf("theirs %d", i),
+		review = append(review, github.PR{Repo: testRepo, Number: 4000 + i, Title: fmt.Sprintf("theirs %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(8000-i), 0)})
 	}
 	m.board.Apply(board.Result{Index: 0, PRs: mine})
@@ -1639,11 +1643,11 @@ func TestFooterSectionCountChangesOnEveryKeypress(t *testing.T) {
 
 	var mine, review []github.PR
 	for i := 1; i <= 6; i++ {
-		mine = append(mine, github.PR{Number: 3000 + i, Title: fmt.Sprintf("mine %d", i),
+		mine = append(mine, github.PR{Repo: testRepo, Number: 3000 + i, Title: fmt.Sprintf("mine %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0)})
 	}
 	for i := 1; i <= 6; i++ {
-		review = append(review, github.PR{Number: 4000 + i, Title: fmt.Sprintf("theirs %d", i),
+		review = append(review, github.PR{Repo: testRepo, Number: 4000 + i, Title: fmt.Sprintf("theirs %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(8000-i), 0)})
 	}
 	m.board.Apply(board.Result{Index: 0, PRs: mine})
@@ -1862,7 +1866,7 @@ func keyRune(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: [
 func TestHelpScrollsThroughUpdate(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
+		{Repo: testRepo, Number: 1, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 
@@ -2180,7 +2184,7 @@ func TestSlotsAgreeWithBodyLineForLine(t *testing.T) {
 	states := []func(m *Model, i int){
 		func(m *Model, i int) { // ready with rows
 			m.board.Apply(board.Result{Index: i, PRs: []github.PR{
-				{Number: 100 + i, Title: "t", CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0)},
+				{Repo: testRepo, Number: 100 + i, Title: "t", CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0)},
 			}})
 		},
 		func(m *Model, i int) { m.board.Apply(board.Result{Index: i}) },               // empty
@@ -2245,12 +2249,12 @@ func TestFooterSectionIsCorrectForEverySlot(t *testing.T) {
 	m := New(cfg, nil)
 	m.width, m.height = 147, 30
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 11, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9002, 0)},
-		{Number: 12, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(9001, 0)},
+		{Repo: testRepo, Number: 11, Title: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(9002, 0)},
+		{Repo: testRepo, Number: 12, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(9001, 0)},
 	}})
 	m.board.Apply(board.Result{Index: 1}) // resolved empty -> header + note
 	m.board.Apply(board.Result{Index: 2, PRs: []github.PR{
-		{Number: 31, Title: "c", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
+		{Repo: testRepo, Number: 31, Title: "c", CIState: "SUCCESS", UpdatedAt: time.Unix(9000, 0)},
 	}})
 
 	for i, sl := range m.slots() {
@@ -2307,7 +2311,7 @@ func TestOneKeypressScrollsAtMostOneLineAcrossSectionStates(t *testing.T) {
 	mk := func(base, n int) []github.PR {
 		var prs []github.PR
 		for i := 0; i < n; i++ {
-			prs = append(prs, github.PR{
+			prs = append(prs, github.PR{Repo: testRepo,
 				Number: base + i, Title: fmt.Sprintf("pr %d", base+i),
 				Author: "someone", CIState: "SUCCESS", UpdatedAt: time.Unix(int64(9000-i), 0),
 			})
@@ -2408,15 +2412,15 @@ func TestNoFixedCubeColoursAnywhereOnTheBoard(t *testing.T) {
 	m := New(cfg, nil)
 	m.width, m.height = 147, 24
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "fix(api): AF-1 a failing one", CIState: "FAILURE",
+		{Repo: testRepo, Number: 1, Title: "fix(api): AF-1 a failing one", CIState: "FAILURE",
 			FailedGates: []string{"g1", "g2"}, Mergeable: "CONFLICTING", UpdatedAt: time.Now()},
-		{Number: 2, Title: "feat(web): a draft", CIState: "PENDING",
+		{Repo: testRepo, Number: 2, Title: "feat(web): a draft", CIState: "PENDING",
 			IsDraft: true, Author: "someone", UpdatedAt: time.Now()},
-		{Number: 3, Title: "chore: an approved one", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3, Title: "chore: an approved one", CIState: "SUCCESS",
 			Review: "APPROVED", Author: "other", UpdatedAt: time.Now()},
 	}})
 	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{
-		{Number: 4, Title: "plain prose title", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 4, Title: "plain prose title", CIState: "SUCCESS",
 			Review: "REVIEW_REQUIRED", Author: "third", UpdatedAt: time.Now()},
 	}})
 	m.board.Apply(board.Result{Index: 2})               // resolved empty -> note

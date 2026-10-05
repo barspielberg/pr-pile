@@ -31,6 +31,9 @@ type watchMsg struct {
 	asked []github.Key
 	got   map[github.Key]github.Watched
 	err   error
+	// failed is the repos whose poll errored. Their PRs are absent from got
+	// without being gone, so they keep their watches and wait for the next poll.
+	failed map[string]bool
 }
 
 // A mixed set is watched rather than flipped PR by PR, so one press never
@@ -105,26 +108,26 @@ func (m Model) pollNow() (Model, tea.Cmd) {
 	for _, numbers := range byRepo {
 		sort.Ints(numbers)
 	}
-	client, fallback := m.client, m.cfg.Repo
+	client := m.client
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		sent := time.Now()
-		got := make(map[github.Key]github.Watched, len(asked))
+		msg := watchMsg{sent: time.Now(), asked: asked,
+			got: make(map[github.Key]github.Watched, len(asked)), failed: map[string]bool{}}
 		for repo, numbers := range byRepo {
-			ask := repo
-			if ask == "" {
-				ask = fallback
-			}
-			polled, err := fetchWatched(ctx, client, ask, numbers)
+			polled, err := fetchWatched(ctx, client, repo, numbers)
 			if err != nil {
-				return watchMsg{sent: sent, asked: asked, err: err}
+				msg.failed[repo] = true
+				if msg.err == nil {
+					msg.err = fmt.Errorf("%s: %w", repo, err)
+				}
+				continue
 			}
 			for n, w := range polled {
-				got[github.Key{Repo: repo, Number: n}] = w
+				msg.got[github.Key{Repo: repo, Number: n}] = w
 			}
 		}
-		return watchMsg{sent: sent, asked: asked, got: got}
+		return msg
 	}
 }
 
@@ -152,19 +155,17 @@ type notice struct {
 
 func (m Model) applyWatch(msg watchMsg) (Model, tea.Cmd) {
 	m.watchInflight = false
+	var failure string
 	if msg.err != nil {
-		if m.status == "" {
-			m = m.setStatus("watch failed: " + terminalText(msg.err.Error()))
-		}
-		return m.pollMissed(msg.asked)
+		failure = "watch failed: " + terminalText(msg.err.Error())
 	}
 
 	var news []notice
 	var gone []string
 	for _, key := range msg.asked {
 		e := m.watched[key]
-		if e == nil {
-			// Unwatched while the poll was out.
+		if e == nil || msg.failed[key.Repo] {
+			// Unwatched while the poll was out, or its repo did not answer.
 			continue
 		}
 		now, ok := msg.got[key]
@@ -200,13 +201,20 @@ func (m Model) applyWatch(msg watchMsg) (Model, tea.Cmd) {
 	}
 	m, poll := m.pollMissed(msg.asked)
 	if len(news) == 0 && len(gone) == 0 {
+		if failure != "" && m.status == "" {
+			m = m.setStatus(failure)
+		}
 		return m, poll
 	}
 	var texts []string
 	for _, n := range news {
 		texts = append(texts, n.text)
 	}
-	m = m.setStatus(strings.Join(append(texts, gone...), " · "))
+	texts = append(texts, gone...)
+	if failure != "" {
+		texts = append(texts, failure)
+	}
+	m = m.setStatus(strings.Join(texts, " · "))
 	m.watchNews = m.status
 	return m, tea.Batch(poll, m.notify(news))
 }

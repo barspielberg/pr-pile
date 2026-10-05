@@ -54,7 +54,7 @@ func (m Model) fetchDetail(pr github.PR) tea.Cmd {
 
 	key, head, generation := pr.Key(), pr.HeadRefName, m.fetchGeneration
 	m.inflight[key] = detailRequest{generation: generation, head: head}
-	repo := m.repoOf(pr)
+	repo := pr.Repo
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

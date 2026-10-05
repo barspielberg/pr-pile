@@ -23,9 +23,9 @@ func multiBoard(t *testing.T, run string, multi bool) Model {
 	m := New(cfg, nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "first", URL: "https://x/1", HeadRefName: "a"},
-		{Number: 2, Title: "second", URL: "https://x/2", HeadRefName: "b"},
-		{Number: 3, Title: "third", URL: "https://x/3", HeadRefName: "c"},
+		{Repo: testRepo, Number: 1, Title: "first", URL: "https://x/1", HeadRefName: "a"},
+		{Repo: testRepo, Number: 2, Title: "second", URL: "https://x/2", HeadRefName: "b"},
+		{Repo: testRepo, Number: 3, Title: "third", URL: "https://x/3", HeadRefName: "c"},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m.fetching = false
@@ -91,10 +91,10 @@ func TestMultiActionExpandsPluralFields(t *testing.T) {
 func TestMultiActionPluralFieldsAreQuotedPerElement(t *testing.T) {
 	m := New(testCfg(), nil)
 	prs := []github.PR{
-		{Title: "plain"},
-		{Title: "with spaces"},
-		{Title: "semi;colon"},
-		{Title: "$(printf substitution)"},
+		{Repo: testRepo, Title: "plain"},
+		{Repo: testRepo, Title: "with spaces"},
+		{Repo: testRepo, Title: "semi;colon"},
+		{Repo: testRepo, Title: "$(printf substitution)"},
 	}
 	line, err := m.renderMultiAction("printf '%s\\n' {{.Titles}}", prs)
 	if err != nil {
@@ -125,7 +125,7 @@ func TestMultiActionWithNothingSelectedUsesTheCursorRow(t *testing.T) {
 func TestSingularFieldInMultiTemplateIsAnError(t *testing.T) {
 	m := New(testCfg(), nil)
 	for _, tmpl := range []string{"echo {{.Number}}", "echo {{.URL}}", "echo {{.Title}}"} {
-		if _, err := m.renderMultiAction(tmpl, []github.PR{{Number: 1}}); err == nil {
+		if _, err := m.renderMultiAction(tmpl, []github.PR{{Repo: testRepo, Number: 1}}); err == nil {
 			t.Errorf("%q was accepted in a multi action", tmpl)
 		}
 	}
@@ -134,7 +134,7 @@ func TestSingularFieldInMultiTemplateIsAnError(t *testing.T) {
 func TestPluralFieldInSingleTemplateIsAnError(t *testing.T) {
 	m := New(testCfg(), nil)
 	for _, tmpl := range []string{"echo {{.Numbers}}", "echo {{.URLs}}"} {
-		if _, err := m.renderAction(tmpl, github.PR{Number: 1}); err == nil {
+		if _, err := m.renderAction(tmpl, github.PR{Repo: testRepo, Number: 1}); err == nil {
 			t.Errorf("%q was accepted in a single action", tmpl)
 		}
 	}
@@ -148,7 +148,7 @@ func TestEveryRemotePluralTemplateFieldCannotInjectShell(t *testing.T) {
 			dir := t.TempDir()
 			marker := filepath.Join(dir, "injected")
 			value := "literal; touch " + marker
-			pr := github.PR{
+			pr := github.PR{Repo: testRepo,
 				HeadRefName: value, BaseRefName: value, URL: value,
 				Author: value, Title: value,
 			}
@@ -174,8 +174,8 @@ func TestInjectionFromASecondSelectedPR(t *testing.T) {
 	marker := filepath.Join(dir, "injected")
 	m := New(testCfg(), nil)
 	prs := []github.PR{
-		{Title: "benign"},
-		{Title: "literal; touch " + marker},
+		{Repo: testRepo, Title: "benign"},
+		{Repo: testRepo, Title: "literal; touch " + marker},
 	}
 	line, err := m.renderMultiAction("printf '%s' {{.Titles}}", prs)
 	if err != nil {
@@ -199,7 +199,7 @@ func TestPluralFieldsRejectUnsafeShellContexts(t *testing.T) {
 		"eval {{.URLs}}", "sh -c {{.URLs}}", "bash -c {{.Titles}}",
 		"echo $( {{.URLs}} )", "echo `{{.URLs}}`", "cat <<EOF\n{{.URLs}}\nEOF",
 	} {
-		if _, err := m.renderMultiAction(tmpl, []github.PR{{URL: "u"}}); err == nil {
+		if _, err := m.renderMultiAction(tmpl, []github.PR{{Repo: testRepo, URL: "u"}}); err == nil {
 			t.Errorf("%q was accepted", tmpl)
 		}
 	}
@@ -233,7 +233,7 @@ func TestRemoteFieldListCoversEveryStringField(t *testing.T) {
 
 func TestNumbersFieldNeedsNoQuoting(t *testing.T) {
 	m := New(testCfg(), nil)
-	line, err := m.renderMultiAction("echo {{.Numbers}}", []github.PR{{Number: 7}, {Number: 9}})
+	line, err := m.renderMultiAction("echo {{.Numbers}}", []github.PR{{Repo: testRepo, Number: 7}, {Repo: testRepo, Number: 9}})
 	if err != nil {
 		t.Fatal(err)
 	}

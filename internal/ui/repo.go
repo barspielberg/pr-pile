@@ -8,16 +8,6 @@ import (
 	"github.com/barspielberg/pr-pile/internal/github"
 )
 
-// repoOf is the repo a PR lives in. A rule can add repo: qualifiers to its
-// query, so this is not always the configured one. Search results always carry
-// a repo; a PR built without one counts as the configured repo's.
-func (m Model) repoOf(pr github.PR) string {
-	if pr.Repo != "" {
-		return pr.Repo
-	}
-	return m.cfg.Repo
-}
-
 // isConfiguredRepo ignores case the way GitHub does, so a config that spells
 // the repo differently from GitHub does not tag every row.
 func (m Model) isConfiguredRepo(repo string) bool { return strings.EqualFold(repo, m.cfg.Repo) }
@@ -27,7 +17,7 @@ func (m Model) isConfiguredRepo(repo string) bool { return strings.EqualFold(rep
 // nearly every row. The owner is dropped when it matches the configured one,
 // since the name alone is what tells two of an org's repos apart.
 func (m Model) repoTag(pr github.PR) string {
-	repo := m.repoOf(pr)
+	repo := pr.Repo
 	if m.isConfiguredRepo(repo) {
 		return ""
 	}

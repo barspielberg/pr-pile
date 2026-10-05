@@ -154,7 +154,7 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	repo, repoPath, err := m.actionRepo(pr)
+	repo, repoPath, err := m.actionRepo(tmpl, pr)
 	if err != nil {
 		return "", err
 	}
@@ -182,13 +182,13 @@ func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	repo, repoPath, err := m.actionRepo(prs[0])
+	repo, repoPath, err := m.actionRepo(tmpl, prs[0])
 	if err != nil {
 		return "", err
 	}
 	if templateMentions(tmpl, "Repo") || templateMentions(tmpl, "RepoPath") {
 		for _, pr := range prs[1:] {
-			if !strings.EqualFold(m.repoOf(pr), repo) {
+			if !strings.EqualFold(pr.Repo, repo) {
 				return "", fmt.Errorf("the selection spans repos, and .Repo names one")
 			}
 		}
@@ -218,15 +218,19 @@ func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 // actionRepo is the Repo and RepoPath an action sees for a PR. Repo goes into
 // the command unquoted, as config text always has, but a PR from a repo: in a
 // query takes it from GitHub, so it must look like a repo name before it is
-// trusted as shell text. RepoPath is configured for one repo, so a PR from any
-// other gets it empty, the same as a config without repoPath.
-func (m Model) actionRepo(pr github.PR) (repo, repoPath string, err error) {
-	repo = m.repoOf(pr)
+// trusted as shell text. RepoPath is configured for one repo, and an action
+// that uses it on a PR from another refuses: expanded empty and unquoted, it
+// would shift every argument after it, or cd into $HOME.
+func (m Model) actionRepo(tmpl string, pr github.PR) (repo, repoPath string, err error) {
+	repo = pr.Repo
 	if m.isConfiguredRepo(repo) {
 		return m.cfg.Repo, m.cfg.RepoPath, nil
 	}
 	if !repoName.MatchString(repo) {
 		return "", "", fmt.Errorf("repo %q is not owner/name", terminalText(repo))
+	}
+	if templateMentions(tmpl, "RepoPath") {
+		return "", "", fmt.Errorf(".RepoPath is only set for %s", m.cfg.Repo)
 	}
 	return repo, "", nil
 }

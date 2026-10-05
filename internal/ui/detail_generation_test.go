@@ -9,12 +9,12 @@ import (
 
 func TestDetailResponseFromBeforeRefreshIsIgnored(t *testing.T) {
 	m := New(testCfg(), nil)
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 7, HeadRefName: "old"}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 7, HeadRefName: "old"}}})
 	m.board.Apply(board.Result{Index: 1})
 	old := detailMsg{
 		generation: m.fetchGeneration,
 		head:       "old",
-		detail:     github.Detail{Number: 7, BehindBy: 99},
+		detail:     github.Detail{Repo: testRepo, Number: 7, BehindBy: 99},
 	}
 
 	next, _ := m.refresh()
@@ -36,16 +36,16 @@ func TestDetailResponseFromBeforeRefreshIsIgnored(t *testing.T) {
 
 func TestDetailResponseForOldHeadIsIgnored(t *testing.T) {
 	m := New(testCfg(), nil)
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 7, HeadRefName: "old"}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 7, HeadRefName: "old"}}})
 	m.board.Apply(board.Result{Index: 1})
 	old := detailMsg{
 		generation: m.fetchGeneration,
 		head:       "old",
-		detail:     github.Detail{Number: 7, BehindBy: 99},
+		detail:     github.Detail{Repo: testRepo, Number: 7, BehindBy: 99},
 	}
 
 	m.board.Refetch()
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 7, HeadRefName: "new"}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 7, HeadRefName: "new"}}})
 	m.board.Apply(board.Result{Index: 1})
 	m.inflight[prKey(7)] = detailRequest{generation: m.fetchGeneration, head: "new"}
 	next, _ := m.Update(old)
@@ -61,14 +61,14 @@ func TestDetailResponseForOldHeadIsIgnored(t *testing.T) {
 
 func TestCurrentDetailResponseIsAccepted(t *testing.T) {
 	m := New(testCfg(), nil)
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 7, HeadRefName: "head"}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 7, HeadRefName: "head"}}})
 	m.board.Apply(board.Result{Index: 1})
 	markDetailInflight(&m, 7)
 
 	next, _ := m.Update(detailMsg{
 		generation: m.fetchGeneration,
 		head:       "head",
-		detail:     github.Detail{Number: 7, BehindBy: 3},
+		detail:     github.Detail{Repo: testRepo, Number: 7, BehindBy: 3},
 	})
 	m = next.(Model)
 
@@ -85,7 +85,7 @@ func TestBoardResultInvalidatesDetailRequestForStaleRow(t *testing.T) {
 	m.inflight[prKey(7)] = detailRequest{generation: m.fetchGeneration, head: "old"}
 
 	next, _ := m.Update(resultMsg{generation: m.fetchGeneration, result: board.Result{
-		Index: 0, PRs: []github.PR{{Number: 7, HeadRefName: "new"}},
+		Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 7, HeadRefName: "new"}},
 	}})
 	m = next.(Model)
 
@@ -100,7 +100,7 @@ func TestBoardResultInvalidatesDetailCachedFromStaleRow(t *testing.T) {
 	next, _ := m.Update(detailMsg{
 		generation: m.fetchGeneration,
 		head:       "old",
-		detail:     github.Detail{Number: 7, BehindBy: 99},
+		detail:     github.Detail{Repo: testRepo, Number: 7, BehindBy: 99},
 	})
 	m = next.(Model)
 	if _, ok := m.detail[prKey(7)]; !ok {
@@ -108,7 +108,7 @@ func TestBoardResultInvalidatesDetailCachedFromStaleRow(t *testing.T) {
 	}
 
 	next, _ = m.Update(resultMsg{generation: m.fetchGeneration, result: board.Result{
-		Index: 0, PRs: []github.PR{{Number: 7, HeadRefName: "new"}},
+		Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 7, HeadRefName: "new"}},
 	}})
 	m = next.(Model)
 
@@ -120,7 +120,7 @@ func TestBoardResultInvalidatesDetailCachedFromStaleRow(t *testing.T) {
 func staleDetailRefreshModel(t *testing.T) Model {
 	t.Helper()
 	m := New(testCfg(), nil)
-	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 7, HeadRefName: "old"}}})
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 7, HeadRefName: "old"}}})
 	m.board.Apply(board.Result{Index: 1})
 	next, _ := m.refresh()
 	return next.(Model)

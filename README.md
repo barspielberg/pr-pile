@@ -61,8 +61,8 @@ ORs them with the configured repo, so the rule below covers both:
 Rows from a repo other than `repo` carry its name before the title (`api`, or
 `owner/name` for another owner), and `d`, `m` and actions use the PR's own repo.
 Every `repo:` is checked at startup like `repo` itself, so a typo fails loudly
-rather than drawing an empty section. `repoPath` belongs to `repo`, so
-`{{.RepoPath}}` is empty for PRs from the others.
+rather than drawing an empty section. `repoPath` belongs to `repo`, so an
+action that uses `{{.RepoPath}}` refuses a PR from any other repo.
 
 ```yaml
 repo: owner/name

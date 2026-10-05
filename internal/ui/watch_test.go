@@ -21,9 +21,9 @@ func watchBoard(t *testing.T) Model {
 	m := New(cfg, nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "first", CIState: "PENDING", Mergeable: "MERGEABLE", Review: "REVIEW_REQUIRED"},
-		{Number: 2, Title: "second", CIState: "PENDING"},
-		{Number: 3, Title: "third"},
+		{Repo: testRepo, Number: 1, Title: "first", CIState: "PENDING", Mergeable: "MERGEABLE", Review: "REVIEW_REQUIRED"},
+		{Repo: testRepo, Number: 2, Title: "second", CIState: "PENDING"},
+		{Repo: testRepo, Number: 3, Title: "third"},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m.fetching = false
@@ -34,7 +34,7 @@ func watchBoard(t *testing.T) Model {
 func open(pr github.PR) github.Watched { return github.Watched{PR: pr, State: "OPEN"} }
 
 func TestWatchEvents(t *testing.T) {
-	base := github.PR{CIState: "PENDING", Review: "REVIEW_REQUIRED", Mergeable: "MERGEABLE"}
+	base := github.PR{Repo: testRepo, CIState: "PENDING", Review: "REVIEW_REQUIRED", Mergeable: "MERGEABLE"}
 	with := func(f func(*github.PR)) github.PR { p := base; f(&p); return p }
 
 	for _, tc := range []struct {
@@ -62,8 +62,8 @@ func TestWatchEvents(t *testing.T) {
 // A new push after a failure goes back to running without a word, and only the
 // next outcome is reported.
 func TestWatchEventsStaySilentWhileANewRunStarts(t *testing.T) {
-	failed := github.PR{CIState: "FAILURE", FailedGates: []string{"lint"}}
-	running := github.PR{CIState: "PENDING"}
+	failed := github.PR{Repo: testRepo, CIState: "FAILURE", FailedGates: []string{"lint"}}
+	running := github.PR{Repo: testRepo, CIState: "PENDING"}
 	if got := watchEvents(failed, open(running)); len(got) != 0 {
 		t.Errorf("failed -> running should be silent, got %q", got)
 	}
@@ -215,7 +215,7 @@ func TestApplyWatchEndsOnMergeAndLeavesTheBoard(t *testing.T) {
 	}
 	// A fetch that still returns it, as a lagging search index can, does not
 	// bring it back.
-	next.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Number: 1}, {Number: 2}}})
+	next.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 1}, {Repo: testRepo, Number: 2}}})
 	for _, r := range next.visibleRows() {
 		if r.PR.Number == 1 {
 			t.Error("a later fetch brought the merged PR back")
@@ -314,11 +314,11 @@ func TestRowDrawsTheFresherCopy(t *testing.T) {
 	pr := m.watched[prKey(1)].pr
 	pr.CIState = "SUCCESS"
 	m, _ = m.applyWatch(polled(map[int]github.Watched{1: open(pr)}))
-	if got := m.statusPR(github.PR{Number: 1, CIState: "PENDING"}).CIState; got != "SUCCESS" {
+	if got := m.statusPR(github.PR{Repo: testRepo, Number: 1, CIState: "PENDING"}).CIState; got != "SUCCESS" {
 		t.Errorf("row drew %q, want the poll's SUCCESS", got)
 	}
 	m.boardAt = time.Now().Add(time.Second)
-	if got := m.statusPR(github.PR{Number: 1, CIState: "PENDING"}).CIState; got != "PENDING" {
+	if got := m.statusPR(github.PR{Repo: testRepo, Number: 1, CIState: "PENDING"}).CIState; got != "PENDING" {
 		t.Errorf("row drew %q, want the newer board's PENDING", got)
 	}
 }
@@ -542,8 +542,7 @@ func polled(got map[int]github.Watched) watchMsg {
 	return watchMsg{sent: time.Now(), asked: asked, got: keyed}
 }
 
-// prKey is the key of a test PR, which carries no repo.
-func prKey(n int) github.Key { return github.Key{Number: n} }
+func prKey(n int) github.Key { return github.Key{Repo: testRepo, Number: n} }
 
 func TestWatchStartedDuringAPollIsPolledWhenItLands(t *testing.T) {
 	stubWatch(t, func([]int) (map[int]github.Watched, error) { return nil, nil })

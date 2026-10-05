@@ -7,6 +7,7 @@ import (
 
 	"github.com/barspielberg/pr-pile/internal/board"
 	"github.com/barspielberg/pr-pile/internal/github"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // multiRepoBoard is a board whose first rule searched o/r, o/api and x/lib,
@@ -93,22 +94,34 @@ func TestDetailHeaderNamesTheRepo(t *testing.T) {
 	}
 }
 
-// RepoPath is configured for one repo, so a PR from another gets it empty
-// rather than a checkout of the wrong repo.
 func TestActionGetsThePRsOwnRepo(t *testing.T) {
 	m := multiRepoBoard(t)
 	for _, c := range []struct {
+		tmpl string
 		pr   github.PR
 		want string
 	}{
-		{github.PR{Repo: "o/r", Number: 1}, "echo o/r /src/r 1"},
-		{github.PR{Repo: "o/api", Number: 1}, "echo o/api  1"},
-		{github.PR{Number: 1}, "echo o/r /src/r 1"},
+		{"echo {{.Repo}} {{.RepoPath}} {{.Number}}", github.PR{Repo: "o/r", Number: 1}, "echo o/r /src/r 1"},
+		{"echo {{.Repo}} {{.Number}}", github.PR{Repo: "o/api", Number: 1}, "echo o/api 1"},
 	} {
-		got, err := m.renderAction("echo {{.Repo}} {{.RepoPath}} {{.Number}}", c.pr)
+		got, err := m.renderAction(c.tmpl, c.pr)
 		if err != nil || got != c.want {
 			t.Errorf("%+v: want %q, got %q (%v)", c.pr, c.want, got, err)
 		}
+	}
+}
+
+// RepoPath is configured for one repo. Empty and unquoted it would shift the
+// arguments after it, or cd into $HOME, so an action using it refuses a PR
+// from another repo, alone or in a selection.
+func TestRepoPathActionRefusesAnotherRepo(t *testing.T) {
+	m := multiRepoBoard(t)
+	other := github.PR{Repo: "o/api", Number: 1}
+	if _, err := m.renderAction("pr-workspace {{.RepoPath}} {{.Number}}", other); err == nil {
+		t.Error("single: want an error for .RepoPath on o/api")
+	}
+	if _, err := m.renderMultiAction("cd {{.RepoPath}} && echo {{.Numbers}}", []github.PR{other}); err == nil {
+		t.Error("multi: want an error for .RepoPath on o/api")
 	}
 }
 
@@ -170,5 +183,50 @@ func TestConfiguredRepoMatchesWhateverItsCase(t *testing.T) {
 	m.cfg.Repo = "O/R"
 	if tag := m.repoTag(github.PR{Repo: "o/r", Number: 1}); tag != "" {
 		t.Errorf("o/r against a configured O/R should be untagged, got %q", tag)
+	}
+}
+
+// A repo that stops answering costs its own watches one poll, not anyone
+// else's: the healthy repo's change is still reported, and the failing repo's
+// PRs stay watched rather than being dropped as not found.
+func TestWatchKeepsHealthyReposWhenOneFails(t *testing.T) {
+	orig := fetchWatched
+	fetchWatched = func(_ context.Context, _ *github.Client, repo string, numbers []int) (map[int]github.Watched, error) {
+		if repo == "o/api" {
+			return nil, errTest
+		}
+		return map[int]github.Watched{1: open(github.PR{Repo: repo, Number: 1, CIState: "SUCCESS"})}, nil
+	}
+	t.Cleanup(func() { fetchWatched = orig })
+
+	m := multiRepoBoard(t)
+	m.client = &github.Client{}
+	for _, pr := range []github.PR{{Repo: "o/r", Number: 1, CIState: "PENDING"}, {Repo: "o/api", Number: 1}} {
+		m.watched[pr.Key()] = &watchEntry{pr: pr}
+	}
+	m, cmd := m.pollNow()
+	m, _ = m.applyWatch(cmd().(watchMsg))
+
+	if e := m.watched[github.Key{Repo: "o/r", Number: 1}]; e == nil || e.pr.CIState != "SUCCESS" {
+		t.Errorf("o/r#1 should have taken the poll's answer, got %+v", e)
+	}
+	if m.watched[github.Key{Repo: "o/api", Number: 1}] == nil {
+		t.Error("o/api#1 was dropped when its repo failed to answer")
+	}
+	if !strings.Contains(m.status, "CI passed") || !strings.Contains(m.status, "watch failed: o/api") {
+		t.Errorf("status should carry both the news and the failure: %q", m.status)
+	}
+}
+
+func TestDetailHeaderFitsWithARepoTag(t *testing.T) {
+	m := multiRepoBoard(t)
+	m.width = 60
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Repo: "x/a-much-longer-repo-name", Number: 1234, Title: strings.Repeat("long title ", 10)},
+	}})
+	m.cursor = m.firstRowSlot()
+	head := strings.SplitN(m.detailOverlay(), "\n", 2)[0]
+	if w := lipgloss.Width(head); w > m.width {
+		t.Errorf("header is %d wide on a %d-wide pane: %q", w, m.width, stripANSI(head))
 	}
 }
