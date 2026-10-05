@@ -10,7 +10,7 @@ import (
 func TestStaleBoardResultFromPreviousRefreshIsIgnored(t *testing.T) {
 	m := New(testCfg(), nil)
 	old := resultMsg{generation: m.fetchGeneration, result: board.Result{
-		Index: 0, PRs: []github.PR{{Number: 1, Title: "old"}},
+		Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 1, Title: "old"}},
 	}}
 
 	next, _ := m.refresh()
@@ -26,7 +26,7 @@ func TestStaleBoardResultFromPreviousRefreshIsIgnored(t *testing.T) {
 	}
 
 	current := resultMsg{generation: m.fetchGeneration, result: board.Result{
-		Index: 0, PRs: []github.PR{{Number: 2, Title: "current"}},
+		Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 2, Title: "current"}},
 	}}
 	next, _ = m.Update(current)
 	m = next.(Model)

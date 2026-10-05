@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
@@ -74,10 +76,15 @@ func (m Model) runAction(key string, prs []github.PR) (Model, tea.Cmd, bool) {
 		if err != nil {
 			return m.setStatus("action: " + err.Error()), nil, true
 		}
+		dir, err := m.actionDir(a.Run, prs)
+		if err != nil {
+			return m.setStatus("action: " + err.Error()), nil, true
+		}
 		m.runSeq++
 		m.statusSeq++
 		m.clearSeq = 0
 		cmd := exec.Command("sh", "-c", line)
+		cmd.Dir = dir
 		if a.Mode == "suspend" {
 			// Hand the terminal over for TUI commands (a diff pager, a review
 			// session), then repaint when they exit.
@@ -153,9 +160,13 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	repo, repoPath, err := m.actionRepo(tmpl, pr)
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	err = t.Execute(&b, actionTemplateData{
-		Number: pr.Number, Repo: m.cfg.Repo, RepoPath: m.cfg.RepoPath,
+		Number: pr.Number, Repo: repo, RepoPath: repoPath,
 		Branch: shellQuote(pr.HeadRefName), Base: shellQuote(pr.BaseRefName),
 		URL: shellQuote(pr.URL), Author: shellQuote(pr.Author), Title: shellQuote(pr.Title),
 	})
@@ -177,7 +188,18 @@ func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data := multiActionTemplateData{Repo: m.cfg.Repo, RepoPath: m.cfg.RepoPath}
+	repo, repoPath, err := m.actionRepo(tmpl, prs[0])
+	if err != nil {
+		return "", err
+	}
+	if templateMentionsAny(tmpl, repoBoundFields) {
+		for _, pr := range prs[1:] {
+			if !strings.EqualFold(pr.Repo, repo) {
+				return "", fmt.Errorf("the selection spans repos, and this action works in one")
+			}
+		}
+	}
+	data := multiActionTemplateData{Repo: repo, RepoPath: repoPath}
 	var numbers, branches, bases, urls, authors, titles []string
 	for _, pr := range prs {
 		numbers = append(numbers, fmt.Sprint(pr.Number))
@@ -197,6 +219,21 @@ func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 	var b strings.Builder
 	err = t.Execute(&b, data)
 	return b.String(), err
+}
+
+// actionRepo is the Repo and RepoPath an action sees for a PR. Both come from
+// the PR's entry in repos: rather than from GitHub, so they stay trusted config
+// text. A template that uses RepoPath refuses a repo without a path: expanded
+// empty and unquoted, it would shift every argument after it, or cd into $HOME.
+func (m Model) actionRepo(tmpl string, pr github.PR) (repo, repoPath string, err error) {
+	r, ok := m.repoOf(pr)
+	if !ok {
+		return "", "", fmt.Errorf("%s is not in repos", terminalText(pr.Repo))
+	}
+	if r.Path == "" && templateMentions(tmpl, "RepoPath") {
+		return "", "", fmt.Errorf(".RepoPath needs a path for %s in repos", r.Tag())
+	}
+	return r.Name, r.Path, nil
 }
 
 type actionTemplateData struct {
@@ -257,6 +294,59 @@ func rejectFields(tmpl string, fields []string) error {
 
 // templateMentions reports whether a template uses a given field, matching the
 // whole name so .URL does not answer for .URLs.
+// repoBoundFields only mean something inside one repo: #12 or a branch name
+// names a different PR, or nothing, in another. URLs, authors and titles do not
+// depend on where the command runs.
+var repoBoundFields = []string{"Repo", "RepoPath", "Number", "Numbers", "Branch", "Branches", "Base", "Bases"}
+
+func templateMentionsAny(tmpl string, fields []string) bool {
+	for _, f := range fields {
+		if templateMentions(tmpl, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// actionDir is where an action runs: the PR's checkout when its repo has a
+// path, so a command like `tuicr pr {{.Number}}` finds the right #12. Without
+// one it runs where pile was started, as it always has. On a board with
+// several repos that is a guess, so an action that needs a repo and does not
+// name one with .Repo or .RepoPath refuses instead.
+func (m Model) actionDir(tmpl string, prs []github.PR) (string, error) {
+	r, ok := m.repoOf(prs[0])
+	if !ok {
+		return "", nil
+	}
+	for _, pr := range prs[1:] {
+		if !strings.EqualFold(pr.Repo, r.Name) {
+			return "", nil
+		}
+	}
+	if r.Path != "" {
+		return expandHome(r.Path), nil
+	}
+	if m.multiRepo() && templateMentionsAny(tmpl, repoBoundFields) &&
+		!templateMentions(tmpl, "Repo") && !templateMentions(tmpl, "RepoPath") {
+		return "", fmt.Errorf("set a path for %s in repos, so this runs in its checkout", r.Tag())
+	}
+	return "", nil
+}
+
+// expandHome resolves a leading ~, which the shell would have done for a path
+// written into the command but nothing does for a working directory.
+func expandHome(path string) string {
+	rest, ok := strings.CutPrefix(path, "~")
+	if !ok || (rest != "" && rest[0] != '/') {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, rest)
+}
+
 func templateMentions(tmpl, field string) bool {
 	for offset := 0; ; {
 		rel := strings.Index(tmpl[offset:], "{{")

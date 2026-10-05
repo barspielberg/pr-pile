@@ -2,21 +2,21 @@ package ui
 
 import "github.com/barspielberg/pr-pile/internal/github"
 
-// Keyed by PR number, not position: rows move between frames, so a selection
+// Keyed by PR, not position: rows move between frames, so a selection
 // held by position would come to mean different PRs after a refresh.
 func (m *Model) toggleSelect() {
 	pr, ok := m.selected()
 	if !ok {
 		return
 	}
-	if m.selection[pr.Number] {
-		delete(m.selection, pr.Number)
+	if m.selection[pr.Key()] {
+		delete(m.selection, pr.Key())
 		return
 	}
-	m.selection[pr.Number] = true
+	m.selection[pr.Key()] = true
 }
 
-func (m Model) isSelected(number int) bool { return m.selection[number] }
+func (m Model) isSelected(key github.Key) bool { return m.selection[key] }
 
 // In board order: Go randomizes map iteration, so reading the set directly
 // would reorder the copied urls on every press.
@@ -26,7 +26,7 @@ func (m Model) selectedPRs() []github.PR {
 	}
 	var out []github.PR
 	for _, s := range m.slots() {
-		if s.isRow() && m.selection[s.row.PR.Number] {
+		if s.isRow() && m.selection[s.row.PR.Key()] {
 			out = append(out, s.row.PR)
 		}
 	}
@@ -47,9 +47,9 @@ func (m Model) actionPRs() []github.PR {
 
 func (m *Model) clearSelection() {
 	if len(m.selection) > 0 {
-		m.selection = map[int]bool{}
+		m.selection = map[github.Key]bool{}
 	}
-	m.rangeOwned = map[int]bool{}
+	m.rangeOwned = map[github.Key]bool{}
 	m.ranging, m.anchor = false, -1
 }
 
@@ -81,31 +81,31 @@ func (m *Model) applyRange() {
 		if !sl[i].isRow() {
 			continue
 		}
-		number := sl[i].row.PR.Number
+		key := sl[i].row.PR.Key()
 		// A row already marked with space is not claimed by the range, or
 		// shrinking the range back off it would undo the user's own mark.
-		if !m.selection[number] {
-			m.rangeOwned[number] = true
+		if !m.selection[key] {
+			m.rangeOwned[key] = true
 		}
-		m.selection[number] = true
+		m.selection[key] = true
 	}
 }
 
 // rangeDrop is the PRs this range selected that its current span no longer
 // covers, so walking the cursor back does not leave a trail.
-func (m *Model) rangeDrop(lo, hi int) []int {
+func (m *Model) rangeDrop(lo, hi int) []github.Key {
 	sl := m.slots()
-	inSpan := map[int]bool{}
+	inSpan := map[github.Key]bool{}
 	for i := lo; i <= hi && i < len(sl); i++ {
 		if sl[i].isRow() {
-			inSpan[sl[i].row.PR.Number] = true
+			inSpan[sl[i].row.PR.Key()] = true
 		}
 	}
-	var out []int
-	for number := range m.rangeOwned {
-		if !inSpan[number] {
-			out = append(out, number)
-			delete(m.rangeOwned, number)
+	var out []github.Key
+	for key := range m.rangeOwned {
+		if !inSpan[key] {
+			out = append(out, key)
+			delete(m.rangeOwned, key)
 		}
 	}
 	return out

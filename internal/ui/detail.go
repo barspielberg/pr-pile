@@ -15,7 +15,7 @@ import (
 // A line with nothing to say is not drawn. On an all-green, freshly-opened PR
 // this is three lines; docs/pr-detail.md §8.3 is the case it is tuned for.
 func (m Model) stateLines(pr github.PR) []string {
-	d, loaded := m.detail[pr.Number]
+	d, loaded := m.detail[pr.Key()]
 	body := max(0, m.width-4)
 	var out []string
 
@@ -34,6 +34,10 @@ func (m Model) stateLines(pr github.PR) []string {
 	}
 	if s := m.pendingLine(pr); s != "" {
 		out = append(out, s)
+	}
+	// Only with several repos: with one it would be a constant.
+	if m.multiRepo() {
+		out = append(out, label("repo", terminalText(pr.Repo)))
 	}
 	if pr.Author != "" {
 		out = append(out, label("author", person(pr.AuthorName, pr.Author)))
@@ -75,7 +79,10 @@ func (m Model) stateLines(pr github.PR) []string {
 // trading the reflow on arrival for a worse one on resolution. One line is what
 // the group usually resolves to, so usually nothing moves at all.
 func (m Model) pendingLine(pr github.PR) string {
-	if _, loaded := m.detail[pr.Number]; loaded {
+	if _, loaded := m.detail[pr.Key()]; loaded {
+		return ""
+	}
+	if _, failed := m.detailFailed[pr.Key()]; failed {
 		return ""
 	}
 	// Nothing is coming when there is no client to ask, so a board rendered
@@ -130,6 +137,9 @@ func (m Model) reviewerLine(pr github.PR, d github.Detail, loaded bool) string {
 		// An unreviewed PR has no name coming, so promising one would be a
 		// placeholder for nothing.
 		if pr.Review == "" || pr.Review == "REVIEW_REQUIRED" {
+			return ""
+		}
+		if _, failed := m.detailFailed[pr.Key()]; failed {
 			return ""
 		}
 		return head + mutedStyle.Render("…")

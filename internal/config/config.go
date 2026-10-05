@@ -27,6 +27,30 @@ type Rule struct {
 	// a rule like author:@me is all one person, so the column would be dead
 	// weight there.
 	Author bool `yaml:"author"`
+	// Repos narrows the rule to these repos, by label. Empty means every
+	// declared repo.
+	Repos []string `yaml:"repos"`
+}
+
+// Repo is one repo the board reads. Every repo is declared here rather than
+// picked out of query text, so the config says plainly what the board covers.
+type Repo struct {
+	Name string `yaml:"name"` // owner/name
+	// Path is where the repo is checked out, for {{.RepoPath}}.
+	Path string `yaml:"path"`
+	// Label names the repo on the board; it defaults to the part after the
+	// slash. See Tag.
+	Label string `yaml:"label"`
+}
+
+// Tag is how the board names the repo: in its column, in label#N, and in a
+// rule's repos list.
+func (r Repo) Tag() string {
+	if r.Label != "" {
+		return r.Label
+	}
+	_, name, _ := strings.Cut(r.Name, "/")
+	return name
 }
 
 // Action is a shell command bound to a key. The tool knows nothing about
@@ -44,12 +68,11 @@ type Action struct {
 }
 
 type Config struct {
-	Repo     string        `yaml:"repo"`
-	RepoPath string        `yaml:"repoPath"`
-	Refresh  time.Duration `yaml:"refresh"`
-	Rules    []Rule        `yaml:"rules"`
-	Actions  []Action      `yaml:"actions"`
-	Watch    Watch         `yaml:"watch"`
+	Repos   []Repo        `yaml:"repos"`
+	Refresh time.Duration `yaml:"refresh"`
+	Rules   []Rule        `yaml:"rules"`
+	Actions []Action      `yaml:"actions"`
+	Watch   Watch         `yaml:"watch"`
 }
 
 // Watch configures how `m` announces changes. It has no interval of its own:
@@ -68,7 +91,7 @@ type Watch struct {
 // near the top stalls everything under it. Cheap, high-value rules go first.
 //
 // No repo is set here: it is the one value that cannot be guessed, so it comes
-// from the config file or the PILE_REPO env var.
+// from the config file.
 func Default() Config {
 	return Config{
 		Refresh: 3 * time.Minute,
@@ -87,9 +110,16 @@ func Default() Config {
 const starterConfig = `# pile configuration.
 # Rules are an ordered list: a PR is shown under the FIRST rule that matches it,
 # so ordering is the configuration. Queries are GitHub search syntax, scoped to
-# the repo and to open PRs automatically.
+# the repos and to open PRs automatically.
 
-repo: %s
+# Every repo the board reads. A rule covers all of them unless it lists some
+# under its own repos:, by label. With more than one repo, each row shows its
+# repo's label.
+repos:
+  - name: %s
+    # path: ~/Repos/%[1]s   # where it is checked out, for {{.RepoPath}}
+    # label: short          # defaults to the part after the slash
+
 refresh: 3m
 
 rules:
@@ -129,8 +159,9 @@ rules:
 # Actions run a shell command for the selected PR. Available template fields:
 # {{.Number}} {{.Repo}} {{.RepoPath}} {{.Branch}} {{.Base}} {{.URL}}
 # {{.Author}} {{.Title}}
+# Repo and RepoPath are the PR's own repo's name and path from repos: above.
 # GitHub string fields are already shell-quoted; use each as a standalone,
-# unquoted placeholder. Repo, repoPath, and run remain trusted shell text.
+# unquoted placeholder. Repo, RepoPath, and run remain trusted shell text.
 # actions:
 #   - key: w
 #     name: worktree
@@ -159,9 +190,7 @@ func Path() string {
 	return filepath.Join(dir, "pile", "config.yml")
 }
 
-// Load reads the config file, writing a starter one if none exists. The repo
-// can be overridden per-invocation, which is what makes the tool usable from a
-// repo other than the configured one without editing the file.
+// Load reads the config file, writing a starter one if none exists.
 func Load() (Config, error) {
 	cfg := Default()
 	path := Path()
@@ -179,10 +208,14 @@ func Load() (Config, error) {
 		if werr := writeStarter(path, repo); werr != nil {
 			return cfg, werr
 		}
-		cfg.Repo = repo
+		cfg.Repos = []Repo{{Name: repo}}
 		return cfg, cfg.Validate()
 	case err != nil:
 		return cfg, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	if err := legacyRepo(data); err != nil {
+		return cfg, fmt.Errorf("%s: %w", path, err)
 	}
 
 	// Decode over the defaults so an absent key keeps its default rather than
@@ -199,10 +232,24 @@ func Load() (Config, error) {
 		}
 		return cfg, fmt.Errorf("parse %s: multiple YAML documents are not supported", path)
 	}
-	if env := os.Getenv("PILE_REPO"); env != "" {
-		cfg.Repo = env
-	}
 	return cfg, cfg.Validate()
+}
+
+// legacyRepo turns a config from before repos: into a message that says how to
+// convert it, rather than the bare unknown-field error the strict decode gives.
+func legacyRepo(data []byte) error {
+	var old struct {
+		Repo     string `yaml:"repo"`
+		RepoPath string `yaml:"repoPath"`
+	}
+	if yaml.Unmarshal(data, &old) != nil || (old.Repo == "" && old.RepoPath == "") {
+		return nil
+	}
+	hint := "repos:\n  - name: " + old.Repo
+	if old.RepoPath != "" {
+		hint += "\n    path: " + old.RepoPath
+	}
+	return fmt.Errorf("repo and repoPath are now a repos: list. Replace them with:\n\n%s", hint)
 }
 
 func writeStarter(path, repo string) error {
@@ -217,14 +264,14 @@ func writeStarter(path, repo string) error {
 }
 
 // detectRepo asks gh for the current directory's repo, so first run in a
-// checkout needs no arguments.
+// checkout needs no arguments. PILE_REPO seeds it instead, outside a checkout.
 func detectRepo() (string, error) {
 	if env := os.Getenv("PILE_REPO"); env != "" {
 		return env, nil
 	}
 	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
 	if err != nil {
-		return "", fmt.Errorf("run pile from a GitHub checkout, or set PILE_REPO=owner/name")
+		return "", fmt.Errorf("run pile from a GitHub checkout, or set PILE_REPO=owner/name for the starter config")
 	}
 	repo := strings.TrimSpace(string(out))
 	if repo == "" {
@@ -233,11 +280,15 @@ func detectRepo() (string, error) {
 	return repo, nil
 }
 
+func validRepo(repo string) bool {
+	parts := strings.Split(repo, "/")
+	return len(parts) == 2 && parts[0] != "" && parts[1] != "" &&
+		strings.TrimSpace(repo) == repo && strings.IndexFunc(repo, unicode.IsSpace) < 0
+}
+
 func (c Config) Validate() error {
-	parts := strings.Split(c.Repo, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" ||
-		strings.TrimSpace(c.Repo) != c.Repo || strings.IndexFunc(c.Repo, unicode.IsSpace) >= 0 {
-		return fmt.Errorf("repo %q must be owner/name", c.Repo)
+	if err := c.validateRepos(); err != nil {
+		return err
 	}
 	if len(c.Rules) == 0 {
 		return fmt.Errorf("at least one rule is required")
@@ -251,6 +302,16 @@ func (c Config) Validate() error {
 		}
 		if r.Limit < 0 || r.Limit > 100 {
 			return fmt.Errorf("rule %q: limit must be 0 or between 1 and 100", r.Name)
+		}
+		// GitHub ORs repo: qualifiers, so one in a query would widen the rule
+		// past its repos rather than narrow it.
+		if repos := queryRepos(r.Query); len(repos) > 0 {
+			return fmt.Errorf("rule %q: list repos under repos: by label rather than repo:%s in the query", r.Name, repos[0])
+		}
+		for _, tag := range r.Repos {
+			if _, ok := c.repoTagged(tag); !ok {
+				return fmt.Errorf("rule %q: no repo is labelled %q", r.Name, tag)
+			}
 		}
 	}
 	seen := make(map[string]bool, len(c.Actions))
@@ -299,10 +360,75 @@ var reservedActionKeys = map[string]bool{
 	"ctrl+d": true, "ctrl+u": true, "pgdown": true, "pgup": true,
 }
 
-// SearchQuery scopes a rule to the configured repo and to open PRs. Rules only
-// carry the part that distinguishes them.
+func (c Config) validateRepos() error {
+	if len(c.Repos) == 0 {
+		return fmt.Errorf("at least one repo is required under repos:")
+	}
+	names := make(map[string]bool, len(c.Repos))
+	tags := make(map[string]string, len(c.Repos))
+	for i, r := range c.Repos {
+		if !validRepo(r.Name) {
+			return fmt.Errorf("repo %d: name %q must be owner/name", i+1, r.Name)
+		}
+		if names[strings.ToLower(r.Name)] {
+			return fmt.Errorf("repo %s is listed twice", r.Name)
+		}
+		names[strings.ToLower(r.Name)] = true
+		tag := r.Tag()
+		if strings.IndexFunc(tag, func(c rune) bool { return unicode.IsSpace(c) || unicode.IsControl(c) }) >= 0 {
+			return fmt.Errorf("repo %s: label %q cannot contain spaces", r.Name, tag)
+		}
+		if other, ok := tags[strings.ToLower(tag)]; ok {
+			return fmt.Errorf("repos %s and %s are both labelled %q; give one a label", other, r.Name, tag)
+		}
+		tags[strings.ToLower(tag)] = r.Name
+	}
+	return nil
+}
+
+// repoTagged ignores case, like GitHub does for the names behind the labels.
+func (c Config) repoTagged(tag string) (Repo, bool) {
+	for _, r := range c.Repos {
+		if strings.EqualFold(r.Tag(), tag) {
+			return r, true
+		}
+	}
+	return Repo{}, false
+}
+
+// RuleRepos is the repos a rule searches: the ones it lists, or all of them.
+func (c Config) RuleRepos(r Rule) []Repo {
+	if len(r.Repos) == 0 {
+		return c.Repos
+	}
+	repos := make([]Repo, 0, len(r.Repos))
+	for _, tag := range r.Repos {
+		if repo, ok := c.repoTagged(tag); ok {
+			repos = append(repos, repo)
+		}
+	}
+	return repos
+}
+
+func queryRepos(query string) []string {
+	var repos []string
+	for _, field := range strings.Fields(query) {
+		if repo, ok := strings.CutPrefix(field, "repo:"); ok {
+			repos = append(repos, repo)
+		}
+	}
+	return repos
+}
+
+// SearchQuery scopes a rule to its repos and to open PRs. Rules only carry the
+// part that distinguishes them. A rule over several repos is still one search,
+// so its limit is shared between them.
 func (c Config) SearchQuery(r Rule) string {
-	return fmt.Sprintf("repo:%s is:pr is:open %s", c.Repo, r.Query)
+	var b strings.Builder
+	for _, repo := range c.RuleRepos(r) {
+		b.WriteString("repo:" + repo.Name + " ")
+	}
+	return b.String() + "is:pr is:open " + r.Query
 }
 
 func (r Rule) PageSize() int {

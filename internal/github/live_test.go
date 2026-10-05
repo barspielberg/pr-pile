@@ -16,8 +16,9 @@ func TestLive(t *testing.T) {
 		t.Skip("live API test")
 	}
 	cfg := config.Default()
-	cfg.Repo = os.Getenv("PILE_REPO")
-	if cfg.Repo == "" {
+	repo := os.Getenv("PILE_REPO")
+	cfg.Repos = []config.Repo{{Name: repo}}
+	if repo == "" {
 		t.Skip("set PILE_REPO to the repo to test against")
 	}
 	c, err := github.New()
@@ -27,7 +28,7 @@ func TestLive(t *testing.T) {
 	// Some orgs make every search return zero rather than failing (an IP allow
 	// list will do it), which would look like a passing test against an empty
 	// board.
-	if err := c.CheckRepo(context.Background(), cfg.Repo); err != nil {
+	if err := c.CheckRepo(context.Background(), repo); err != nil {
 		t.Skip("repo unreachable:", err)
 	}
 	for _, r := range cfg.Rules {

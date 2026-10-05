@@ -26,7 +26,7 @@ func actionBoard(t *testing.T, run string) Model {
 	m := New(actionCfg(run), nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 42, Title: "a pr", HeadRefName: "feat/x"},
+		{Repo: testRepo, Number: 42, Title: "a pr", HeadRefName: "feat/x"},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m.fetching = false

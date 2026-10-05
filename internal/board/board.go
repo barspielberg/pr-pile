@@ -51,7 +51,7 @@ type Board struct {
 	// hidden is PRs the watch saw merge or close, and when. The search index
 	// can lag a merge, so a fetch soon after must not bring one back; the
 	// hold expires so a PR closed by mistake and reopened does come back.
-	hidden map[int]time.Time
+	hidden map[github.Key]time.Time
 }
 
 // hideFor outlasts the search index's lag behind a merge, which is seconds to
@@ -62,7 +62,7 @@ const hideFor = 10 * time.Minute
 var now = time.Now
 
 func New(cfg config.Config) *Board {
-	b := &Board{cfg: cfg, results: make([]*Result, len(cfg.Rules)), hidden: map[int]time.Time{}}
+	b := &Board{cfg: cfg, results: make([]*Result, len(cfg.Rules)), hidden: map[github.Key]time.Time{}}
 	b.sections = make([]Section, len(cfg.Rules))
 	for i, r := range cfg.Rules {
 		b.sections[i] = Section{Rule: r, State: Pending}
@@ -86,8 +86,8 @@ func (b *Board) Refetch() {
 
 // Hide takes a PR off the board now, without waiting for the next fetch to
 // stop returning it.
-func (b *Board) Hide(number int) {
-	b.hidden[number] = now()
+func (b *Board) Hide(key github.Key) {
+	b.hidden[key] = now()
 	b.rebuild()
 	// A section still waiting on its fetch keeps last time's rows, which
 	// rebuild leaves alone, so the PR comes out of those here.
@@ -95,7 +95,7 @@ func (b *Board) Hide(number int) {
 		s := &b.sections[i]
 		rows := s.Rows[:0:0]
 		for _, r := range s.Rows {
-			if r.PR.Number != number {
+			if r.PR.Key() != key {
 				rows = append(rows, r)
 			}
 		}
@@ -103,10 +103,10 @@ func (b *Board) Hide(number int) {
 	}
 }
 
-func (b *Board) isHidden(number int) bool {
-	at, ok := b.hidden[number]
+func (b *Board) isHidden(key github.Key) bool {
+	at, ok := b.hidden[key]
 	if ok && now().Sub(at) >= hideFor {
-		delete(b.hidden, number)
+		delete(b.hidden, key)
 		return false
 	}
 	return ok
@@ -141,7 +141,7 @@ func (b *Board) Loading() bool { return b.Frontier() < len(b.results) }
 // above it has resolved -- otherwise a row could be shown here and then
 // claimed by an earlier rule a moment later.
 func (b *Board) rebuild() {
-	claimed := map[int]bool{}
+	claimed := map[github.Key]bool{}
 	frontier := b.Frontier()
 
 	for i := range b.sections {
@@ -162,10 +162,10 @@ func (b *Board) rebuild() {
 		}
 		var own []github.PR
 		for _, pr := range res.PRs {
-			if claimed[pr.Number] || b.isHidden(pr.Number) {
+			if claimed[pr.Key()] || b.isHidden(pr.Key()) {
 				continue
 			}
-			claimed[pr.Number] = true
+			claimed[pr.Key()] = true
 			own = append(own, pr)
 		}
 		s.State, s.Err, s.Stale = Ready, nil, false
@@ -189,24 +189,29 @@ func layout(prs []github.PR, tree bool) []Row {
 	return stacks(prs)
 }
 
+// branch is a ref within its repo: two repos can both have a fix/login, and
+// one PR must not stack on the other's.
+type branch struct{ repo, name string }
+
 // stacks finds chains where one PR targets another's head branch and emits
 // each chain contiguously, root first.
 func stacks(prs []github.PR) []Row {
-	byBase := map[string][]github.PR{}
-	heads := map[string]bool{}
+	byBase := map[branch][]github.PR{}
+	heads := map[branch]bool{}
 	for _, pr := range prs {
 		// An empty ref would make every PR look stacked on every other, since
 		// an unset base would "match" an unset head.
 		if pr.HeadRefName != "" {
-			heads[pr.HeadRefName] = true
+			heads[branch{pr.Repo, pr.HeadRefName}] = true
 		}
 	}
 	stacked := func(pr github.PR) bool {
-		return pr.BaseRefName != "" && heads[pr.BaseRefName]
+		return pr.BaseRefName != "" && heads[branch{pr.Repo, pr.BaseRefName}]
 	}
 	for _, pr := range prs {
 		if stacked(pr) {
-			byBase[pr.BaseRefName] = append(byBase[pr.BaseRefName], pr)
+			base := branch{pr.Repo, pr.BaseRefName}
+			byBase[base] = append(byBase[base], pr)
 		}
 	}
 
@@ -216,7 +221,7 @@ func stacks(prs []github.PR) []Row {
 		if stacked(pr) {
 			continue
 		}
-		chain := walk(pr, byBase, map[int]bool{})
+		chain := walk(pr, byBase, map[github.Key]bool{})
 		if len(chain) == 1 {
 			rows = append(rows, Row{PR: chain[0]})
 			continue
@@ -229,13 +234,13 @@ func stacks(prs []github.PR) []Row {
 }
 
 // seen guards against a base/head cycle, which would otherwise recurse forever.
-func walk(pr github.PR, byBase map[string][]github.PR, seen map[int]bool) []github.PR {
-	if seen[pr.Number] {
+func walk(pr github.PR, byBase map[branch][]github.PR, seen map[github.Key]bool) []github.PR {
+	if seen[pr.Key()] {
 		return nil
 	}
-	seen[pr.Number] = true
+	seen[pr.Key()] = true
 	out := []github.PR{pr}
-	for _, child := range byBase[pr.HeadRefName] {
+	for _, child := range byBase[branch{pr.Repo, pr.HeadRefName}] {
 		out = append(out, walk(child, byBase, seen)...)
 	}
 	return out

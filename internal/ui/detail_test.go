@@ -12,14 +12,14 @@ import (
 )
 
 func detailResponse(m Model, detail github.Detail) detailMsg {
-	head, _ := m.currentHead(detail.Number)
-	m.inflight[detail.Number] = detailRequest{generation: m.fetchGeneration, head: head}
+	head, _ := m.currentHead(detail.Key())
+	m.inflight[detail.Key()] = detailRequest{generation: m.fetchGeneration, head: head}
 	return detailMsg{generation: m.fetchGeneration, head: head, detail: detail}
 }
 
 func markDetailInflight(m *Model, number int) {
-	head, _ := m.currentHead(number)
-	m.inflight[number] = detailRequest{generation: m.fetchGeneration, head: head}
+	head, _ := m.currentHead(prKey(number))
+	m.inflight[prKey(number)] = detailRequest{generation: m.fetchGeneration, head: head}
 }
 
 // detailModel is a board with one PR selected, which is what every test here
@@ -40,7 +40,7 @@ func detailModel(t *testing.T, pr github.PR, h int) Model {
 // how big. This is the case docs/pr-detail.md §8.2 is written against -- CI is
 // green and the PR is still completely stuck.
 func TestDetailOverlayRendersTheStateBlock(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3186, Title: "free unit numbers when a plan is abandoned",
 		CIState: "SUCCESS", PassedCount: 18, Mergeable: "CONFLICTING",
 		Author: "cdiaz88", AuthorName: "Carol Diaz",
@@ -50,7 +50,7 @@ func TestDetailOverlayRendersTheStateBlock(t *testing.T) {
 		UpdatedAt: time.Now().Add(-25 * time.Hour),
 	}
 	m := detailModel(t, pr, 24)
-	m.detail[3186] = github.Detail{
+	m.detail[prKey(3186)] = github.Detail{Repo: testRepo,
 		Number: 3186, BehindBy: 26, Unresolved: 9, DefaultBranch: "master",
 	}
 
@@ -78,7 +78,7 @@ func TestDetailOverlayRendersTheStateBlock(t *testing.T) {
 // with no conversations earns almost nothing, which is the point: a green PR
 // does not get a full page just because a full page exists. §8.3.
 func TestDetailOverlayDrawsNothingItCannotSay(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3253, Title: "enable ops reports templates", CIState: "SUCCESS",
 		PassedCount: 8, SkippedCount: 13, Mergeable: "MERGEABLE",
 		Author: "erin-w-74", AuthorName: "Erin Walsh",
@@ -88,7 +88,7 @@ func TestDetailOverlayDrawsNothingItCannotSay(t *testing.T) {
 		UpdatedAt: time.Now().Add(-9 * time.Minute),
 	}
 	m := detailModel(t, pr, 24)
-	m.detail[3253] = github.Detail{Number: 3253, DefaultBranch: "master"}
+	m.detail[prKey(3253)] = github.Detail{Repo: testRepo, Number: 3253, DefaultBranch: "master"}
 
 	out := stripANSI(m.detailOverlay())
 	for _, unwanted := range []string{"conflicted", "unresolved", "opened", "behind", "base "} {
@@ -105,7 +105,7 @@ func TestDetailOverlayDrawsNothingItCannotSay(t *testing.T) {
 // on, so it is drawn whenever it is not the repo default -- and the default
 // comes from the repo, not from assuming "master". §5.6.
 func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3109, Title: "forbid only the move that re-opens a cycle",
 		CIState: "SUCCESS", PassedCount: 16, Author: "barspielberg",
 		HeadRefName: "fix-PROJ-1850-seat-mapping-error",
@@ -113,7 +113,7 @@ func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
 		UpdatedAt:   time.Now(),
 	}
 	m := detailModel(t, pr, 24)
-	m.detail[3109] = github.Detail{Number: 3109, DefaultBranch: "master"}
+	m.detail[prKey(3109)] = github.Detail{Repo: testRepo, Number: 3109, DefaultBranch: "master"}
 
 	if out := stripANSI(m.detailOverlay()); !strings.Contains(out,
 		"base      fix-PROJ-1839-reject-legacy-option") {
@@ -124,7 +124,7 @@ func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
 	// it: the same base line would then be drawn for every PR on the board.
 	pr.BaseRefName = "main"
 	m2 := detailModel(t, pr, 24)
-	m2.detail[3109] = github.Detail{Number: 3109, DefaultBranch: "main"}
+	m2.detail[prKey(3109)] = github.Detail{Repo: testRepo, Number: 3109, DefaultBranch: "main"}
 	if out := stripANSI(m2.detailOverlay()); strings.Contains(out, "base ") {
 		t.Errorf("base drawn for a repo whose default is main:\n%s", out)
 	}
@@ -134,7 +134,7 @@ func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
 // interleaved: a PR with 6 failing checks must not drop a failure to make room
 // for its branch name. §6.2, at the 14 rows the spec sizes the drop order for.
 func TestDetailOverlayClipsTheStateBlockBeforeTheChecks(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3230, Title: "bump @types/send from 0.17.4 to 1.2.1",
 		CIState: "FAILURE", Author: "dependabot",
 		FailedGates: []string{
@@ -152,7 +152,7 @@ func TestDetailOverlayClipsTheStateBlockBeforeTheChecks(t *testing.T) {
 		UpdatedAt:   time.Now().Add(-30 * time.Hour),
 	}
 	m := detailModel(t, pr, 14)
-	m.detail[3230] = github.Detail{Number: 3230, DefaultBranch: "master"}
+	m.detail[prKey(3230)] = github.Detail{Repo: testRepo, Number: 3230, DefaultBranch: "master"}
 
 	out := stripANSI(m.detailOverlay())
 
@@ -188,7 +188,7 @@ func TestDetailOverlayClipsTheStateBlockBeforeTheChecks(t *testing.T) {
 // The overlay is usable before the on-demand request lands: `d` draws it from
 // data already held, and the two late lines are simply absent. §7.
 func TestDetailOverlayIsUsableBeforeTheRequestLands(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3186, Title: "free unit numbers", CIState: "SUCCESS",
 		PassedCount: 18, Mergeable: "CONFLICTING", Review: "REVIEW_REQUIRED",
 		Author: "cdiaz88", AuthorName: "Carol Diaz",
@@ -223,7 +223,7 @@ func TestDetailOverlayIsUsableBeforeTheRequestLands(t *testing.T) {
 	}
 
 	// The response lands and the lines appear.
-	next, _ := m.Update(detailResponse(m, github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{Repo: testRepo,
 		Number: 3186, BehindBy: 26, Unresolved: 9, DefaultBranch: "master",
 	}))
 	out = stripANSI(next.(Model).detailOverlay())
@@ -237,7 +237,7 @@ func TestDetailOverlayIsUsableBeforeTheRequestLands(t *testing.T) {
 // after the fact: it was asked for specifically, and a name that materialises a
 // second later reads as the page having been wrong rather than incomplete.
 func TestReviewerLineShowsALoaderUntilItArrives(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3246, Title: "add context tree", CIState: "SUCCESS",
 		PassedCount: 4, Review: "CHANGES_REQUESTED", Author: "someone",
 		HeadRefName: "PROJ-1827", UpdatedAt: time.Now(),
@@ -249,7 +249,7 @@ func TestReviewerLineShowsALoaderUntilItArrives(t *testing.T) {
 		t.Errorf("no loader held the reviewer line:\n%s", out)
 	}
 
-	next, _ := m.Update(detailResponse(m, github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{Repo: testRepo,
 		Number: 3246, DefaultBranch: "master",
 		Reviewers: []github.Reviewer{
 			{Login: "alicechen", Name: "Alice Chen", State: "CHANGES_REQUESTED"},
@@ -267,7 +267,7 @@ func TestReviewerLineShowsALoaderUntilItArrives(t *testing.T) {
 // A PR nobody has reviewed has no name coming, so promising one with a loader
 // would be a placeholder for nothing.
 func TestReviewerLineIsSilentWhenNoOneHasReviewed(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3230, Title: "bump", CIState: "SUCCESS", PassedCount: 2,
 		Review: "REVIEW_REQUIRED", Author: "dependabot", UpdatedAt: time.Now(),
 	}
@@ -297,14 +297,14 @@ func TestALateResponseIsFiledUnderItsOwnPR(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 24
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "a", CIState: "SUCCESS", PassedCount: 1, UpdatedAt: time.Unix(9000, 0)},
-		{Number: 2, Title: "b", CIState: "SUCCESS", PassedCount: 1, UpdatedAt: time.Unix(8000, 0)},
+		{Repo: testRepo, Number: 1, Title: "a", CIState: "SUCCESS", PassedCount: 1, UpdatedAt: time.Unix(9000, 0)},
+		{Repo: testRepo, Number: 2, Title: "b", CIState: "SUCCESS", PassedCount: 1, UpdatedAt: time.Unix(8000, 0)},
 	}})
 	m.board.Apply(board.Result{Index: 1})
 
 	// The cursor is on #2 when #1's request finally answers.
 	m = onRow(t, m, 1)
-	next, _ := m.Update(detailResponse(m, github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{Repo: testRepo,
 		Number: 1, Unresolved: 4, DefaultBranch: "master",
 	}))
 	m = next.(Model)
@@ -322,7 +322,7 @@ func TestALateResponseIsFiledUnderItsOwnPR(t *testing.T) {
 // already asked about: holding the key down would otherwise queue one per
 // repeat.
 func TestRepeatedPressesDoNotRefetch(t *testing.T) {
-	m := detailModel(t, github.PR{
+	m := detailModel(t, github.PR{Repo: testRepo,
 		Number: 7, Title: "t", CIState: "SUCCESS", PassedCount: 1,
 		HeadRefName: "b", UpdatedAt: time.Now(),
 	}, 24)
@@ -334,8 +334,8 @@ func TestRepeatedPressesDoNotRefetch(t *testing.T) {
 	if cmd := m.fetchDetail(pr); cmd != nil {
 		t.Error("a second request was issued while the first was in flight")
 	}
-	delete(m.inflight, pr.Number)
-	m.detail[pr.Number] = github.Detail{Number: pr.Number}
+	delete(m.inflight, pr.Key())
+	m.detail[pr.Key()] = github.Detail{Repo: testRepo, Number: pr.Number}
 	if cmd := m.fetchDetail(pr); cmd != nil {
 		t.Error("a request was issued for a PR already answered")
 	}
@@ -344,14 +344,14 @@ func TestRepeatedPressesDoNotRefetch(t *testing.T) {
 // `d` still opens instantly and still closes on the next movement, with the
 // state block present. The overlay grew a block; it did not grow a mode.
 func TestDetailOverlayStaysAGlance(t *testing.T) {
-	m := detailModel(t, github.PR{
+	m := detailModel(t, github.PR{Repo: testRepo,
 		Number: 1, Title: "a", CIState: "FAILURE", FailedGates: []string{"gate-one"},
 		Author: "someone", HeadRefName: "b", UpdatedAt: time.Unix(9000, 0),
 	}, 20)
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Number: 1, Title: "a", CIState: "FAILURE", FailedGates: []string{"gate-one"},
+		{Repo: testRepo, Number: 1, Title: "a", CIState: "FAILURE", FailedGates: []string{"gate-one"},
 			Author: "someone", HeadRefName: "b", UpdatedAt: time.Unix(9000, 0)},
-		{Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
+		{Repo: testRepo, Number: 2, Title: "b", CIState: "SUCCESS", UpdatedAt: time.Unix(8000, 0)},
 	}})
 
 	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
@@ -376,7 +376,7 @@ func TestDetailOverlayStaysAGlance(t *testing.T) {
 // The overlay fits whatever pane it is given, at every height the board is
 // usable at. A page that overruns would push its own footer off the screen.
 func TestDetailOverlayFitsEveryPane(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3186, Title: strings.Repeat("a long title ", 12),
 		CIState: "FAILURE", Mergeable: "CONFLICTING",
 		FailedGates:  []string{"g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8"},
@@ -391,7 +391,7 @@ func TestDetailOverlayFitsEveryPane(t *testing.T) {
 		for _, w := range []int{80, 120, 200} {
 			m := detailModel(t, pr, h)
 			m.width = w
-			m.detail[3186] = github.Detail{
+			m.detail[prKey(3186)] = github.Detail{Repo: testRepo,
 				Number: 3186, BehindBy: 26, Unresolved: 9, DefaultBranch: "master",
 				Reviewers: []github.Reviewer{{Login: "alicechen", Name: "Alice Chen", State: "APPROVED"}},
 			}
@@ -411,13 +411,13 @@ func TestDetailOverlayFitsEveryPane(t *testing.T) {
 // The state block never appears above or inside the check list: the reader came
 // for the checks and they stay at the top of the page.
 func TestStateBlockStaysBelowTheChecks(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 9, Title: "t", CIState: "FAILURE",
 		FailedGates: []string{"gate-one", "gate-two"}, PassedCount: 3,
 		Author: "someone", HeadRefName: "b", UpdatedAt: time.Now(),
 	}
 	m := detailModel(t, pr, 24)
-	m.detail[9] = github.Detail{Number: 9, Unresolved: 2, DefaultBranch: "master"}
+	m.detail[prKey(9)] = github.Detail{Repo: testRepo, Number: 9, Unresolved: 2, DefaultBranch: "master"}
 
 	out := stripANSI(m.detailOverlay())
 	lastCheck := strings.Index(out, "3 passing")
@@ -437,11 +437,11 @@ func TestStateBlockStaysBelowTheChecks(t *testing.T) {
 // "1 unresolved comments".
 func TestUnresolvedLineAgreesWithItsCount(t *testing.T) {
 	for n, want := range map[int]string{1: "● 1 unresolved comment", 9: "● 9 unresolved comments"} {
-		m := detailModel(t, github.PR{
+		m := detailModel(t, github.PR{Repo: testRepo,
 			Number: 5, Title: "t", CIState: "SUCCESS", PassedCount: 1,
 			Author: "a", UpdatedAt: time.Now(),
 		}, 24)
-		m.detail[5] = github.Detail{Number: 5, Unresolved: n, DefaultBranch: "master"}
+		m.detail[prKey(5)] = github.Detail{Repo: testRepo, Number: 5, Unresolved: n, DefaultBranch: "master"}
 		if out := stripANSI(m.detailOverlay()); !strings.Contains(out, want) {
 			t.Errorf("n=%d: missing %q:\n%s", n, want, fmt.Sprint(out))
 		}
@@ -454,7 +454,7 @@ func TestUnresolvedLineAgreesWithItsCount(t *testing.T) {
 // below it moves. docs/pr-detail.md §7 chose to draw nothing and let the lines
 // appear; that reflows the whole block and shows no loading state at all.
 func TestDetailOverlayShowsItIsStillLoading(t *testing.T) {
-	pr := github.PR{
+	pr := github.PR{Repo: testRepo,
 		Number: 3186, Title: "free unit numbers", CIState: "SUCCESS",
 		PassedCount: 18, Author: "cdiaz88", AuthorName: "Carol Diaz",
 		Additions: 596, Deletions: 45, ChangedFiles: 7,
@@ -478,7 +478,7 @@ func TestDetailOverlayShowsItIsStillLoading(t *testing.T) {
 
 	// One on-demand line arrives, which is the common shape, and it lands on
 	// the loader's own row.
-	next, _ := m.Update(detailResponse(m, github.Detail{
+	next, _ := m.Update(detailResponse(m, github.Detail{Repo: testRepo,
 		Number: 3186, BehindBy: 26, DefaultBranch: "master",
 	}))
 	after := strings.Split(stripANSI(next.(Model).detailOverlay()), "\n")
@@ -506,7 +506,7 @@ func TestDetailOverlayShowsItIsStillLoading(t *testing.T) {
 // A board with no client is not waiting on anything, so it must not sit on a
 // loader forever.
 func TestDetailOverlayHasNoLoaderWithNothingInFlight(t *testing.T) {
-	pr := github.PR{Number: 1, Title: "a", CIState: "SUCCESS", PassedCount: 1,
+	pr := github.PR{Repo: testRepo, Number: 1, Title: "a", CIState: "SUCCESS", PassedCount: 1,
 		Author: "someone", UpdatedAt: time.Now()}
 	m := detailModel(t, pr, 24)
 	if out := stripANSI(m.detailOverlay()); strings.Contains(out, "checking for") {
@@ -518,7 +518,7 @@ func TestDetailOverlayHasNoLoaderWithNothingInFlight(t *testing.T) {
 // is a frozen glyph -- which reads as stuck, not as working. The board may well
 // have finished fetching by the time `d` is pressed.
 func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
-	pr := github.PR{Number: 1, Title: "a", CIState: "SUCCESS", PassedCount: 1,
+	pr := github.PR{Repo: testRepo, Number: 1, Title: "a", CIState: "SUCCESS", PassedCount: 1,
 		Author: "someone", UpdatedAt: time.Now()}
 	m := detailModel(t, pr, 24)
 	m.fetching = false
@@ -533,8 +533,29 @@ func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
 	}
 
 	// And it stops once nothing is out, so an idle board is not spinning.
-	m.inflight = map[int]detailRequest{}
+	m.inflight = map[github.Key]detailRequest{}
 	if _, cmd := m.Update(spinMsg(time.Now())); cmd != nil {
 		t.Error("the spinner kept ticking on an idle board")
+	}
+}
+
+// A failed request has nothing coming, so the loader and the reviewer
+// placeholder stop rather than spinning until the next refresh.
+func TestDetailLoaderStopsWhenTheRequestFails(t *testing.T) {
+	pr := github.PR{Repo: testRepo, Number: 3186, Title: "t", Review: "APPROVED",
+		HeadRefName: "PROJ-1951", UpdatedAt: time.Now()}
+	m := detailModel(t, pr, 24)
+	m.client = &github.Client{}
+
+	msg := detailResponse(m, github.Detail{Repo: testRepo, Number: 3186})
+	msg.err = errTest
+	next, _ := m.Update(msg)
+	m = next.(Model)
+	out := stripANSI(m.detailOverlay())
+	if strings.Contains(out, "checking for conflicts") || strings.Contains(out, "…") {
+		t.Errorf("the page still promises lines after the request failed:\n%s", out)
+	}
+	if m.fetchDetail(pr) != nil {
+		t.Error("a failed PR was asked again before a refresh")
 	}
 }

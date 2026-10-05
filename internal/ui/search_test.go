@@ -86,13 +86,13 @@ func loaded(t *testing.T, width, height int, mine, review []github.PR) Model {
 
 func samplePRs() ([]github.PR, []github.PR) {
 	mine := []github.PR{
-		{Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
-		{Number: 3100, Title: "fix(pricing): rounding on invoice totals",
+		{Repo: testRepo, Number: 3100, Title: "fix(pricing): rounding on invoice totals",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(200, 0)},
 	}
 	review := []github.PR{
-		{Number: 4001, Title: "chore(deps): bump lipgloss",
+		{Repo: testRepo, Number: 4001, Title: "chore(deps): bump lipgloss",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(100, 0)},
 	}
 	return mine, review
@@ -122,9 +122,9 @@ func TestQueryDoesNotNarrowTheBoard(t *testing.T) {
 // highlighted, so the user can see which is which.
 func TestNumberIsOrdinarySearchableText(t *testing.T) {
 	mine := []github.PR{
-		{Number: 3248, Title: "feat(api-service): refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(api-service): refuse order plan writes",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
-		{Number: 3100, Title: "fix(pricing): round the 324 cent remainder",
+		{Repo: testRepo, Number: 3100, Title: "fix(pricing): round the 324 cent remainder",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(200, 0)},
 	}
 	m := loaded(t, 120, 40, mine, nil)
@@ -153,12 +153,12 @@ func TestNumberIsOrdinarySearchableText(t *testing.T) {
 func TestCtrlNAndCtrlPMoveWithinMatches(t *testing.T) {
 	var mine []github.PR
 	for i := 0; i < 5; i++ {
-		mine = append(mine, github.PR{
+		mine = append(mine, github.PR{Repo: testRepo,
 			Number: 100 + i, Title: fmt.Sprintf("alpha match %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(500-i), 0),
 		})
 	}
-	mine = append(mine, github.PR{
+	mine = append(mine, github.PR{Repo: testRepo,
 		Number: 999, Title: "zeta unrelated", CIState: "SUCCESS", UpdatedAt: time.Unix(1, 0),
 	})
 	m := typeQuery(loaded(t, 120, 40, mine, nil), "alpha")
@@ -262,7 +262,7 @@ func TestEmptySectionsStayVisibleWhileSearching(t *testing.T) {
 func TestSearchedBoardFitsTerminalAtAnyWidth(t *testing.T) {
 	var mine []github.PR
 	for i := 0; i < 40; i++ {
-		mine = append(mine, github.PR{
+		mine = append(mine, github.PR{Repo: testRepo,
 			Number: 3000 + i, Title: fmt.Sprintf("feat(api-service): %s %d", strings.Repeat("long ", 10), i),
 			CIState: "FAILURE", FailedGates: []string{"a", "b"}, UpdatedAt: time.Unix(int64(900-i), 0),
 		})
@@ -298,7 +298,7 @@ func TestSearchedBoardFitsTerminalAtAnyWidth(t *testing.T) {
 func TestCursorStaysVisibleWhileSearching(t *testing.T) {
 	var mine []github.PR
 	for i := 0; i < 30; i++ {
-		mine = append(mine, github.PR{
+		mine = append(mine, github.PR{Repo: testRepo,
 			Number: 200 + i, Title: fmt.Sprintf("refuse item %d", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(900-i), 0),
 		})
@@ -500,7 +500,7 @@ func TestMatchedCharactersAreHighlighted(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	mine := []github.PR{{
+	mine := []github.PR{{Repo: testRepo,
 		Number: 3248, Title: "feat(api-service): refuse order plan writes",
 		CIState: "SUCCESS", UpdatedAt: time.Now(),
 	}}
@@ -600,16 +600,16 @@ func numbersOf(rows []board.Row) []int {
 // under the title.
 func TestSearchTextMatchesWhatIsRendered(t *testing.T) {
 	prs := []github.PR{
-		{Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
-		{Number: 7, Title: "fix: tiny", Author: "ab", CIState: "FAILURE", UpdatedAt: time.Unix(200, 0)},
-		{Number: 41234, Title: "chore(deps): bump lipgloss to the version with the fix",
+		{Repo: testRepo, Number: 7, Title: "fix: tiny", Author: "ab", CIState: "FAILURE", UpdatedAt: time.Unix(200, 0)},
+		{Repo: testRepo, Number: 41234, Title: "chore(deps): bump lipgloss to the version with the fix",
 			Author: "dependabot", CIState: "PENDING", UpdatedAt: time.Unix(100, 0)},
-		{Number: 4001, Title: "修复订单计划写入被拒绝的问题",
+		{Repo: testRepo, Number: 4001, Title: "修复订单计划写入被拒绝的问题",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(400, 0)},
-		{Number: 4002, Title: "🚀🚀 fix the ordering thing",
+		{Repo: testRepo, Number: 4002, Title: "🚀🚀 fix the ordering thing",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(500, 0)},
-		{Number: 4003, Title: "修复 fix(api): 订单 plan writes 被拒绝",
+		{Repo: testRepo, Number: 4003, Title: "修复 fix(api): 订单 plan writes 被拒绝",
 			Author: "immanuel", CIState: "FAILURE", UpdatedAt: time.Unix(600, 0)},
 	}
 
@@ -667,7 +667,7 @@ func TestSearchTextOffsetsLandOnTheCells(t *testing.T) {
 		"修复订单计划写入被拒绝的问题",
 		"🚀🚀 refuse order plan writes",
 	} {
-		pr := github.PR{Number: 3248, Title: title,
+		pr := github.PR{Repo: testRepo, Number: 3248, Title: title,
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}
 
 		for _, w := range []int{80, 100, 147} {
@@ -708,7 +708,7 @@ func TestAuthorHighlightSurvivesWideRuneTitles(t *testing.T) {
 		"修复订单计划写入被拒绝的问题",
 		"修复订单计划写入被拒绝的问题，以及其他若干问题需要处理",
 	} {
-		pr := github.PR{Number: 4001, Title: title, Author: "immanuel",
+		pr := github.PR{Repo: testRepo, Number: 4001, Title: title, Author: "immanuel",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}
 		m := loaded(t, 147, 40, []github.PR{pr}, nil)
 		r := m.board.Sections()[0].Rows[0]
@@ -733,7 +733,7 @@ func TestAuthorHighlightSurvivesWideRuneTitles(t *testing.T) {
 // A clipped title stops at the clip point, so a word past it is not on screen
 // and must not match. Widen the pane and the same word is found.
 func TestClippedTitleTextIsNotSearchable(t *testing.T) {
-	pr := github.PR{Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
+	pr := github.PR{Repo: testRepo, Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
 		Title: "feat(api-service): refuse order plan writes while the fleet is offline"}
 
 	narrow := loaded(t, 70, 40, []github.PR{pr}, nil)
@@ -751,7 +751,7 @@ func TestClippedTitleTextIsNotSearchable(t *testing.T) {
 
 // The author column is not drawn below tierFull, so it is not searchable there.
 func TestAuthorIsNotSearchableBelowFullWidth(t *testing.T) {
-	pr := github.PR{Number: 3248, Title: "refuse order plan writes",
+	pr := github.PR{Repo: testRepo, Number: 3248, Title: "refuse order plan writes",
 		Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}
 
 	mid := loaded(t, midUntil, 40, []github.PR{pr}, nil)
@@ -767,7 +767,7 @@ func TestAuthorIsNotSearchableBelowFullWidth(t *testing.T) {
 // on its own as the clock moves, and a bare digit would collide with the PR
 // number on the way to every numeric search.
 func TestAgeIsNotSearchable(t *testing.T) {
-	pr := github.PR{Number: 3248, Title: "refuse order plan writes",
+	pr := github.PR{Repo: testRepo, Number: 3248, Title: "refuse order plan writes",
 		Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Now().Add(-48 * time.Hour)}
 	m := loaded(t, 147, 40, []github.PR{pr}, nil)
 	r := m.board.Sections()[0].Rows[0]
@@ -786,7 +786,7 @@ func TestAgeIsNotSearchable(t *testing.T) {
 // Every occurrence is a hit, not only the first: a query can appear twice on
 // one row and both have to be highlighted.
 func TestMatchSpansFindsEveryOccurrence(t *testing.T) {
-	pr := github.PR{Number: 3248, Title: "fix: fix the fix", CIState: "SUCCESS",
+	pr := github.PR{Repo: testRepo, Number: 3248, Title: "fix: fix the fix", CIState: "SUCCESS",
 		UpdatedAt: time.Unix(300, 0)}
 	m := loaded(t, 147, 40, []github.PR{pr}, nil)
 
@@ -799,7 +799,7 @@ func TestMatchSpansFindsEveryOccurrence(t *testing.T) {
 // title with multi-byte characters -- and the multi-byte ellipsis clip itself
 // adds -- would misplace every highlight without the conversion.
 func TestClippedNonASCIITitleHighlightsCorrectly(t *testing.T) {
-	pr := github.PR{Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
+	pr := github.PR{Repo: testRepo, Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
 		Title: "feat(café): refuse — órder plán writes for the whole fleet at once"}
 	// 80, not 90: the section gutter's 10 cells went back to the title when
 	// sections moved to their own header row, so 90 no longer clips this.
@@ -845,7 +845,7 @@ func TestWhitespaceQueryMatchesNothing(t *testing.T) {
 // Case never matters, in either direction: initials() lower-cases the author,
 // so a login typed the way GitHub spells it would never find its own cell.
 func TestMatchingIsCaseInsensitive(t *testing.T) {
-	pr := github.PR{Number: 3248, Title: "feat(api): PROJ-2037 refuse writes",
+	pr := github.PR{Repo: testRepo, Number: 3248, Title: "feat(api): PROJ-2037 refuse writes",
 		Author: "Immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}
 	m := loaded(t, 147, 40, []github.PR{pr}, nil)
 	r := m.board.Sections()[0].Rows[0]
@@ -879,23 +879,23 @@ func TestEveryMatchIsVisiblyHighlighted(t *testing.T) {
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	mine := []github.PR{
-		{Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
-		{Number: 3100, Title: "fix(pricing): rounding on invoice totals",
+		{Repo: testRepo, Number: 3100, Title: "fix(pricing): rounding on invoice totals",
 			Author: "cdiaz88", CIState: "SUCCESS", UpdatedAt: time.Unix(200, 0)},
 		// Wide runes put the cells' rune counts and their column widths out of
 		// step, which is where a match can be counted and still draw nothing.
-		{Number: 3301, Title: "修复订单计划写入被拒绝的问题",
+		{Repo: testRepo, Number: 3301, Title: "修复订单计划写入被拒绝的问题",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(250, 0)},
-		{Number: 3302, Title: "🚀🚀 refuse order plan writes",
+		{Repo: testRepo, Number: 3302, Title: "🚀🚀 refuse order plan writes",
 			Author: "cdiaz88", CIState: "FAILURE", UpdatedAt: time.Unix(240, 0)},
-		{Number: 3303, Title: "修复 fix(api): 订单 refuse PROJ-2037 被拒绝",
+		{Repo: testRepo, Number: 3303, Title: "修复 fix(api): 订单 refuse PROJ-2037 被拒绝",
 			Author: "dependabot", CIState: "SUCCESS", UpdatedAt: time.Unix(230, 0)},
 	}
 	review := []github.PR{
-		{Number: 4001, Title: "chore(deps): bump lipgloss", Author: "dependabot",
+		{Repo: testRepo, Number: 4001, Title: "chore(deps): bump lipgloss", Author: "dependabot",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(100, 0)},
-		{Number: 4002, Title: "重构：订单计划的写入路径 lipgloss", Author: "immanuel",
+		{Repo: testRepo, Number: 4002, Title: "重构：订单计划的写入路径 lipgloss", Author: "immanuel",
 			CIState: "PENDING", UpdatedAt: time.Unix(90, 0)},
 	}
 
@@ -925,7 +925,7 @@ func TestNumberCellHighlightsAndKeepsItsWidth(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	mine := []github.PR{{Number: 42, Title: "fix(pricing): round it",
+	mine := []github.PR{{Repo: testRepo, Number: 42, Title: "fix(pricing): round it",
 		Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}}
 
 	plain := loaded(t, 147, 20, mine, nil)
@@ -955,7 +955,7 @@ func TestPaddingIsNeverFilled(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	mine := []github.PR{{Number: 42, Title: "fix: round it", Author: "ab",
+	mine := []github.PR{{Repo: testRepo, Number: 42, Title: "fix: round it", Author: "ab",
 		CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}}
 	m := typeQuery(loaded(t, 147, 20, mine, nil), "42")
 	line := rowFor(t, m, "#42")
@@ -1017,7 +1017,7 @@ func TestAuthorCellHighlightsWithinItsThreeCells(t *testing.T) {
 
 	// Only the review rule shows the author column, so that is where a row
 	// with an author cell to fill has to live.
-	review := []github.PR{{Number: 3248, Title: "fix(pricing): round it",
+	review := []github.PR{{Repo: testRepo, Number: 3248, Title: "fix(pricing): round it",
 		Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}}
 
 	plain := loaded(t, 147, 20, nil, review)
@@ -1050,7 +1050,7 @@ func TestAgeCellIsNeverHighlighted(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	mine := []github.PR{{Number: 3248, Title: "fix(pricing): round it",
+	mine := []github.PR{{Repo: testRepo, Number: 3248, Title: "fix(pricing): round it",
 		Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Now().Add(-48 * time.Hour)}}
 	m := typeQuery(loaded(t, 147, 20, mine, nil), "2d")
 	line := rowFor(t, m, "#3248")
@@ -1112,7 +1112,7 @@ func TestAQueryMatchingNothingLeavesTheCursorAlone(t *testing.T) {
 func TestBoardDoesNotMoveWhileSearching(t *testing.T) {
 	var mine []github.PR
 	for i := 0; i < 12; i++ {
-		mine = append(mine, github.PR{
+		mine = append(mine, github.PR{Repo: testRepo,
 			Number: 3000 + i, Title: fmt.Sprintf("feat(ordering): AF-1%d do the thing", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(900-i), 0),
 		})
@@ -1141,8 +1141,8 @@ func TestBoardDoesNotMoveWhileSearching(t *testing.T) {
 // a dangling ╰╴ would draw a line to a row that is not above it.
 func TestStackGlyphsSurviveSearch(t *testing.T) {
 	mine := []github.PR{
-		{Number: 3001, Title: "feat: base", HeadRefName: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(900, 0)},
-		{Number: 3002, Title: "feat: stacked on it", BaseRefName: "a", HeadRefName: "b",
+		{Repo: testRepo, Number: 3001, Title: "feat: base", HeadRefName: "a", CIState: "SUCCESS", UpdatedAt: time.Unix(900, 0)},
+		{Repo: testRepo, Number: 3002, Title: "feat: stacked on it", BaseRefName: "a", HeadRefName: "b",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(800, 0)},
 	}
 	plain := stripANSI(loaded(t, 147, 40, mine, nil).View())
@@ -1173,13 +1173,13 @@ func searched(t *testing.T, m Model, q string) Model {
 // other; TestNStopsOnAMatchingHeader covers that.
 func TestNCrossesSectionBoundaries(t *testing.T) {
 	mine := []github.PR{
-		{Number: 3248, Title: "feat(ordering): refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(ordering): refuse order plan writes",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
-		{Number: 3100, Title: "fix(pricing): rounding on invoice totals",
+		{Repo: testRepo, Number: 3100, Title: "fix(pricing): rounding on invoice totals",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(200, 0)},
 	}
 	review := []github.PR{
-		{Number: 4001, Title: "chore(ordering): bump lipgloss",
+		{Repo: testRepo, Number: 4001, Title: "chore(ordering): bump lipgloss",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(100, 0)},
 	}
 	m := searched(t, loaded(t, 147, 40, mine, review), "ordering")
@@ -1374,7 +1374,7 @@ func TestSearchSurvivesRefresh(t *testing.T) {
 // Section 4.1: the searchable text is what is drawn, so the width decides the
 // match set. Widening reveals matches a narrow pane clipped away.
 func TestResizeRecomputesMatches(t *testing.T) {
-	mine := []github.PR{{Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
+	mine := []github.PR{{Repo: testRepo, Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
 		Title: "feat(api-service): refuse order plan writes while the fleet is offline"}}
 
 	m := loaded(t, 70, 40, mine, nil)
@@ -1501,9 +1501,9 @@ func TestHitDoesNotInheritWhatItLandsOn(t *testing.T) {
 	// "ordering" sits inside the scope of both titles, so the hit lands on
 	// faint text; one row is selected and one is not.
 	mine := []github.PR{
-		{Number: 3248, Title: "fix(ordering): reach the popup", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3248, Title: "fix(ordering): reach the popup", CIState: "SUCCESS",
 			UpdatedAt: time.Unix(300, 0)},
-		{Number: 3100, Title: "feat(ordering): add the thing", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3100, Title: "feat(ordering): add the thing", CIState: "SUCCESS",
 			UpdatedAt: time.Unix(200, 0)},
 	}
 	m := searched(t, onRow(t, loaded(t, 147, 20, mine, nil), 0), "ordering")
@@ -1756,7 +1756,7 @@ func TestHitNeverInheritsBackgroundOnEitherPage(t *testing.T) {
 // reach; stepping to it without counting it would lose the position.
 func TestSectionTitleMatchesAreCounted(t *testing.T) {
 	mine := []github.PR{
-		{Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
 			UpdatedAt: time.Unix(300, 0)},
 	}
 	m := loaded(t, 147, 40, mine, nil)
@@ -1778,7 +1778,7 @@ func TestSectionTitleMatchesAreCounted(t *testing.T) {
 // already supports -- and skipping it would strand a counted match.
 func TestNStopsOnAMatchingHeader(t *testing.T) {
 	mine := []github.PR{
-		{Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
 			UpdatedAt: time.Unix(300, 0)},
 	}
 	m := loaded(t, 147, 40, mine, nil)
@@ -1810,7 +1810,7 @@ func TestNStopsOnAMatchingHeader(t *testing.T) {
 // there. Landing the search on a header must not change that.
 func TestActionsOnAMatchedHeaderStayNoOps(t *testing.T) {
 	mine := []github.PR{
-		{Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
 			UpdatedAt: time.Unix(300, 0)},
 	}
 	m := loaded(t, 147, 40, mine, nil)
@@ -1829,7 +1829,7 @@ func TestActionsOnAMatchedHeaderStayNoOps(t *testing.T) {
 // kind of thing that gets noticed in use.
 func TestCtrlNStopsOnAMatchingHeader(t *testing.T) {
 	mine := []github.PR{
-		{Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3248, Title: "feat(api): mine to review", CIState: "SUCCESS",
 			UpdatedAt: time.Unix(300, 0)},
 	}
 	m := typeQuery(loaded(t, 147, 40, mine, nil), "mine")
