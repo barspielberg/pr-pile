@@ -90,22 +90,32 @@ func (m Model) bodyBudget() int {
 // checkLines is the overlay's body, split out so a test can assert on the list
 // without parsing the frame around it.
 //
-// Order is failing, pending, cancelled, then the passing count: the list is read
-// top-down and the top is what you pressed `d` for. Within a bucket the API's
-// own order is kept -- it groups a workflow's jobs together, which is more
-// useful than an alphabetical sort that would interleave them.
+// Order is required failing, pending, optional failing, cancelled, then the
+// passing count: the list is read top-down and the top is what you pressed `d`
+// for. Within a bucket the API's own order is kept -- it groups a workflow's
+// jobs together, which is more useful than an alphabetical sort that would
+// interleave them.
 func (m Model) checkLines(pr github.PR) []string {
 	body := max(0, m.width-4)
 	var out []string
-	for _, g := range pr.FailedGates {
+	for _, g := range pr.RequiredFailures() {
 		out = append(out, "  "+errorStyle.Render("✗")+" "+clip(g, body))
 	}
 	for _, g := range pr.PendingGates {
 		out = append(out, "  "+attentionStyle.Render("◐")+" "+mutedStyle.Render(clip(g, body)))
 	}
+	for _, g := range pr.FailedGates {
+		if pr.IsOptional(g) {
+			out = append(out, "  "+mutedStyle.Render("✗ "+clip(g+" (optional)", body)))
+		}
+	}
 	// Muted rather than red: a cancelled check usually wants a re-run, not a fix.
 	for _, g := range pr.CancelledGates {
-		out = append(out, "  "+mutedStyle.Render("⊘ "+clip(g+" (cancelled)", body)))
+		label := g + " (cancelled)"
+		if pr.IsOptional(g) {
+			label = g + " (cancelled, optional)"
+		}
+		out = append(out, "  "+mutedStyle.Render("⊘ "+clip(label, body)))
 	}
 
 	if len(out) == 0 {

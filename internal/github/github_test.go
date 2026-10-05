@@ -201,6 +201,130 @@ func TestSearchListsACancelledLatestRun(t *testing.T) {
 	}
 }
 
+// isRequired needs a PR number, so a search cannot ask for it and a second
+// request does, for the PRs with something failing. A green PR costs nothing.
+func TestSearchAsksWhichFailingChecksAreRequired(t *testing.T) {
+	const search = `{"data":{"search":{"nodes":[
+	  {"number":7,"repository":{"nameWithOwner":"o/r"},
+	   "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[
+	    {"__typename":"CheckRun","name":"run e2e / run-e2e","status":"COMPLETED","conclusion":"FAILURE"},
+	    {"__typename":"CheckRun","name":"claude-review","status":"COMPLETED","conclusion":"FAILURE"},
+	    {"__typename":"CheckRun","name":"Build","status":"COMPLETED","conclusion":"SUCCESS"}]}}}}]}},
+	  {"number":8,"repository":{"nameWithOwner":"o/r"},
+	   "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[
+	    {"__typename":"CheckRun","name":"Build","status":"COMPLETED","conclusion":"SUCCESS"}]}}}}]}}]}}}`
+	const required = `{"data":{"r0":{"p7":{"number":7,
+	   "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+	    {"__typename":"CheckRun","name":"run e2e / run-e2e","isRequired":true},
+	    {"__typename":"CheckRun","name":"claude-review","isRequired":false},
+	    {"__typename":"CheckRun","name":"Build","isRequired":true}]}}}}]}}}}}`
+
+	var asked string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Query string }
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if strings.Contains(req.Query, "isRequired") {
+			asked = req.Query
+			_, _ = w.Write([]byte(required))
+			return
+		}
+		_, _ = w.Write([]byte(search))
+	}))
+	defer srv.Close()
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	prs, err := c.Search(context.Background(), "q", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(asked, "pullRequest(number: 7)") || strings.Contains(asked, "pullRequest(number: 8)") {
+		t.Errorf("asked about the wrong PRs:\n%s", asked)
+	}
+	red := prs[0]
+	if got := red.RequiredFailures(); len(got) != 1 || got[0] != "run-e2e" {
+		t.Errorf("required failures %v, want [run-e2e]", got)
+	}
+	if !red.IsOptional("claude-review") || red.OnlyOptionalFailing() {
+		t.Errorf("claude-review optional %v, only optional %v", red.IsOptional("claude-review"), red.OnlyOptionalFailing())
+	}
+	if prs[1].Required != nil {
+		t.Errorf("a green PR was asked about: %v", prs[1].Required)
+	}
+}
+
+// searchWithRequired answers the board search with search and the isRequired
+// follow-up with required.
+func searchWithRequired(t *testing.T, search, required string) []PR {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Query string }
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if strings.Contains(req.Query, "isRequired") {
+			_, _ = w.Write([]byte(required))
+			return
+		}
+		_, _ = w.Write([]byte(search))
+	}))
+	defer srv.Close()
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	prs, err := c.Search(context.Background(), "q", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prs
+}
+
+// Captured from Autofleet/autorepo#3429: the only required check is the CI Gate
+// umbrella, which pile never names, so its failing child looked optional and
+// the row went grey on a PR GitHub would not let merge. The umbrella only
+// speaks for its own workflow, so another workflow's optional check stays so.
+func TestSearchTreatsFailuresUnderARequiredUmbrellaAsRequired(t *testing.T) {
+	prs := searchWithRequired(t, `{"data":{"search":{"nodes":[
+	  {"number":3429,"repository":{"nameWithOwner":"o/r"},
+	   "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[
+	    {"__typename":"CheckRun","name":"call_apps_ci / CI Gate","status":"COMPLETED","conclusion":"FAILURE"},
+	    {"__typename":"CheckRun","name":"call_apps_ci / lint-typecheck-test control-center","status":"COMPLETED","conclusion":"FAILURE"},
+	    {"__typename":"CheckRun","name":"claude-review","status":"COMPLETED","conclusion":"FAILURE"}]}}}}]}}]}}}`,
+		`{"data":{"r0":{"p3429":{"number":3429,
+	   "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+	    {"__typename":"CheckRun","name":"call_apps_ci / CI Gate","isRequired":true},
+	    {"__typename":"CheckRun","name":"call_apps_ci / lint-typecheck-test control-center","isRequired":false},
+	    {"__typename":"CheckRun","name":"claude-review","isRequired":false}]}}}}]}}}}}`)
+
+	got := prs[0].RequiredFailures()
+	if len(got) != 1 || got[0] != "lint-typecheck-test control-center" {
+		t.Errorf("required failures %v, want only the umbrella's own child", got)
+	}
+}
+
+// Past one page of contexts a required failure may be unseen, so no failure is
+// called optional and the follow-up is not even asked.
+func TestSearchDoesNotCallFailuresOptionalWhenContextsAreTruncated(t *testing.T) {
+	prs := searchWithRequired(t, `{"data":{"search":{"nodes":[
+	  {"number":7,"repository":{"nameWithOwner":"o/r"},
+	   "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{
+	    "pageInfo":{"hasNextPage":true},"nodes":[
+	    {"__typename":"CheckRun","name":"claude-review","status":"COMPLETED","conclusion":"FAILURE"}]}}}}]}}]}}}`,
+		`{"data":{"r0":{"p7":{"number":7,
+	   "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+	    {"__typename":"CheckRun","name":"claude-review","isRequired":false}]}}}}]}}}}}`)
+
+	if prs[0].Required != nil || prs[0].OnlyOptionalFailing() {
+		t.Errorf("required %v: a truncated PR must not have optional failures", prs[0].Required)
+	}
+}
+
+// The second request is best effort: when it fails the board must look
+// exactly as it did before it existed, every failure blocking.
+func TestSearchTreatsEveryCheckAsRequiredWhenTheSecondRequestFails(t *testing.T) {
+	pr := searchOne(t, `
+	  {"__typename":"CheckRun","name":"claude-review","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-10-05T08:25:42Z"}`)
+
+	if pr.Required != nil || pr.IsOptional("claude-review") || len(pr.RequiredFailures()) != 1 {
+		t.Errorf("required %v, failures %v: an unknown answer must read as required", pr.Required, pr.RequiredFailures())
+	}
+}
+
 // A rule can search several repos, so each PR carries the repo it came from.
 func TestSearchCarriesEachPRsRepo(t *testing.T) {
 	const body = `{"data":{"search":{"nodes":[

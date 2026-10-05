@@ -1332,6 +1332,54 @@ func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
 	}
 }
 
+// The row's count is of failures that block the merge. With only optional ones
+// the cell drops the count, which is what tells it apart from red ✗n without
+// colour, and a nil Required keeps the old every-failure count.
+func TestCICellCountsOnlyRequiredFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		required map[string]bool
+		want     string
+	}{
+		{"unknown counts all", nil, "✗2"},
+		{"one required", map[string]bool{"run-e2e": true}, "✗1"},
+		{"none required", map[string]bool{}, "✗ "},
+	} {
+		pr := github.PR{CIState: "FAILURE", FailedGates: []string{"claude-review", "run-e2e"}, Required: tc.required}
+		got, style := ciCell(pr)
+		if got != tc.want {
+			t.Errorf("%s: cell %q, want %q", tc.name, got, tc.want)
+		}
+		if tc.want == "✗ " && style.GetForeground() != mutedStyle.GetForeground() {
+			t.Errorf("%s: only-optional failures must be muted, not red", tc.name)
+		}
+	}
+}
+
+// Optional failures are still named, below what blocks and what is running,
+// so the page accounts for every check without ranking them as equals.
+func TestChecksOverlayMarksOptionalFailures(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 24
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
+		Number: 7, Title: "t", CIState: "FAILURE", UpdatedAt: time.Now(),
+		FailedGates:  []string{"claude-review", "run-e2e"},
+		PendingGates: []string{"env-setup"},
+		Required:     map[string]bool{"run-e2e": true},
+	}}})
+	m.board.Apply(board.Result{Index: 1})
+	m = onRow(t, m, 0)
+	m.showChecks = true
+
+	out := stripANSI(m.View())
+	req := strings.Index(out, "✗ run-e2e")
+	pend := strings.Index(out, "◐ env-setup")
+	opt := strings.Index(out, "✗ claude-review (optional)")
+	if req < 0 || pend < 0 || opt < 0 || !(req < pend && pend < opt) {
+		t.Errorf("want required, then running, then optional:\n%s", out)
+	}
+}
+
 // A cancelled check is named so a blocked PR never reads as green, but in the
 // muted glyph rather than the failure one: it wants a re-run, not a fix.
 func TestChecksOverlayNamesCancelledChecksApartFromFailures(t *testing.T) {

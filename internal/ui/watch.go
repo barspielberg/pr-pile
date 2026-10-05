@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -176,7 +177,9 @@ func (m Model) applyWatch(msg watchMsg) (Model, tea.Cmd) {
 			gone = append(gone, m.prRef(e.pr)+" not found, stopped watching")
 			continue
 		}
-		if events := watchEvents(e.pr, now); len(events) > 0 {
+		now.PR = keepRequired(e.pr, now.PR)
+		was := keepRequired(now.PR, e.pr)
+		if events := watchEvents(was, now); len(events) > 0 {
 			e.unseen = true
 			news = append(news, notice{number: key.Number, url: now.URL, title: terminalText(now.Title),
 				text: m.prRef(e.pr) + " " + strings.Join(events, ", ")})
@@ -234,8 +237,8 @@ func watchEvents(was github.PR, now github.Watched) []string {
 		switch out {
 		case "failed":
 			text := "CI failed"
-			if len(now.FailedGates) > 0 {
-				text += ": " + terminalText(now.FailedGates[0])
+			if req := now.RequiredFailures(); len(req) > 0 {
+				text += ": " + terminalText(req[0])
 			}
 			events = append(events, text)
 		case "passed":
@@ -264,11 +267,36 @@ func watchEvents(was github.PR, now github.Watched) []string {
 
 func knownMergeable(s string) bool { return s == "MERGEABLE" || s == "CONFLICTING" }
 
+// keepRequired lends to's missing Required from from, when both saw the same
+// failing and cancelled checks. The lookup is best effort, so one failed
+// request would otherwise flip an optional-only failure to "CI failed" and
+// back to "CI passed" a poll later.
+func keepRequired(from, to github.PR) github.PR {
+	if to.Required == nil && from.Required != nil &&
+		slices.Equal(from.FailedGates, to.FailedGates) && slices.Equal(from.CancelledGates, to.CancelledGates) {
+		to.Required = from.Required
+	}
+	return to
+}
+
 // ciOutcome counts a single failed check as failed while others still run,
 // which is what lets a failure be reported without waiting for the slowest job.
+// Only checks the PR needs to merge count: an optional failure or cancel on
+// its own is not news.
 func ciOutcome(pr github.PR) string {
 	switch {
-	case len(pr.FailedGates) > 0 || pr.CIState == "FAILURE" || pr.CIState == "ERROR":
+	case len(pr.RequiredFailures()) > 0:
+		return "failed"
+	case pr.OnlyOptionalFailing() ||
+		(pr.CIState == "CANCELLED" && len(pr.CancelledGates) > 0 && len(pr.RequiredCancels()) == 0):
+		switch {
+		case len(pr.PendingGates) > 0:
+			return "running"
+		case len(pr.RequiredCancels()) > 0:
+			return "cancelled"
+		}
+		return "passed"
+	case pr.CIState == "FAILURE" || pr.CIState == "ERROR":
 		return "failed"
 	case pr.CIState == "SUCCESS":
 		return "passed"

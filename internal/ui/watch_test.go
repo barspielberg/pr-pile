@@ -47,6 +47,18 @@ func TestWatchEvents(t *testing.T) {
 		{"ci cancelled", open(with(func(p *github.PR) { p.CIState = "CANCELLED" })), "CI cancelled"},
 		// The first failing check is the news, while the rest still run.
 		{"first failure while running", open(with(func(p *github.PR) { p.FailedGates = []string{"lint"} })), "CI failed: lint"},
+		// An optional failure does not block the merge, so it is not news.
+		{"optional failure while running", open(with(func(p *github.PR) {
+			p.CIState, p.FailedGates, p.PendingGates = "FAILURE", []string{"claude-review"}, []string{"e2e"}
+			p.Required = map[string]bool{"e2e": true}
+		})), ""},
+		{"only optional failures once done", open(with(func(p *github.PR) {
+			p.CIState, p.FailedGates, p.Required = "FAILURE", []string{"claude-review"}, map[string]bool{}
+		})), "CI passed"},
+		{"names the required failure", open(with(func(p *github.PR) {
+			p.CIState, p.FailedGates = "FAILURE", []string{"claude-review", "run-e2e"}
+			p.Required = map[string]bool{"run-e2e": true}
+		})), "CI failed: run-e2e"},
 		{"approved", open(with(func(p *github.PR) { p.Review = "APPROVED" })), "approved"},
 		{"changes requested", open(with(func(p *github.PR) { p.Review = "CHANGES_REQUESTED" })), "changes requested"},
 		{"conflicts", open(with(func(p *github.PR) { p.Mergeable = "CONFLICTING" })), "conflicts"},
@@ -57,6 +69,35 @@ func TestWatchEvents(t *testing.T) {
 		if got := strings.Join(watchEvents(base, tc.now), ", "); got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// The isRequired lookup is best effort. One that fails on a single poll, on
+// either side of the diff, must not turn an optional failure into news.
+func TestWatchEventsSurviveAFailedRequiredLookup(t *testing.T) {
+	known := github.PR{Repo: testRepo, CIState: "FAILURE", FailedGates: []string{"claude-review"}, Required: map[string]bool{}}
+	unknown := known
+	unknown.Required = nil
+
+	for _, tc := range []struct {
+		name     string
+		was, now github.PR
+	}{
+		{"lookup failed on this poll", known, unknown},
+		{"lookup failed on the last poll", unknown, known},
+	} {
+		now := keepRequired(tc.was, tc.now)
+		was := keepRequired(now, tc.was)
+		if got := watchEvents(was, open(now)); len(got) > 0 {
+			t.Errorf("%s: got %v, want nothing", tc.name, got)
+		}
+	}
+
+	// A different set of failures is a different answer, not a gap to fill.
+	changed := unknown
+	changed.FailedGates = []string{"claude-review", "run-e2e"}
+	if keepRequired(known, changed).Required != nil {
+		t.Error("lent Required across a change in failing checks")
 	}
 }
 

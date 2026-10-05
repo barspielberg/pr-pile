@@ -86,9 +86,49 @@ type PR struct {
 	// rather than about the PR. Counted so the overlay can reconcile its
 	// total against GitHub's, never listed.
 	SkippedCount int
+
+	// Required holds the gate names branch protection requires, fetched only
+	// for PRs with a failing or cancelled check. Nil means unknown, and then
+	// every check is treated as required, which is what the board did before.
+	Required map[string]bool
+
+	// openUmbrellas are the raw names of umbrella gates that have not passed.
+	// They are never named, but if one is required it blocks the merge on
+	// behalf of every failure under it.
+	openUmbrellas []string
+	// rawProblems are the raw names behind FailedGates and CancelledGates,
+	// which keep the workflow prefix an umbrella's children share.
+	rawProblems []string
+	// truncated is set when the contexts ran past one page, so a required
+	// failure may be unseen and no failure can safely be called optional.
+	truncated bool
 }
 
 func (p PR) Key() Key { return Key{Repo: p.Repo, Number: p.Number} }
+
+// IsOptional is true only when the PR is known not to need the gate to merge.
+func (p PR) IsOptional(gate string) bool {
+	return p.Required != nil && !p.Required[gate]
+}
+
+func (p PR) RequiredFailures() []string { return p.required(p.FailedGates) }
+
+func (p PR) RequiredCancels() []string { return p.required(p.CancelledGates) }
+
+func (p PR) required(gates []string) []string {
+	var out []string
+	for _, g := range gates {
+		if !p.IsOptional(g) {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// OnlyOptionalFailing is a PR whose named failures can all be merged past.
+func (p PR) OnlyOptionalFailing() bool {
+	return len(p.FailedGates) > 0 && len(p.RequiredFailures()) == 0
+}
 
 // CompareRef names the PR's head for a compare against its base. A fork's
 // branch is not in the base repo, so it needs the owner:branch form.
@@ -306,6 +346,7 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]PR, err
 	for _, n := range out.Data.Search.Nodes {
 		prs = append(prs, n.toPR())
 	}
+	c.fillRequired(ctx, prs)
 	return prs, nil
 }
 
@@ -390,7 +431,174 @@ func (c *Client) Watch(ctx context.Context, repo string, numbers []int) (map[int
 			}
 		}
 	}
+	// The watch copy is what a row draws from when it is fresher, so it needs
+	// the same answer as the board or the row would flip between the two.
+	prs := make([]PR, 0, len(got))
+	for _, w := range got {
+		prs = append(prs, w.PR)
+	}
+	c.fillRequired(ctx, prs)
+	for _, p := range prs {
+		w := got[p.Number]
+		w.PR = p
+		got[p.Number] = w
+	}
 	return got, nil
+}
+
+// fillRequired asks which checks branch protection requires, for the PRs that
+// have a failing or cancelled check. A separate request because isRequired
+// needs the PR number as an argument, which a search cannot pass per node,
+// and mergeStateStatus came back UNKNOWN for 54 of 101 open PRs measured.
+// Best effort: on any error the PRs keep a nil Required, which reads as all
+// required, the board's behaviour before this existed.
+func (c *Client) fillRequired(ctx context.Context, prs []PR) {
+	var want []int
+	for i, p := range prs {
+		if len(p.FailedGates)+len(p.CancelledGates) > 0 && !p.truncated && strings.Contains(p.Repo, "/") {
+			want = append(want, i)
+		}
+	}
+	if len(want) == 0 {
+		return
+	}
+
+	repoAlias := map[string]int{}
+	byRepo := map[int][]int{}
+	vars := map[string]any{}
+	var repoOrder []int
+	for _, i := range want {
+		a, ok := repoAlias[prs[i].Repo]
+		if !ok {
+			a = len(repoAlias)
+			repoAlias[prs[i].Repo] = a
+			owner, name, _ := strings.Cut(prs[i].Repo, "/")
+			vars[fmt.Sprintf("o%d", a)], vars[fmt.Sprintf("r%d", a)] = owner, name
+			repoOrder = append(repoOrder, a)
+		}
+		byRepo[a] = append(byRepo[a], prs[i].Number)
+	}
+
+	var q strings.Builder
+	q.WriteString("query(")
+	for _, a := range repoOrder {
+		fmt.Fprintf(&q, "$o%d: String!, $r%d: String!, ", a, a)
+	}
+	q.WriteString(") {\n")
+	for _, a := range repoOrder {
+		fmt.Fprintf(&q, "  r%d: repository(owner: $o%d, name: $r%d) {\n", a, a, a)
+		for _, n := range byRepo[a] {
+			fmt.Fprintf(&q, `    p%d: pullRequest(number: %d) { number commits(last: 1) { nodes { commit {
+      statusCheckRollup { contexts(first: 100) { nodes {
+        __typename
+        ... on CheckRun { name isRequired(pullRequestNumber: %d) }
+        ... on StatusContext { context isRequired(pullRequestNumber: %d) }
+      } } } } } } }
+`, n, n, n, n)
+		}
+		q.WriteString("  }\n")
+	}
+	q.WriteString("}")
+
+	body, err := json.Marshal(map[string]any{"query": q.String(), "variables": vars})
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	var out struct {
+		Data map[string]map[string]*struct {
+			Number  int `json:"number"`
+			Commits struct {
+				Nodes []struct {
+					Commit struct {
+						StatusCheckRollup *struct {
+							Contexts struct {
+								Nodes []struct {
+									Name       string `json:"name"`
+									Context    string `json:"context"`
+									IsRequired bool   `json:"isRequired"`
+								} `json:"nodes"`
+							} `json:"contexts"`
+						} `json:"statusCheckRollup"`
+					} `json:"commit"`
+				} `json:"nodes"`
+			} `json:"commits"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return
+	}
+
+	// Partial errors leave their own alias null; every PR that did come back
+	// is still a full answer for that PR.
+	type answer struct {
+		leaves    map[string]bool
+		umbrellas map[string]bool
+	}
+	answers := map[Key]answer{}
+	for repo, a := range repoAlias {
+		for _, pr := range out.Data[fmt.Sprintf("r%d", a)] {
+			if pr == nil || len(pr.Commits.Nodes) == 0 || pr.Commits.Nodes[0].Commit.StatusCheckRollup == nil {
+				continue
+			}
+			ans := answer{map[string]bool{}, map[string]bool{}}
+			for _, ctx := range pr.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.Nodes {
+				if !ctx.IsRequired {
+					continue
+				}
+				name := ctx.Name
+				if name == "" {
+					name = ctx.Context
+				}
+				// Keyed by gate name, which drops the workflow: if two
+				// workflows share a job name and one is required, both read as
+				// required, which errs toward showing a failure as blocking.
+				if leaf := gateName(name); leaf != "" {
+					ans.leaves[leaf] = true
+				} else {
+					ans.umbrellas[name] = true
+				}
+			}
+			answers[Key{Repo: repo, Number: pr.Number}] = ans
+		}
+	}
+	for _, i := range want {
+		ans, ok := answers[prs[i].Key()]
+		if !ok {
+			continue
+		}
+		// A required umbrella that has not passed blocks on behalf of the
+		// checks under it, which share its workflow prefix. A bare umbrella
+		// with no prefix could be gating anything, so it claims every check.
+		for _, u := range prs[i].openUmbrellas {
+			if !ans.umbrellas[u] {
+				continue
+			}
+			prefix := ""
+			if j := strings.LastIndex(u, " / "); j >= 0 {
+				prefix = u[:j+3]
+			}
+			for _, raw := range prs[i].rawProblems {
+				if strings.HasPrefix(raw, prefix) {
+					ans.leaves[gateName(raw)] = true
+				}
+			}
+		}
+		prs[i].Required = ans.leaves
+	}
 }
 
 func (n prNode) toPR() PR {
@@ -440,6 +648,12 @@ func (n prNode) toPR() PR {
 		// Umbrella gates still count toward CIState, since they can be the
 		// only thing that failed; they are just never named.
 		leaf := gateName(c.name)
+		if leaf == "" && !isSuccess(c.state) {
+			pr.openUmbrellas = append(pr.openUmbrellas, c.name)
+		}
+		if leaf != "" && (isFailure(c.state) || c.state == "CANCELLED") {
+			pr.rawProblems = append(pr.rawProblems, c.name)
+		}
 		switch {
 		case isFailure(c.state):
 			anyFailed = true
@@ -486,6 +700,7 @@ func (n prNode) toPR() PR {
 	// and the rollup is the only state that covers them all.
 	if rollup.Contexts.PageInfo.HasNextPage {
 		pr.CIState = rollup.State
+		pr.truncated = true
 	}
 	return pr
 }

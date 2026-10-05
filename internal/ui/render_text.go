@@ -17,7 +17,12 @@ func ciCell(pr github.PR) (string, lipgloss.Style) {
 	case "SUCCESS":
 		return "✓ ", okStyle
 	case "FAILURE", "ERROR":
-		n := len(pr.FailedGates)
+		// Grey and uncounted, so it still reads as different from red ✗n
+		// without colour: the PR can merge past these.
+		if pr.OnlyOptionalFailing() {
+			return "✗ ", mutedStyle
+		}
+		n := len(pr.RequiredFailures())
 		switch {
 		case n == 0:
 			return "✗ ", errorStyle
