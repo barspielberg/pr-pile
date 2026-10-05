@@ -240,6 +240,8 @@ func watchEvents(was github.PR, now github.Watched) []string {
 			events = append(events, text)
 		case "passed":
 			events = append(events, "CI passed")
+		case "cancelled":
+			events = append(events, "CI cancelled")
 		}
 	}
 	if now.Review != was.Review {
@@ -272,6 +274,8 @@ func ciOutcome(pr github.PR) string {
 		return "passed"
 	case pr.CIState == "PENDING" || pr.CIState == "EXPECTED":
 		return "running"
+	case pr.CIState == "CANCELLED":
+		return "cancelled"
 	}
 	return ""
 }

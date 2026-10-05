@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -75,6 +76,128 @@ func TestSearchBucketsChecksByState(t *testing.T) {
 	}
 	if pr.SkippedCount != 1 {
 		t.Errorf("skipped count = %d, want 1", pr.SkippedCount)
+	}
+}
+
+func searchOne(t *testing.T, contexts string) PR {
+	t.Helper()
+	return searchOnePage(t, false, contexts)
+}
+
+func searchOnePage(t *testing.T, hasNextPage bool, contexts string) PR {
+	t.Helper()
+	body := fmt.Sprintf(`{"data":{"search":{"nodes":[{"number":1,"title":"t","url":"u",
+	  "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{
+	    "pageInfo":{"hasNextPage":%t},"nodes":[%s]}}}}]}}]}}}`, hasNextPage, contexts)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	prs, err := c.Search(context.Background(), "q", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prs[0]
+}
+
+// Captured from Autofleet/api-gateway-ms#1020: a second workflow run started 4s
+// after the first and cancelled it. GitHub's PR page is green and its rollup
+// still says FAILURE, so only the newest run of each check may count.
+func TestSearchKeepsOnlyTheNewestRunOfEachCheck(t *testing.T) {
+	pr := searchOne(t, `
+	  {"__typename":"CheckRun","name":"Build","status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-10-05T08:25:37Z"},
+	  {"__typename":"CheckRun","name":"Deploy","status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-10-05T08:25:38Z"},
+	  {"__typename":"CheckRun","name":"Build","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-10-05T08:25:42Z"},
+	  {"__typename":"CheckRun","name":"Deploy","status":"COMPLETED","conclusion":"SKIPPED","startedAt":"2026-10-05T08:28:45Z"},
+	  {"__typename":"CheckRun","name":"check-e2e-label","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-10-05T08:50:43Z"},
+	  {"__typename":"CheckRun","name":"check-e2e-label","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-10-05T08:56:19Z"}`)
+
+	if pr.CIState != "SUCCESS" {
+		t.Errorf("CIState = %q, want SUCCESS", pr.CIState)
+	}
+	if len(pr.FailedGates)+len(pr.CancelledGates) != 0 {
+		t.Errorf("superseded runs still listed: failed %v, cancelled %v", pr.FailedGates, pr.CancelledGates)
+	}
+	if pr.PassedCount != 2 || pr.SkippedCount != 1 {
+		t.Errorf("passed %d skipped %d, want 2 and 1", pr.PassedCount, pr.SkippedCount)
+	}
+}
+
+// Newest by startedAt, not by position: the API does not order runs by time.
+// A queued run has no startedAt yet and is the newest of all.
+func TestSearchPicksTheNewestRunByStartTime(t *testing.T) {
+	pr := searchOne(t, `
+	  {"__typename":"CheckRun","name":"run-e2e","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-10-05T13:28:30Z"},
+	  {"__typename":"CheckRun","name":"run-e2e","status":"COMPLETED","conclusion":"SKIPPED","startedAt":"2026-10-05T08:50:50Z"},
+	  {"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-10-05T08:00:00Z"},
+	  {"__typename":"CheckRun","name":"lint","status":"QUEUED","conclusion":null,"startedAt":null}`)
+
+	if len(pr.FailedGates) != 1 || pr.FailedGates[0] != "run-e2e" {
+		t.Errorf("failed gates %v, want [run-e2e]", pr.FailedGates)
+	}
+	if len(pr.PendingGates) != 1 || pr.PendingGates[0] != "lint" {
+		t.Errorf("pending gates %v, want [lint]", pr.PendingGates)
+	}
+	if pr.SkippedCount != 0 {
+		t.Errorf("skipped %d, want 0", pr.SkippedCount)
+	}
+}
+
+// Two workflows with a job of the same name are two checks, so one passing
+// later must not hide the other failing.
+func TestSearchKeepsSameNamedJobsFromDifferentWorkflowsApart(t *testing.T) {
+	pr := searchOne(t, `
+	  {"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-10-05T10:00:00Z",
+	   "checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},
+	  {"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-10-05T10:01:00Z",
+	   "checkSuite":{"workflowRun":{"workflow":{"name":"E2E"}}}}`)
+
+	if pr.CIState != "FAILURE" || len(pr.FailedGates) != 1 {
+		t.Errorf("CIState %q, failed %v: a failure was hidden by another workflow's job", pr.CIState, pr.FailedGates)
+	}
+}
+
+// Only a run that has not finished is newest for lacking a startedAt. One
+// cancelled while still queued has none either, and must not outrank a real run.
+func TestSearchDoesNotTreatAFinishedRunWithoutAStartAsNewest(t *testing.T) {
+	pr := searchOne(t, `
+	  {"__typename":"CheckRun","name":"Build","status":"COMPLETED","conclusion":"CANCELLED","startedAt":null},
+	  {"__typename":"CheckRun","name":"Build","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-10-05T08:25:42Z"},
+	  {"__typename":"CheckRun","name":"Test","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-10-05T08:25:42Z"},
+	  {"__typename":"CheckRun","name":"Test","status":"COMPLETED","conclusion":"CANCELLED","startedAt":null}`)
+
+	if pr.CIState != "SUCCESS" || len(pr.CancelledGates) != 0 {
+		t.Errorf("CIState %q, cancelled %v, want SUCCESS and none", pr.CIState, pr.CancelledGates)
+	}
+}
+
+// With more contexts than one page, an unseen run may be the newest or the
+// failing one, so the state falls back to the rollup, which covers them all.
+func TestSearchTrustsTheRollupWhenContextsAreTruncated(t *testing.T) {
+	pr := searchOnePage(t, true, `
+	  {"__typename":"CheckRun","name":"Build","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-10-05T08:25:42Z"}`)
+
+	if pr.CIState != "FAILURE" {
+		t.Errorf("CIState = %q, want the rollup's FAILURE", pr.CIState)
+	}
+}
+
+// A cancel with no newer run is still the check's current state: it blocks
+// the merge, so it is listed, but it is not a failure.
+func TestSearchListsACancelledLatestRun(t *testing.T) {
+	pr := searchOne(t, `
+	  {"__typename":"CheckRun","name":"Build","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-10-05T08:25:37Z"},
+	  {"__typename":"CheckRun","name":"Test","status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-10-05T08:25:38Z"}`)
+
+	if pr.CIState != "CANCELLED" {
+		t.Errorf("CIState = %q, want CANCELLED", pr.CIState)
+	}
+	if len(pr.CancelledGates) != 1 || pr.CancelledGates[0] != "Test" {
+		t.Errorf("cancelled gates %v, want [Test]", pr.CancelledGates)
+	}
+	if len(pr.FailedGates) != 0 {
+		t.Errorf("a cancel was listed as a failure: %v", pr.FailedGates)
 	}
 }
 
