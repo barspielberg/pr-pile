@@ -21,7 +21,7 @@ const testRepo = "o/r"
 
 func testCfg() config.Config {
 	return config.Config{
-		Repo: testRepo,
+		Repos: []config.Repo{{Name: testRepo}},
 		Rules: []config.Rule{
 			{Name: "Mine", Query: "author:@me", Tree: true},
 			{Name: "Review requested", Query: "review-requested:@me", Author: true},
@@ -142,7 +142,7 @@ func TestCursorSurvivesSectionsResolving(t *testing.T) {
 
 func TestActionTemplateRenders(t *testing.T) {
 	cfg := testCfg()
-	cfg.RepoPath = "~/Repos/acme/monorepo"
+	cfg.Repos[0].Path = "~/Repos/acme/monorepo"
 	m := New(cfg, nil)
 	got, err := m.renderAction("wt switch -x nvim pr:{{.Number}} # {{.Repo}} {{.RepoPath}} {{.Branch}}",
 		github.PR{Repo: testRepo, Number: 42, HeadRefName: "feat/x"})
@@ -535,7 +535,7 @@ func TestAuthorColumnIsMutedLikeAge(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+	cfg := config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{
 		{Name: "Mine", Query: "a", Author: true},
 	}}
 	seg := func(login string) string {
@@ -2194,7 +2194,7 @@ func TestSlotsAgreeWithBodyLineForLine(t *testing.T) {
 	for a := range states {
 		for b := range states {
 			for c := range states {
-				cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+				cfg := config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{
 					{Name: "One", Query: "a"}, {Name: "Two", Query: "b"}, {Name: "Three", Query: "c"},
 				}}
 				m := New(cfg, nil)
@@ -2243,7 +2243,7 @@ func TestSlotsAgreeWithBodyLineForLine(t *testing.T) {
 // the case that silently shifted them by one section before notes became
 // slots.
 func TestFooterSectionIsCorrectForEverySlot(t *testing.T) {
-	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+	cfg := config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{
 		{Name: "One", Query: "a"}, {Name: "Empty", Query: "b"}, {Name: "Three", Query: "c"},
 	}}
 	m := New(cfg, nil)
@@ -2328,7 +2328,7 @@ func TestOneKeypressScrollsAtMostOneLineAcrossSectionStates(t *testing.T) {
 				states := [3]state{a, b, c}
 				label := name[a] + "/" + name[b] + "/" + name[c]
 				for _, h := range []int{5, 8, 10, 12, 16, 20, 24} {
-					cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+					cfg := config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{
 						{Name: "Mine", Query: "a"},
 						{Name: "Needs my review", Query: "b"},
 						{Name: "All open", Query: "c"},
@@ -2403,7 +2403,7 @@ func TestNoFixedCubeColoursAnywhereOnTheBoard(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	cfg := config.Config{Repo: "o/r", Rules: []config.Rule{
+	cfg := config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{
 		{Name: "Mine", Query: "a", Tree: true},
 		{Name: "Needs my review", Query: "b", Author: true},
 		{Name: "Empty", Query: "c"},

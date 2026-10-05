@@ -6,16 +6,17 @@ import (
 	"testing"
 
 	"github.com/barspielberg/pr-pile/internal/board"
+	"github.com/barspielberg/pr-pile/internal/config"
 	"github.com/barspielberg/pr-pile/internal/github"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// multiRepoBoard is a board whose first rule searched o/r, o/api and x/lib,
-// with #1 in both o/r and o/api.
+// multiRepoBoard is a board over o/r, o/api and x/lib, with #1 in both o/r
+// and o/api. Only o/r has a path.
 func multiRepoBoard(t *testing.T) Model {
 	t.Helper()
 	cfg := testCfg()
-	cfg.RepoPath = "/src/r"
+	cfg.Repos = []config.Repo{{Name: "o/r", Path: "/src/r"}, {Name: "o/api"}, {Name: "x/lib"}}
 	m := New(cfg, nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
@@ -40,40 +41,59 @@ func boardLine(t *testing.T, m Model, title string) string {
 	return ""
 }
 
-// The configured repo stays untagged, an org sibling is named by its repo
-// alone, and another owner's repo is named in full.
-func TestRowFromAnotherRepoIsTagged(t *testing.T) {
+// Every row names its repo in a column of its own, so no repo is implied by a
+// blank, and the columns after it stay lined up.
+func TestEveryRowNamesItsRepo(t *testing.T) {
 	m := multiRepoBoard(t)
-	if line := boardLine(t, m, "here"); strings.Contains(line, "r fix: here") {
-		t.Errorf("configured repo's row is tagged: %q", line)
-	}
-	if line := boardLine(t, m, "there"); !strings.Contains(line, "api feat(auth): there") {
-		t.Errorf("o/api row: want tag api before the title, got %q", line)
-	}
-	if line := boardLine(t, m, "elsewhere"); !strings.Contains(line, "x/lib elsewhere") {
-		t.Errorf("x/lib row: want tag x/lib before the title, got %q", line)
-	}
-}
-
-// The tag is muted and the commit convention after it still parses.
-func TestRepoTagKeepsTheTitleConvention(t *testing.T) {
-	parts := titleParts("api feat(auth): there", 4)
-	want := []titlePart{partRepo, partRepo, partRepo, partRepo, partType, partType, partType, partType}
-	for i, p := range want {
-		if parts[i] != p {
-			t.Fatalf("rune %d: want part %v, got %v (all: %v)", i, p, parts[i], parts)
+	at := -1
+	for title, cell := range map[string]string{"here": "r     #1", "there": "api   #1", "elsewhere": "lib   #2"} {
+		line := []rune(boardLine(t, m, title))
+		i := strings.Index(string(line[2:]), cell)
+		if i < 0 {
+			t.Errorf("%s: want %q leading the row, got %q", title, cell, string(line))
+			continue
+		}
+		if at == -1 {
+			at = i
+		} else if i != at {
+			t.Errorf("%s: repo column at %d, want %d: %q", title, i, at, string(line))
 		}
 	}
-	if got := titleParts("api plain words", 4); got[4] != partSubject {
-		t.Errorf("a free-form title after a tag should stay subject, got %v", got)
+	if line := boardLine(t, m, "there"); strings.Contains(line, "api feat") {
+		t.Errorf("the label should not run into the title: %q", line)
 	}
 }
 
-func TestSearchMatchesTheRepoTag(t *testing.T) {
+// With one repo every row would carry the same word, so there is no column.
+func TestSingleRepoBoardHasNoRepoColumn(t *testing.T) {
+	m := New(testCfg(), nil)
+	text, _ := m.searchText(board.Row{PR: github.PR{Repo: testRepo, Number: 1, Title: "t"}}, false)
+	if !strings.HasPrefix(text, "#1") {
+		t.Errorf("a single-repo row should start at its number: %q", text)
+	}
+	if got := m.prRef(github.PR{Repo: testRepo, Number: 1}); got != "#1" {
+		t.Errorf("prRef = %q, want #1", got)
+	}
+}
+
+func TestSearchMatchesTheRepoColumn(t *testing.T) {
 	m := multiRepoBoard(t)
-	text, _ := m.searchText(board.Row{PR: github.PR{Repo: "o/api", Number: 1, Title: "t"}}, false)
-	if !strings.Contains(text, "api t") {
-		t.Errorf("search text should carry the tag: %q", text)
+	text, cells := m.searchText(board.Row{PR: github.PR{Repo: "o/api", Number: 1, Title: "t"}}, false)
+	if got := string([]rune(text)[cells.repo[0]:cells.repo[1]]); got != "api" {
+		t.Errorf("repo cell = %q in %q", got, text)
+	}
+	if !textMatches(text, "api") {
+		t.Error("a search for the label should match the row")
+	}
+}
+
+func TestFooterNamesTheRepos(t *testing.T) {
+	m := multiRepoBoard(t)
+	if got := m.reposText(); got != "r, api, lib" {
+		t.Errorf("multi: got %q", got)
+	}
+	if got := New(testCfg(), nil).reposText(); got != testRepo {
+		t.Errorf("single: got %q", got)
 	}
 }
 
@@ -103,6 +123,8 @@ func TestActionGetsThePRsOwnRepo(t *testing.T) {
 	}{
 		{"echo {{.Repo}} {{.RepoPath}} {{.Number}}", github.PR{Repo: "o/r", Number: 1}, "echo o/r /src/r 1"},
 		{"echo {{.Repo}} {{.Number}}", github.PR{Repo: "o/api", Number: 1}, "echo o/api 1"},
+		// The name comes from repos:, not from how GitHub spelled it.
+		{"echo {{.Repo}}", github.PR{Repo: "O/API", Number: 1}, "echo o/api"},
 	} {
 		got, err := m.renderAction(c.tmpl, c.pr)
 		if err != nil || got != c.want {
@@ -111,10 +133,10 @@ func TestActionGetsThePRsOwnRepo(t *testing.T) {
 	}
 }
 
-// RepoPath is configured for one repo. Empty and unquoted it would shift the
-// arguments after it, or cd into $HOME, so an action using it refuses a PR
-// from another repo, alone or in a selection.
-func TestRepoPathActionRefusesAnotherRepo(t *testing.T) {
+// Empty and unquoted, RepoPath would shift the arguments after it, or cd into
+// $HOME, so an action using it refuses a repo without a path, alone or in a
+// selection.
+func TestRepoPathActionRefusesARepoWithoutAPath(t *testing.T) {
 	m := multiRepoBoard(t)
 	other := github.PR{Repo: "o/api", Number: 1}
 	if _, err := m.renderAction("pr-workspace {{.RepoPath}} {{.Number}}", other); err == nil {
@@ -125,12 +147,12 @@ func TestRepoPathActionRefusesAnotherRepo(t *testing.T) {
 	}
 }
 
-// Repo goes into the command unquoted, so one from GitHub has to look like a
-// repo name first.
-func TestActionRefusesARepoThatIsNotARepoName(t *testing.T) {
+// Repo goes into the command unquoted, so it only ever comes from repos:. A
+// PR from anywhere else has nothing trusted to put there.
+func TestActionRefusesARepoNotInRepos(t *testing.T) {
 	m := multiRepoBoard(t)
 	if _, err := m.renderAction("echo {{.Repo}}", github.PR{Repo: "o/a;rm -rf ~", Number: 1}); err == nil {
-		t.Error("want an error for a repo that is not owner/name")
+		t.Error("want an error for a repo that is not declared")
 	}
 }
 
@@ -178,11 +200,10 @@ func TestWatchPollsEachRepo(t *testing.T) {
 	}
 }
 
-func TestConfiguredRepoMatchesWhateverItsCase(t *testing.T) {
+func TestRepoMatchesWhateverItsCase(t *testing.T) {
 	m := multiRepoBoard(t)
-	m.cfg.Repo = "O/R"
-	if tag := m.repoTag(github.PR{Repo: "o/r", Number: 1}); tag != "" {
-		t.Errorf("o/r against a configured O/R should be untagged, got %q", tag)
+	if tag := m.repoTag(github.PR{Repo: "O/Api", Number: 1}); tag != "api" {
+		t.Errorf("O/Api should resolve to the api label, got %q", tag)
 	}
 }
 
@@ -221,6 +242,7 @@ func TestWatchKeepsHealthyReposWhenOneFails(t *testing.T) {
 func TestDetailHeaderFitsWithARepoTag(t *testing.T) {
 	m := multiRepoBoard(t)
 	m.width = 60
+	m.cfg.Repos = append(m.cfg.Repos, config.Repo{Name: "x/a-much-longer-repo-name"})
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
 		{Repo: "x/a-much-longer-repo-name", Number: 1234, Title: strings.Repeat("long title ", 10)},
 	}})

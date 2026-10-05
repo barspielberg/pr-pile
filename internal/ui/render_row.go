@@ -85,6 +85,13 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	var b strings.Builder
 	b.WriteString(paint(accent).Render(mark))
 	b.WriteString(paint(pickStyle).Render(pick))
+	// The repo leads the row, before the tree prefix: a chain never crosses
+	// repos, and a column of its own keeps it from reading as part of the title.
+	if rw := m.repoWidth(); rw > 0 {
+		b.WriteString(hitRuns(pad(clip(m.repoTag(r.PR), rw), rw),
+			cellHits(spans, cells.repo), mutedStyle, paint))
+		b.WriteString(paint(fgStyle).Render(" "))
+	}
 	b.WriteString(paint(mutedStyle).Render(pad(r.Prefix, 2)))
 	b.WriteString(hitRuns(pad("#"+fmt.Sprint(r.PR.Number), numberWidth),
 		cellHits(spans, cells.number), accent, paint))
@@ -189,9 +196,8 @@ func hitRuns(text string, hits map[int]bool, st lipgloss.Style,
 // are indexes into that same string -- the search matched it -- so there is
 // nothing to clamp and no ellipsis to guard against.
 func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.Style) lipgloss.Style, tw int, hits map[int]bool) string {
-	full, tagLen := m.titleText(r.PR)
-	text := pad(clip(full, tw), tw)
-	parts := titleParts(text, tagLen)
+	text := pad(clip(r.PR.Title, tw), tw)
+	parts := parseTitle(text)
 	if len(hits) == 0 && parts == nil {
 		return paint(st).Render(text)
 	}

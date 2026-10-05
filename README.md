@@ -42,31 +42,36 @@ Rules are fetched in parallel but revealed in order: a section can only be drawn
 
 `~/.config/pile/config.yml` (honors `$XDG_CONFIG_HOME`), or `$PILE_CONFIG`.
 
-Configuration is strict: unknown fields are errors, `repo` must be exactly
-`owner/name`, rule limits are `1` through `100` (`0` means the default `20`),
-and action mode is either `background` or `suspend`.
+Configuration is strict: unknown fields are errors, every repo name must be
+exactly `owner/name`, rule limits are `1` through `100` (`0` means the default
+`20`), and action mode is either `background` or `suspend`.
 
 On first run inside a GitHub checkout, the repo is inferred with `gh` and a
-commented starter config is written. `PILE_REPO=owner/name` overrides the
-configured repo for one invocation.
+commented starter config is written. Outside a checkout, `PILE_REPO=owner/name`
+names the repo for that starter config instead.
 
-A rule can search more repos by adding `repo:` qualifiers to its query. GitHub
-ORs them with the configured repo, so the rule below covers both:
+`repos` lists every repo the board reads. Each has a `name`, an optional `path`
+where it is checked out (for `{{.RepoPath}}`), and an optional `label`, which
+defaults to the part after the slash. A rule covers every repo unless it lists
+some by label under its own `repos`. Write repos there rather than as `repo:` in
+a query: GitHub ORs `repo:` qualifiers, so one in a query would widen the rule
+instead of narrowing it, and the config refuses it.
+
+With more than one repo, every row starts with its repo's label, and a PR is
+named `label#N` in the detail header, the status line and notifications. With
+one repo the column is left out. Every repo is checked at startup, so a typo
+fails loudly rather than drawing an empty section.
+
+A rule over several repos is still one search, so its `limit` is shared between
+them: a busy repo can crowd a quiet one out of the section.
 
 ```yaml
-  - name: Needs my review
-    query: review-requested:@me repo:acme/api
-```
+repos:
+  - name: owner/name
+    path: ~/Repos/owner/name
+  - name: owner/api
+    label: api          # the default; shown in the repo column
 
-Rows from a repo other than `repo` carry its name before the title (`api`, or
-`owner/name` for another owner), and `d`, `m` and actions use the PR's own repo.
-Every `repo:` is checked at startup like `repo` itself, so a typo fails loudly
-rather than drawing an empty section. `repoPath` belongs to `repo`, so an
-action that uses `{{.RepoPath}}` refuses a PR from any other repo.
-
-```yaml
-repo: owner/name
-repoPath: ~/Repos/owner/name
 refresh: 3m
 
 rules:
@@ -76,8 +81,9 @@ rules:
     limit: 50
   - name: My team's review
     query: team-review-requested:acme/web-platform
-  - name: Review requested
+  - name: API review requested
     query: review-requested:@me
+    repos: [api]        # only this repo; every repo when left out
   - name: All open
     query: draft:false
     limit: 20
@@ -148,7 +154,9 @@ paste.
 ### Example: open a PR as a worktree workspace (Worktrunk + herdr)
 
 ```yaml
-repoPath: ~/Repos/owner/name    # {{.RepoPath}} is empty without this
+repos:
+  - name: owner/name
+    path: ~/Repos/owner/name    # the action refuses a repo without one
 
 actions:
   - key: w
@@ -214,12 +222,12 @@ are already POSIX-shell-quoted; use those placeholders directly, without adding
 quotes around them. Each remote placeholder must be a standalone shell word;
 quoted, embedded, command-substitution, and heredoc contexts are rejected when
 the action is invoked. Explicit shell evaluators such as `sh -c` and `eval` are
-also rejected when the template uses a remote field. The trusted configured `Repo` and `RepoPath` values
-remain shell text, as does the command itself, so expansions, pipes and
-redirects written in `run` still work. For a PR from a `repo:` in a query,
-`Repo` comes from GitHub and must look like `owner/name` before it is used.
-A `multi` action that uses `{{.Repo}}` or `{{.RepoPath}}` refuses a selection
-that spans repos.
+also rejected when the template uses a remote field. `Repo` and `RepoPath` are
+the PR's own repo's `name` and `path` from `repos`, so they are trusted config
+text and remain shell text, as does the command itself, so expansions, pipes and
+redirects written in `run` still work. An action that uses `{{.RepoPath}}`
+refuses a PR whose repo has no `path`, and a `multi` action that uses
+`{{.Repo}}` or `{{.RepoPath}}` refuses a selection that spans repos.
 
 [docs/config-example.md](docs/config-example.md) works a five-section team board
 through end to end: what each rule claims versus what it actually shows once the

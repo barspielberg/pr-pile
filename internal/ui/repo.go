@@ -3,62 +3,68 @@ package ui
 import (
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
+	"github.com/barspielberg/pr-pile/internal/config"
 	"github.com/barspielberg/pr-pile/internal/github"
 )
 
-// isConfiguredRepo ignores case the way GitHub does, so a config that spells
-// the repo differently from GitHub does not tag every row.
-func (m Model) isConfiguredRepo(repo string) bool { return strings.EqualFold(repo, m.cfg.Repo) }
+// repoOf finds the declared repo a PR came from, ignoring case the way GitHub
+// does. Every search is scoped to declared repos, so a miss is not expected.
+func (m Model) repoOf(pr github.PR) (config.Repo, bool) {
+	for _, r := range m.cfg.Repos {
+		if strings.EqualFold(r.Name, pr.Repo) {
+			return r, true
+		}
+	}
+	return config.Repo{}, false
+}
 
-// repoTag names a PR's repo on its row, and is empty for the configured repo:
-// that one is the board's default, so tagging it would put the same word on
-// nearly every row. The owner is dropped when it matches the configured one,
-// since the name alone is what tells two of an org's repos apart.
+// multiRepo is when rows name their repo. With one repo every row would carry
+// the same word, so the column and the label#N form are left out.
+func (m Model) multiRepo() bool { return len(m.cfg.Repos) > 1 }
+
 func (m Model) repoTag(pr github.PR) string {
-	repo := pr.Repo
-	if m.isConfiguredRepo(repo) {
-		return ""
+	if r, ok := m.repoOf(pr); ok {
+		return r.Tag()
 	}
-	owner, name, _ := strings.Cut(repo, "/")
-	if base, _, _ := strings.Cut(m.cfg.Repo, "/"); strings.EqualFold(owner, base) {
-		return terminalText(name)
-	}
-	return terminalText(repo)
+	return terminalText(pr.Repo)
 }
 
-// titleText is the title cell's text before clipping: the repo tag, when the
-// PR has one, then the title. The tag sits inside the title cell rather than in
-// a column of its own so the board's fixed columns stay where they are, and so
-// a search for the repo's name finds and highlights it like any other text.
-// tagLen is how many leading runes the tag and its separating space take.
-func (m Model) titleText(pr github.PR) (text string, tagLen int) {
-	tag := m.repoTag(pr)
-	if tag == "" {
-		return pr.Title, 0
+// repoWidth is the repo column, sized to the longest label so the columns
+// after it line up, and 0 when the column is not drawn.
+func (m Model) repoWidth() int {
+	if !m.multiRepo() {
+		return 0
 	}
-	return tag + " " + pr.Title, utf8.RuneCountInString(tag) + 1
+	w := 0
+	for _, r := range m.cfg.Repos {
+		w = max(w, len([]rune(r.Tag())))
+	}
+	return min(w, maxRepoWidth)
 }
 
-// titleParts is parseTitle for a title drawn after a repo tag: the tag is a
-// part of its own, and the commit convention is read from what follows it.
-func titleParts(text string, tagLen int) []titlePart {
-	if tagLen == 0 {
-		return parseTitle(text)
-	}
-	r := []rune(text)
-	n := min(tagLen, len(r))
-	parts := make([]titlePart, n, len(r))
-	fill(parts, 0, n, partRepo)
-	rest := parseTitle(string(r[n:]))
-	if rest == nil {
-		rest = make([]titlePart, len(r)-n)
-	}
-	return append(parts, rest...)
-}
+// maxRepoWidth keeps a long label from eating the title. Labels are short by
+// intent; one that runs past this is clipped like any other cell.
+const maxRepoWidth = 12
 
-// prRef names a PR in prose: #12 in the configured repo, repo#12 elsewhere.
+// prRef names a PR in prose: label#12 on a board with several repos, #12 on
+// one with a single repo.
 func (m Model) prRef(pr github.PR) string {
+	if !m.multiRepo() {
+		return fmt.Sprintf("#%d", pr.Number)
+	}
 	return fmt.Sprintf("%s#%d", m.repoTag(pr), pr.Number)
+}
+
+// reposText is what the board covers, for the footer: the repo's full name when
+// there is one, the labels when there are several, since the rows use those.
+func (m Model) reposText() string {
+	if !m.multiRepo() {
+		return m.cfg.Repos[0].Name
+	}
+	tags := make([]string, len(m.cfg.Repos))
+	for i, r := range m.cfg.Repos {
+		tags[i] = r.Tag()
+	}
+	return strings.Join(tags, ", ")
 }

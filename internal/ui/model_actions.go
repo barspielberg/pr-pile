@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -215,28 +214,20 @@ func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 	return b.String(), err
 }
 
-// actionRepo is the Repo and RepoPath an action sees for a PR. Repo goes into
-// the command unquoted, as config text always has, but a PR from a repo: in a
-// query takes it from GitHub, so it must look like a repo name before it is
-// trusted as shell text. RepoPath is configured for one repo, and an action
-// that uses it on a PR from another refuses: expanded empty and unquoted, it
-// would shift every argument after it, or cd into $HOME.
+// actionRepo is the Repo and RepoPath an action sees for a PR. Both come from
+// the PR's entry in repos: rather than from GitHub, so they stay trusted config
+// text. A template that uses RepoPath refuses a repo without a path: expanded
+// empty and unquoted, it would shift every argument after it, or cd into $HOME.
 func (m Model) actionRepo(tmpl string, pr github.PR) (repo, repoPath string, err error) {
-	repo = pr.Repo
-	if m.isConfiguredRepo(repo) {
-		return m.cfg.Repo, m.cfg.RepoPath, nil
+	r, ok := m.repoOf(pr)
+	if !ok {
+		return "", "", fmt.Errorf("%s is not in repos", terminalText(pr.Repo))
 	}
-	if !repoName.MatchString(repo) {
-		return "", "", fmt.Errorf("repo %q is not owner/name", terminalText(repo))
+	if r.Path == "" && templateMentions(tmpl, "RepoPath") {
+		return "", "", fmt.Errorf(".RepoPath needs a path for %s in repos", r.Tag())
 	}
-	if templateMentions(tmpl, "RepoPath") {
-		return "", "", fmt.Errorf(".RepoPath is only set for %s", m.cfg.Repo)
-	}
-	return repo, "", nil
+	return r.Name, r.Path, nil
 }
-
-// repoName is the character set GitHub allows in owner and repository names.
-var repoName = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 
 type actionTemplateData struct {
 	Number            int

@@ -10,7 +10,7 @@ import (
 )
 
 func cfg(names ...string) config.Config {
-	c := config.Config{Repo: "o/r"}
+	c := config.Config{Repos: []config.Repo{{Name: "o/r"}}}
 	for _, n := range names {
 		c.Rules = append(c.Rules, config.Rule{Name: n, Query: "x"})
 	}
@@ -107,7 +107,7 @@ func TestStackedPRsGroupIntoChain(t *testing.T) {
 	mid := github.PR{Number: 2, HeadRefName: "b", BaseRefName: "a", UpdatedAt: time.Unix(2, 0)}
 	top := github.PR{Number: 3, HeadRefName: "c", BaseRefName: "b", UpdatedAt: time.Unix(1, 0)}
 
-	b := New(config.Config{Repo: "o/r", Rules: []config.Rule{{Name: "mine", Query: "x", Tree: true}}})
+	b := New(config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{{Name: "mine", Query: "x", Tree: true}}})
 	b.Apply(Result{Index: 0, PRs: []github.PR{top, base, mid}})
 
 	rows := b.Sections()[0].Rows
@@ -126,7 +126,7 @@ func TestCyclicStackTerminates(t *testing.T) {
 
 	done := make(chan []Row, 1)
 	go func() {
-		b := New(config.Config{Repo: "o/r", Rules: []config.Rule{{Name: "m", Query: "x", Tree: true}}})
+		b := New(config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{{Name: "m", Query: "x", Tree: true}}})
 		b.Apply(Result{Index: 0, PRs: []github.PR{x, y}})
 		done <- b.Sections()[0].Rows
 	}()
@@ -140,7 +140,7 @@ func TestCyclicStackTerminates(t *testing.T) {
 // An unset base must not read as "stacked on" an unset head, which would drop
 // every PR from a tree section.
 func TestUnstackedPRsSurviveTreeLayout(t *testing.T) {
-	b := New(config.Config{Repo: "o/r", Rules: []config.Rule{{Name: "mine", Query: "x", Tree: true}}})
+	b := New(config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{{Name: "mine", Query: "x", Tree: true}}})
 	b.Apply(Result{Index: 0, PRs: []github.PR{pr(1), pr(2)}})
 
 	if got := nums(b.Sections()[0]); len(got) != 2 {
@@ -164,7 +164,7 @@ func TestSplitStackClosesEachSubChain(t *testing.T) {
 		{Number: 3, HeadRefName: "c", BaseRefName: "b", UpdatedAt: time.Unix(3, 0)},
 		{Number: 4, HeadRefName: "d", BaseRefName: "c", UpdatedAt: time.Unix(4, 0)},
 	}
-	b := New(config.Config{Repo: "o/r", Rules: []config.Rule{
+	b := New(config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{
 		{Name: "first", Query: "x", Tree: true},
 		{Name: "rest", Query: "x", Tree: true},
 	}})
@@ -192,7 +192,7 @@ func TestSplitStackClosesEachSubChain(t *testing.T) {
 // means "stacked on something in this section", and must not claim otherwise.
 func TestLoneStackTopDrawsNoGlyph(t *testing.T) {
 	top := github.PR{Number: 2, HeadRefName: "b", BaseRefName: "a", UpdatedAt: time.Unix(2, 0)}
-	b := New(config.Config{Repo: "o/r", Rules: []config.Rule{{Name: "team", Query: "x", Tree: true}}})
+	b := New(config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{{Name: "team", Query: "x", Tree: true}}})
 	b.Apply(Result{Index: 0, PRs: []github.PR{top}})
 
 	rows := b.Sections()[0].Rows
@@ -256,7 +256,7 @@ func TestStacksStayInsideOneRepo(t *testing.T) {
 	base := github.PR{Repo: "o/a", Number: 1, HeadRefName: "fix", BaseRefName: "main", UpdatedAt: time.Unix(2, 0)}
 	elsewhere := github.PR{Repo: "o/b", Number: 2, HeadRefName: "next", BaseRefName: "fix", UpdatedAt: time.Unix(1, 0)}
 
-	b := New(config.Config{Repo: "o/a", Rules: []config.Rule{{Name: "mine", Query: "x", Tree: true}}})
+	b := New(config.Config{Repos: []config.Repo{{Name: "o/a"}}, Rules: []config.Rule{{Name: "mine", Query: "x", Tree: true}}})
 	b.Apply(Result{Index: 0, PRs: []github.PR{base, elsewhere}})
 
 	for _, r := range b.Sections()[0].Rows {

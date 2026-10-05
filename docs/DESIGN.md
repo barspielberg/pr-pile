@@ -47,7 +47,7 @@ Code: `internal/board/board.go` (`Frontier`, `rebuild`), `internal/config/config
 | GraphQL over HTTP, not the `gh` CLI | `gh search prs` cannot return `statusCheckRollup` / `reviewDecision` / `mergeable` — most of the board. `gh pr list` returns them but cannot express `review-requested:` / `team-review-requested:`. Neither subcommand alone works; shelling out also costs ~1.7s per call. |
 | One search per rule, in parallel | A single combined query with aliased searches is *slower* — GitHub appears to run aliases serially, so one request pays the sum instead of the max. |
 | No caching | Cold start is ~2–4s and the spinner is load-bearing. Revisit only if it grates. |
-| Repo comes from config, not cwd | `pr-status.sh` inferred from cwd and silently showed the dotfiles repo. `PILE_REPO` overrides per-invocation. |
+| Repos come from config, not cwd | `pr-status.sh` inferred from cwd and silently showed the dotfiles repo. cwd is only asked once, to seed the starter config. |
 | Startup reachability check | GitHub's search index reports `issueCount 0` for a repo behind an org IP allow list, so being blocked was indistinguishable from having no PRs. A direct `repository(...)` query does error, so ask for one at startup. |
 | ANSI 0–15 only, never hex or 256 | The 16 indices are an indirection layer, not a limitation: they resolve through the user's own theme. gh-dash shipped hex, got the bug report, and migrated (#770 / PR #771). Hex values of the same nominal colours do *not* get this (k9s #1234). |
 | `muted` is `Faint(true)`, not index 8 | Index 8 is "bright black" — a *light* grey on many light themes, near-invisible on white. Faint is relative: SGR 2 dims whatever the theme's foreground already is, so it is correct on both by construction, and degrades to plain legible text where SGR 2 is ignored. Index 7 is avoided for the same class of reason. |
@@ -782,8 +782,10 @@ rejects unknown fields so a misspelling cannot silently become dead config.
 
 | field | type | meaning |
 |---|---|---|
-| `repo` | `owner/name` | required; exactly one nonempty owner and repository component. `PILE_REPO` overrides it per invocation. |
-| `repoPath` | path | local checkout, for `{{.RepoPath}}` in action templates |
+| `repos` | `[]Repo` | required, at least one; every repo the board reads. No repo is the default: with several, every row names its repo |
+| `repos[].name` | `owner/name` | required; exactly one nonempty owner and repository component, listed once |
+| `repos[].path` | path | local checkout, for `{{.RepoPath}}` in action templates; an action that uses it refuses a repo without one |
+| `repos[].label` | string | how the board names the repo: its column, `label#N`, and a rule's `repos`. Defaults to the part after the slash; labels must be unique, so two repos with the same name need one |
 | `refresh` | duration | auto-refresh interval, default `3m`; `<= 0` disables. Watched PRs are checked on the same refresh, so there is no second interval |
 | `rules` | `[]Rule` | ordered; at least one required |
 | `actions` | `[]Action` | key-bound shell commands |
@@ -795,7 +797,8 @@ rejects unknown fields so a misspelling cannot silently become dead config.
 | field | type | meaning |
 |---|---|---|
 | `name` | string | required; the section header, uppercased on render |
-| `query` | string | required; GitHub search syntax. Scoped automatically: `repo:<repo> is:pr is:open <query>` — a rule carries only what distinguishes it. A `repo:` in the query widens it, since GitHub ORs `repo:` qualifiers; each one is reachability-checked at startup. |
+| `query` | string | required; GitHub search syntax. Scoped automatically: `repo:<each repo> is:pr is:open <query>` — a rule carries only what distinguishes it. `repo:` in the query is refused: GitHub ORs `repo:` qualifiers, so it would widen the rule rather than narrow it. |
+| `repos` | `[]string` | labels of the repos this rule searches; every repo when empty. Still one search, so `limit` is shared between them |
 | `limit` | int | page size: `0` defaults to 20, otherwise `1..100`. Applied as `first:N` on the search, so it truncates before `tree` groups anything |
 | `tree` | bool | group stacked PRs into a chain. Chains are computed from the PRs *in that section*, so first-match-wins splits a stack into per-section sub-chains (§4.1) |
 | `author` | bool | show the author's initials column |
@@ -842,9 +845,9 @@ Template fields: `{{.Number}}` `{{.Repo}}` `{{.RepoPath}}` `{{.Branch}}`
 GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, and `Title`)
 are POSIX-shell-quoted before template execution. Those placeholders therefore
 appear as standalone, unquoted shell words; quoted, embedded,
-command-substitution, and heredoc contexts are rejected. Configured `Repo` and
-`RepoPath`, the surrounding command, and numeric `.Number` remain trusted shell
-text.
+command-substitution, and heredoc contexts are rejected. `Repo` and `RepoPath`
+come from the PR's entry in `repos`, not from GitHub, so they, the surrounding
+command, and numeric `.Number` remain trusted shell text.
 
 ### 4.4 `multi` actions, and why opting in is required
 
@@ -1206,9 +1209,8 @@ thing `gh pr list` does not give us, so it drags in an extra GraphQL query or a
 per-row lazy fetch.
 
 **Not built:** detail/preview pane; write actions (approve, comment, re-run CI,
-mark ready) — the action model should not make them awkward to add; a list of
-repos in config (a rule widens with `repo:` in its query instead, and PRs are
-keyed by repo and number throughout); per-repo `repoPath`; a
+mark ready) — the action model should not make them awkward to add; a
+"current repo" that follows the working directory; a
 `glyphs = "ascii"` escape hatch (specified, cheap because widths are already
 fixed); a config key for the scroll margin (hardcoded on purpose — there is one
 user).

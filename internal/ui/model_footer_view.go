@@ -161,7 +161,7 @@ func (m Model) footer(spin string) string {
 	// section changes under every keypress. A header scrolls away with its
 	// section, so this is the only place the cursor's section is named once you
 	// are past the top of it.
-	right := m.cfg.Repo
+	right := m.reposText()
 	if name, pos, total := m.cursorSection(); name != "" {
 		if pos == 0 {
 			// On the header: the section's size, with no false position.

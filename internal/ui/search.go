@@ -16,14 +16,15 @@ import (
 // the moment a title carries a CJK or emoji rune, and every consumer of a span
 // indexes by rune.
 type searchCells struct {
-	number, title, author [2]int
+	repo, number, title, author [2]int
 }
 
-// searchText is exactly what the row draws, in draw order: the number, the
-// title as clipped to this width, and the author initials when the column is
-// shown. It is built from the same helpers renderRow uses, so it can never
-// drift from what is on screen -- which is the whole contract: every match is
-// visible, so every match can be highlighted.
+// searchText is exactly what the row draws, in draw order: the repo label when
+// the board has several repos, the number, the title as clipped to this width,
+// and the author initials when the column is shown. It is built from the same
+// helpers renderRow uses, so it can never drift from what is on screen --
+// which is the whole contract: every match is visible, so every match can be
+// highlighted.
 //
 // It returns the cell extents alongside the string because it is the only
 // place that knows both: the offsets are accumulated as the segments are
@@ -45,10 +46,13 @@ func (m Model) searchText(r board.Row, showAuthor bool) (string, searchCells) {
 	}
 
 	tw := m.searchTitleWidth(showAuthor)
+	if rw := m.repoWidth(); rw > 0 {
+		cells.repo = add(pad(clip(m.repoTag(r.PR), rw), rw))
+		add(" ")
+	}
 	cells.number = add(pad("#"+fmt.Sprint(r.PR.Number), numberWidth))
 	add(" ")
-	title, _ := m.titleText(r.PR)
-	cells.title = add(pad(clip(title, tw), tw))
+	cells.title = add(pad(clip(r.PR.Title, tw), tw))
 	if m.showsAuthor(showAuthor) {
 		add(" ")
 		cells.author = add(padLeft(initials(r.PR.Author), authorWidth))
@@ -56,15 +60,18 @@ func (m Model) searchText(r board.Row, showAuthor bool) (string, searchCells) {
 	return b.String(), cells
 }
 
-// searchTitleWidth is the title budget, including the reservation the author
-// column takes. renderRow draws to the same number by calling this, so the
-// searchable text and the drawn text cannot disagree about where the title
-// ends.
+// searchTitleWidth is the title budget, including the reservations the repo
+// and author columns take. renderRow draws to the same number by calling this,
+// so the searchable text and the drawn text cannot disagree about where the
+// title ends.
 func (m Model) searchTitleWidth(showAuthor bool) int {
 	t := widthTierFor(m.width, showAuthor)
 	tw := titleWidth(m.width, t)
 	if showAuthor && t == tierFull {
 		tw -= authorWidth + 1
+	}
+	if rw := m.repoWidth(); rw > 0 {
+		tw = max(0, tw-rw-1)
 	}
 	return tw
 }
