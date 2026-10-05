@@ -71,7 +71,8 @@ func (m Model) searchTitleWidth(showAuthor bool) int {
 		tw -= authorWidth + 1
 	}
 	if rw := m.repoWidth(); rw > 0 {
-		tw = max(0, tw-rw-1)
+		// The column plus a space on each side.
+		tw = max(0, tw-rw-2)
 	}
 	return tw
 }
