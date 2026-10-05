@@ -264,14 +264,11 @@ func writeStarter(path, repo string) error {
 }
 
 // detectRepo asks gh for the current directory's repo, so first run in a
-// checkout needs no arguments. PILE_REPO seeds it instead, outside a checkout.
-func detectRepo() (string, error) {
-	if env := os.Getenv("PILE_REPO"); env != "" {
-		return env, nil
-	}
+// checkout needs no arguments. A var so tests can stub out gh.
+var detectRepo = func() (string, error) {
 	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
 	if err != nil {
-		return "", fmt.Errorf("run pile from a GitHub checkout, or set PILE_REPO=owner/name for the starter config")
+		return "", fmt.Errorf("run pile once from a GitHub checkout, or write a config with a repos: list")
 	}
 	repo := strings.TrimSpace(string(out))
 	if repo == "" {
