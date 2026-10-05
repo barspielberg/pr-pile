@@ -82,6 +82,9 @@ func (m Model) pendingLine(pr github.PR) string {
 	if _, loaded := m.detail[pr.Key()]; loaded {
 		return ""
 	}
+	if _, failed := m.detailFailed[pr.Key()]; failed {
+		return ""
+	}
 	// Nothing is coming when there is no client to ask, so a board rendered
 	// offline or in a test must not sit on a loader forever.
 	if m.client == nil {
@@ -134,6 +137,9 @@ func (m Model) reviewerLine(pr github.PR, d github.Detail, loaded bool) string {
 		// An unreviewed PR has no name coming, so promising one would be a
 		// placeholder for nothing.
 		if pr.Review == "" || pr.Review == "REVIEW_REQUIRED" {
+			return ""
+		}
+		if _, failed := m.detailFailed[pr.Key()]; failed {
 			return ""
 		}
 		return head + mutedStyle.Render("…")

@@ -78,6 +78,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil && msg.detail.Number != 0 {
 			m.detail[key] = msg.detail
 			m.detailIdentity[key] = request
+		} else {
+			m.detailFailed[key] = request
 		}
 		return m, nil
 
@@ -167,6 +169,7 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	m.detail = make(map[github.Key]github.Detail)
 	m.inflight = make(map[github.Key]detailRequest)
 	m.detailIdentity = make(map[github.Key]detailRequest)
+	m.detailFailed = make(map[github.Key]detailRequest)
 	m.fetching = true
 	if m.status != m.watchNews {
 		m.status = ""

@@ -172,3 +172,27 @@ func TestWatchFailsWhenTheRepoIsMissing(t *testing.T) {
 		t.Error("a missing repo should fail the poll, not drop every watch")
 	}
 }
+
+// A fork's branch is not in the base repo, so compare needs owner:branch.
+func TestSearchCarriesAForksHeadOwner(t *testing.T) {
+	const body = `{"data":{"search":{"nodes":[
+	  {"number":1,"headRefName":"feat","isCrossRepository":true,"headRepositoryOwner":{"login":"fork"},"repository":{"nameWithOwner":"o/r"}},
+	  {"number":2,"headRefName":"fix","isCrossRepository":false,"headRepositoryOwner":{"login":"o"},"repository":{"nameWithOwner":"o/r"}}
+	]}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	prs, err := c.Search(context.Background(), "q", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prs[0].CompareRef(); got != "fork:feat" {
+		t.Errorf("fork: got %q, want fork:feat", got)
+	}
+	if got := prs[1].CompareRef(); got != "fix" {
+		t.Errorf("same repo: got %q, want fix", got)
+	}
+}

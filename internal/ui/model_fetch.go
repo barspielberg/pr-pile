@@ -51,15 +51,18 @@ func (m Model) fetchDetail(pr github.PR) tea.Cmd {
 	if _, pending := m.inflight[pr.Key()]; pending {
 		return nil
 	}
+	if _, failed := m.detailFailed[pr.Key()]; failed {
+		return nil
+	}
 
 	key, head, generation := pr.Key(), pr.HeadRefName, m.fetchGeneration
 	m.inflight[key] = detailRequest{generation: generation, head: head}
-	repo := pr.Repo
+	repo, compare := pr.Repo, pr.CompareRef()
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		d, err := client.Detail(ctx, repo, key.Number, head)
+		d, err := client.Detail(ctx, repo, key.Number, compare)
 		d.Repo, d.Number = key.Repo, key.Number // so a failed response is still attributable
 		return detailMsg{generation: generation, head: head, detail: d, err: err}
 	}
@@ -77,6 +80,12 @@ func (m *Model) reconcileDetailIdentity() {
 		if identity.generation != m.fetchGeneration || !ok || head != identity.head {
 			delete(m.detail, key)
 			delete(m.detailIdentity, key)
+		}
+	}
+	for key, request := range m.detailFailed {
+		head, ok := m.currentHead(key)
+		if request.generation != m.fetchGeneration || !ok || head != request.head {
+			delete(m.detailFailed, key)
 		}
 	}
 }

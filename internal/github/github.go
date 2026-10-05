@@ -57,18 +57,20 @@ type Key struct {
 }
 
 type PR struct {
-	Repo         string // owner/name
-	Number       int
-	Title        string
-	URL          string
-	Author       string // login; the identifier you actually @-mention
-	AuthorName   string // display name, null for 36% of this board: see docs/pr-detail.md §5.2
-	IsDraft      bool
-	Review       string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
-	Mergeable    string // MERGEABLE | CONFLICTING | UNKNOWN
-	UpdatedAt    time.Time
-	CreatedAt    time.Time
-	HeadRefName  string
+	Repo        string // owner/name
+	Number      int
+	Title       string
+	URL         string
+	Author      string // login; the identifier you actually @-mention
+	AuthorName  string // display name, null for 36% of this board: see docs/pr-detail.md §5.2
+	IsDraft     bool
+	Review      string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
+	Mergeable   string // MERGEABLE | CONFLICTING | UNKNOWN
+	UpdatedAt   time.Time
+	CreatedAt   time.Time
+	HeadRefName string
+	// HeadOwner is the fork's owner for a PR from a fork, and empty otherwise.
+	HeadOwner    string
 	BaseRefName  string
 	Additions    int
 	Deletions    int
@@ -87,11 +89,21 @@ type PR struct {
 
 func (p PR) Key() Key { return Key{Repo: p.Repo, Number: p.Number} }
 
+// CompareRef names the PR's head for a compare against its base. A fork's
+// branch is not in the base repo, so it needs the owner:branch form.
+func (p PR) CompareRef() string {
+	if p.HeadOwner != "" {
+		return p.HeadOwner + ":" + p.HeadRefName
+	}
+	return p.HeadRefName
+}
+
 // prFields is everything a row draws. The watch poll asks for the same fields
 // so a watched PR parses into the same PR the board holds.
 const prFields = `
         number title url isDraft reviewDecision mergeable updatedAt createdAt
         headRefName baseRefName
+        isCrossRepository headRepositoryOwner { login }
         repository { nameWithOwner }
         additions deletions changedFiles
         author { login ... on User { name } }
@@ -144,10 +156,14 @@ type prNode struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	HeadRefName    string    `json:"headRefName"`
 	BaseRefName    string    `json:"baseRefName"`
-	Additions      int       `json:"additions"`
-	Deletions      int       `json:"deletions"`
-	ChangedFiles   int       `json:"changedFiles"`
-	Repository     struct {
+	IsCross        bool      `json:"isCrossRepository"`
+	HeadOwner      *struct {
+		Login string `json:"login"`
+	} `json:"headRepositoryOwner"`
+	Additions    int `json:"additions"`
+	Deletions    int `json:"deletions"`
+	ChangedFiles int `json:"changedFiles"`
+	Repository   struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
 	Author struct {
@@ -370,6 +386,9 @@ func (n prNode) toPR() PR {
 		Additions:    n.Additions,
 		Deletions:    n.Deletions,
 		ChangedFiles: n.ChangedFiles,
+	}
+	if n.IsCross && n.HeadOwner != nil {
+		pr.HeadOwner = n.HeadOwner.Login
 	}
 	if len(n.Commits.Nodes) == 0 {
 		return pr

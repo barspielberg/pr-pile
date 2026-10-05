@@ -538,3 +538,24 @@ func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
 		t.Error("the spinner kept ticking on an idle board")
 	}
 }
+
+// A failed request has nothing coming, so the loader and the reviewer
+// placeholder stop rather than spinning until the next refresh.
+func TestDetailLoaderStopsWhenTheRequestFails(t *testing.T) {
+	pr := github.PR{Repo: testRepo, Number: 3186, Title: "t", Review: "APPROVED",
+		HeadRefName: "PROJ-1951", UpdatedAt: time.Now()}
+	m := detailModel(t, pr, 24)
+	m.client = &github.Client{}
+
+	msg := detailResponse(m, github.Detail{Repo: testRepo, Number: 3186})
+	msg.err = errTest
+	next, _ := m.Update(msg)
+	m = next.(Model)
+	out := stripANSI(m.detailOverlay())
+	if strings.Contains(out, "checking for conflicts") || strings.Contains(out, "…") {
+		t.Errorf("the page still promises lines after the request failed:\n%s", out)
+	}
+	if m.fetchDetail(pr) != nil {
+		t.Error("a failed PR was asked again before a refresh")
+	}
+}

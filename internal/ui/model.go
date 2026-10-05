@@ -94,6 +94,9 @@ type Model struct {
 	// fire the same request twice while the first is still out.
 	inflight       map[github.Key]detailRequest
 	detailIdentity map[github.Key]detailRequest
+	// detailFailed is the PRs whose request errored, so the page stops
+	// promising lines that are not coming. A refresh asks again.
+	detailFailed map[github.Key]detailRequest
 
 	// Watches outlive a refresh, unlike the selection: they are keyed by
 	// PR and nothing about a refetch makes them stale. See watch.go.
@@ -155,7 +158,8 @@ func New(cfg config.Config, client *github.Client) Model {
 	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
 		fetchGeneration: 1, refreshSeq: 1, detail: map[github.Key]github.Detail{},
 		inflight: map[github.Key]detailRequest{}, detailIdentity: map[github.Key]detailRequest{},
-		selection: map[github.Key]bool{}, rangeOwned: map[github.Key]bool{}, anchor: -1,
+		detailFailed: map[github.Key]detailRequest{},
+		selection:    map[github.Key]bool{}, rangeOwned: map[github.Key]bool{}, anchor: -1,
 		watched: map[github.Key]*watchEntry{}, boardAt: time.Now()}
 }
 
