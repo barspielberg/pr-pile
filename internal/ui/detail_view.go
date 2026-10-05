@@ -90,7 +90,7 @@ func (m Model) bodyBudget() int {
 // checkLines is the overlay's body, split out so a test can assert on the list
 // without parsing the frame around it.
 //
-// Order is failing, then pending, then the passing count: the list is read
+// Order is failing, pending, cancelled, then the passing count: the list is read
 // top-down and the top is what you pressed `d` for. Within a bucket the API's
 // own order is kept -- it groups a workflow's jobs together, which is more
 // useful than an alphabetical sort that would interleave them.
@@ -102,6 +102,10 @@ func (m Model) checkLines(pr github.PR) []string {
 	}
 	for _, g := range pr.PendingGates {
 		out = append(out, "  "+attentionStyle.Render("◐")+" "+mutedStyle.Render(clip(g, body)))
+	}
+	// Muted rather than red: a cancelled check usually wants a re-run, not a fix.
+	for _, g := range pr.CancelledGates {
+		out = append(out, "  "+mutedStyle.Render("⊘ "+clip(g+" (cancelled)", body)))
 	}
 
 	if len(out) == 0 {

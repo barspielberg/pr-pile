@@ -70,15 +70,16 @@ type PR struct {
 	CreatedAt   time.Time
 	HeadRefName string
 	// HeadOwner is the fork's owner for a PR from a fork, and empty otherwise.
-	HeadOwner    string
-	BaseRefName  string
-	Additions    int
-	Deletions    int
-	ChangedFiles int
-	CIState      string   // SUCCESS | FAILURE | PENDING | ERROR | "" (none)
-	FailedGates  []string // names of failing checks, deduped
-	PendingGates []string // names of still-running checks, deduped
-	PassedCount  int      // passing checks are counted, not named: see docs/checks-page.md
+	HeadOwner      string
+	BaseRefName    string
+	Additions      int
+	Deletions      int
+	ChangedFiles   int
+	CIState        string   // SUCCESS | FAILURE | PENDING | CANCELLED | "" (none)
+	FailedGates    []string // names of failing checks, deduped
+	PendingGates   []string // names of still-running checks, deduped
+	CancelledGates []string // names of checks whose latest run was cancelled, deduped
+	PassedCount    int      // passing checks are counted, not named: see docs/checks-page.md
 
 	// Skipped is the largest bucket on this board (47% of contexts) and means
 	// a job's path filter did not match, which is a fact about the workflow
@@ -113,9 +114,13 @@ const prFields = `
               statusCheckRollup {
                 state
                 contexts(first: 100) {
+                  pageInfo { hasNextPage }
                   nodes {
                     __typename
-                    ... on CheckRun { name status conclusion }
+                    ... on CheckRun {
+                      name status conclusion startedAt
+                      checkSuite { workflowRun { workflow { name } } }
+                    }
                     ... on StatusContext { context state }
                   }
                 }
@@ -176,19 +181,40 @@ type prNode struct {
 				StatusCheckRollup *struct {
 					State    string `json:"state"`
 					Contexts struct {
-						Nodes []struct {
-							TypeName   string `json:"__typename"`
-							Name       string `json:"name"`
-							Status     string `json:"status"`
-							Conclusion string `json:"conclusion"`
-							Context    string `json:"context"`
-							State      string `json:"state"`
-						} `json:"nodes"`
+						PageInfo struct {
+							HasNextPage bool `json:"hasNextPage"`
+						} `json:"pageInfo"`
+						Nodes []contextNode `json:"nodes"`
 					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+type contextNode struct {
+	TypeName   string    `json:"__typename"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	Conclusion string    `json:"conclusion"`
+	StartedAt  time.Time `json:"startedAt"`
+	CheckSuite *struct {
+		WorkflowRun *struct {
+			Workflow struct {
+				Name string `json:"name"`
+			} `json:"workflow"`
+		} `json:"workflowRun"`
+	} `json:"checkSuite"`
+	Context string `json:"context"`
+	State   string `json:"state"`
+}
+
+// workflow is empty for a CheckRun posted by an app rather than by Actions.
+func (n contextNode) workflow() string {
+	if n.CheckSuite == nil || n.CheckSuite.WorkflowRun == nil {
+		return ""
+	}
+	return n.CheckSuite.WorkflowRun.Workflow.Name
 }
 
 // CheckRepo verifies the repo is actually reachable. The search index reports
@@ -397,54 +423,120 @@ func (n prNode) toPR() PR {
 	if rollup == nil {
 		return pr
 	}
-	pr.CIState = rollup.State
 	// Deduped per bucket rather than globally: the same leaf name legitimately
 	// appears once as a skipped reusable-workflow stub and once as the real
 	// run, and dropping the second would lose the one that matters.
 	failed := map[string]bool{}
 	pending := map[string]bool{}
+	cancelled := map[string]bool{}
 	passed := map[string]bool{}
-	for _, ctxNode := range rollup.Contexts.Nodes {
-		name, state := ctxNode.Name, ctxNode.Conclusion
-		if ctxNode.TypeName == "StatusContext" {
-			name, state = ctxNode.Context, ctxNode.State
-		} else if state == "" {
-			// A CheckRun that has not finished carries a null conclusion, so
-			// its status is the only thing that says it is still running.
-			state = ctxNode.Status
-		}
-		if state == "SKIPPED" {
+	var anyFailed, anyPending, anyCancelled, anyDone bool
+	for _, c := range latestChecks(rollup.Contexts.Nodes) {
+		if c.state == "SKIPPED" {
 			pr.SkippedCount++
+			anyDone = true
 			continue
 		}
-		leaf := gateName(name)
-		if leaf == "" {
-			continue
-		}
+		// Umbrella gates still count toward CIState, since they can be the
+		// only thing that failed; they are just never named.
+		leaf := gateName(c.name)
 		switch {
-		case isFailure(state):
-			if !failed[leaf] {
+		case isFailure(c.state):
+			anyFailed = true
+			if leaf != "" && !failed[leaf] {
 				failed[leaf] = true
 				pr.FailedGates = append(pr.FailedGates, leaf)
 			}
-		case isPending(state):
-			if !pending[leaf] {
+		case isPending(c.state):
+			anyPending = true
+			if leaf != "" && !pending[leaf] {
 				pending[leaf] = true
 				pr.PendingGates = append(pr.PendingGates, leaf)
 			}
-		case isSuccess(state):
-			if !passed[leaf] {
+		case c.state == "CANCELLED":
+			anyCancelled = true
+			if leaf != "" && !cancelled[leaf] {
+				cancelled[leaf] = true
+				pr.CancelledGates = append(pr.CancelledGates, leaf)
+			}
+		case isSuccess(c.state):
+			anyDone = true
+			if leaf != "" && !passed[leaf] {
 				passed[leaf] = true
 				pr.PassedCount++
 			}
 		}
 	}
+	// Derived rather than taken from rollup.state, which counts every run on
+	// the commit: a run cancelled by a newer one keeps the rollup FAILURE
+	// while GitHub's own PR page shows green.
+	switch {
+	case anyFailed:
+		pr.CIState = "FAILURE"
+	case anyPending:
+		pr.CIState = "PENDING"
+	case anyCancelled:
+		pr.CIState = "CANCELLED"
+	case anyDone:
+		pr.CIState = "SUCCESS"
+	default:
+		pr.CIState = rollup.State
+	}
+	// Past the first page a check's newest run, or a failure, may be unseen,
+	// and the rollup is the only state that covers them all.
+	if rollup.Contexts.PageInfo.HasNextPage {
+		pr.CIState = rollup.State
+	}
 	return pr
+}
+
+type check struct{ name, state string }
+
+// latestChecks keeps only the newest run of each workflow's job, as GitHub's PR
+// page does. A re-run or a superseded workflow run leaves the older runs on
+// the commit, so without this a cancelled or since-fixed run stays red. The
+// workflow is part of the key because two workflows can both have a "test" job.
+// StatusContexts need nothing: GitHub already keeps only the latest per context.
+func latestChecks(nodes []contextNode) []check {
+	type run struct {
+		at     int
+		start  time.Time
+		queued bool
+	}
+	var out []check
+	newest := map[[2]string]run{}
+	for _, n := range nodes {
+		if n.TypeName == "StatusContext" {
+			out = append(out, check{n.Context, n.State})
+			continue
+		}
+		state := n.Conclusion
+		if state == "" {
+			// A CheckRun that has not finished carries a null conclusion, so
+			// its status is the only thing that says it is still running.
+			state = n.Status
+		}
+		// A queued run has no startedAt yet, and is the newest by definition.
+		// A finished run can also lack one, if it was cancelled while queued.
+		queued := n.StartedAt.IsZero() && n.Status != "COMPLETED"
+		key := [2]string{n.workflow(), n.Name}
+		cur, seen := newest[key]
+		if !seen {
+			newest[key] = run{len(out), n.StartedAt, queued}
+			out = append(out, check{n.Name, state})
+			continue
+		}
+		if queued || (!cur.queued && n.StartedAt.After(cur.start)) {
+			newest[key] = run{cur.at, n.StartedAt, queued}
+			out[cur.at].state = state
+		}
+	}
+	return out
 }
 
 func isFailure(state string) bool {
 	switch state {
-	case "FAILURE", "TIMED_OUT", "CANCELLED", "ERROR", "ACTION_REQUIRED":
+	case "FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ERROR", "ACTION_REQUIRED":
 		return true
 	}
 	return false
