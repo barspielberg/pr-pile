@@ -58,7 +58,7 @@ func TestRemoteTextCannotEmitTerminalControls(t *testing.T) {
 	}}})
 	m.board.Apply(board.Result{Index: 1})
 	m.cursor = m.firstRowSlot()
-	m.detail[7] = github.Detail{
+	m.detail[prKey(7)] = github.Detail{
 		Number:        7,
 		DefaultBranch: "main",
 		Reviewers:     []github.Reviewer{{Name: bad, Login: bad}},

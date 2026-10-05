@@ -795,7 +795,7 @@ rejects unknown fields so a misspelling cannot silently become dead config.
 | field | type | meaning |
 |---|---|---|
 | `name` | string | required; the section header, uppercased on render |
-| `query` | string | required; GitHub search syntax. Scoped automatically: `repo:<repo> is:pr is:open <query>` — a rule carries only what distinguishes it. |
+| `query` | string | required; GitHub search syntax. Scoped automatically: `repo:<repo> is:pr is:open <query>` — a rule carries only what distinguishes it. A `repo:` in the query widens it, since GitHub ORs `repo:` qualifiers; each one is reachability-checked at startup. |
 | `limit` | int | page size: `0` defaults to 20, otherwise `1..100`. Applied as `first:N` on the search, so it truncates before `tree` groups anything |
 | `tree` | bool | group stacked PRs into a chain. Chains are computed from the PRs *in that section*, so first-match-wins splits a stack into per-section sub-chains (§4.1) |
 | `author` | bool | show the author's initials column |
@@ -1206,8 +1206,9 @@ thing `gh pr list` does not give us, so it drags in an extra GraphQL query or a
 per-row lazy fetch.
 
 **Not built:** detail/preview pane; write actions (approve, comment, re-run CI,
-mark ready) — the action model should not make them awkward to add; multi-repo
-(config takes a repo, not a list — do not bake the assumption deeper); a
+mark ready) — the action model should not make them awkward to add; a list of
+repos in config (a rule widens with `repo:` in its query instead, and PRs are
+keyed by repo and number throughout); per-repo `repoPath`; a
 `glyphs = "ascii"` escape hatch (specified, cheap because widths are already
 fixed); a config key for the scroll margin (hardcoded on purpose — there is one
 user).

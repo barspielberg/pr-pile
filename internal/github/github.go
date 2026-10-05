@@ -50,7 +50,14 @@ func New() (*Client, error) {
 	return &Client{token: token, http: &http.Client{Timeout: 30 * time.Second}}, nil
 }
 
+// Key identifies a PR on a board that can span repos, where numbers repeat.
+type Key struct {
+	Repo   string
+	Number int
+}
+
 type PR struct {
+	Repo         string // owner/name
 	Number       int
 	Title        string
 	URL          string
@@ -78,11 +85,14 @@ type PR struct {
 	SkippedCount int
 }
 
+func (p PR) Key() Key { return Key{Repo: p.Repo, Number: p.Number} }
+
 // prFields is everything a row draws. The watch poll asks for the same fields
 // so a watched PR parses into the same PR the board holds.
 const prFields = `
         number title url isDraft reviewDecision mergeable updatedAt createdAt
         headRefName baseRefName
+        repository { nameWithOwner }
         additions deletions changedFiles
         author { login ... on User { name } }
         commits(last: 1) {
@@ -137,7 +147,10 @@ type prNode struct {
 	Additions      int       `json:"additions"`
 	Deletions      int       `json:"deletions"`
 	ChangedFiles   int       `json:"changedFiles"`
-	Author         struct {
+	Repository     struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+	Author struct {
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	} `json:"author"`
@@ -340,6 +353,7 @@ func (c *Client) Watch(ctx context.Context, repo string, numbers []int) (map[int
 
 func (n prNode) toPR() PR {
 	pr := PR{
+		Repo:        n.Repository.NameWithOwner,
 		Number:      n.Number,
 		Title:       n.Title,
 		URL:         n.URL,
@@ -461,13 +475,17 @@ func gateName(raw string) string {
 // cost +6,565 bytes and a rate-limit point on the board, and nothing here.
 // Measured at 912-1,400 bytes, 1.2-1.9s, 1 point. See docs/pr-detail.md §2.4.
 type Detail struct {
-	Number int // tags the response so a stale one can be dropped
+	// Repo and Number tag the response so a stale one can be dropped.
+	Repo   string
+	Number int
 
 	BehindBy      int
 	Unresolved    int
 	Reviewers     []Reviewer
 	DefaultBranch string
 }
+
+func (d Detail) Key() Key { return Key{Repo: d.Repo, Number: d.Number} }
 
 // Reviewer is someone who has actually formed an opinion. Requested reviewers
 // are not carried: 17 of 50 are teams, which the board already expresses as a

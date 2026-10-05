@@ -9,7 +9,7 @@ import (
 )
 
 func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
-	picked := m.isSelected(r.PR.Number)
+	picked := m.isSelected(r.PR.Key())
 	t := widthTierFor(m.width, showAuthor)
 	tw := m.searchTitleWidth(showAuthor)
 
@@ -23,7 +23,7 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	ci, ciStyle := ciCell(live)
 	rev, revStyle := reviewCell(live)
 	blocker, blockerStyle := blockerCell(live)
-	watch, watchStyle := m.watchCell(r.PR.Number)
+	watch, watchStyle := m.watchCell(r.PR.Key())
 
 	titleStyle := fgStyle
 	if r.PR.IsDraft {
@@ -189,8 +189,9 @@ func hitRuns(text string, hits map[int]bool, st lipgloss.Style,
 // are indexes into that same string -- the search matched it -- so there is
 // nothing to clamp and no ellipsis to guard against.
 func (m Model) renderTitle(r board.Row, st lipgloss.Style, paint func(lipgloss.Style) lipgloss.Style, tw int, hits map[int]bool) string {
-	text := pad(clip(r.PR.Title, tw), tw)
-	parts := parseTitle(text)
+	full, tagLen := m.titleText(r.PR)
+	text := pad(clip(full, tw), tw)
+	parts := titleParts(text, tagLen)
 	if len(hits) == 0 && parts == nil {
 		return paint(st).Render(text)
 	}

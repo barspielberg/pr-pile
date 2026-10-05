@@ -233,10 +233,14 @@ func detectRepo() (string, error) {
 	return repo, nil
 }
 
+func validRepo(repo string) bool {
+	parts := strings.Split(repo, "/")
+	return len(parts) == 2 && parts[0] != "" && parts[1] != "" &&
+		strings.TrimSpace(repo) == repo && strings.IndexFunc(repo, unicode.IsSpace) < 0
+}
+
 func (c Config) Validate() error {
-	parts := strings.Split(c.Repo, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" ||
-		strings.TrimSpace(c.Repo) != c.Repo || strings.IndexFunc(c.Repo, unicode.IsSpace) >= 0 {
+	if !validRepo(c.Repo) {
 		return fmt.Errorf("repo %q must be owner/name", c.Repo)
 	}
 	if len(c.Rules) == 0 {
@@ -251,6 +255,11 @@ func (c Config) Validate() error {
 		}
 		if r.Limit < 0 || r.Limit > 100 {
 			return fmt.Errorf("rule %q: limit must be 0 or between 1 and 100", r.Name)
+		}
+		for _, repo := range queryRepos(r.Query) {
+			if !validRepo(repo) {
+				return fmt.Errorf("rule %q: repo:%s must be owner/name", r.Name, repo)
+			}
 		}
 	}
 	seen := make(map[string]bool, len(c.Actions))
@@ -297,6 +306,33 @@ var reservedActionKeys = map[string]bool{
 	"j": true, "down": true, "k": true, "up": true, "l": true, "right": true,
 	"h": true, "left": true, "g": true, "home": true, "G": true, "end": true,
 	"ctrl+d": true, "ctrl+u": true, "pgdown": true, "pgup": true,
+}
+
+// Repos is every repo the board reads: the configured one, then each one a
+// rule widens its search to with a repo: qualifier, in order and without
+// repeats. GitHub ORs repo: qualifiers, so a rule with one searches both.
+func (c Config) Repos() []string {
+	repos := []string{c.Repo}
+	seen := map[string]bool{strings.ToLower(c.Repo): true}
+	for _, r := range c.Rules {
+		for _, repo := range queryRepos(r.Query) {
+			if !seen[strings.ToLower(repo)] {
+				seen[strings.ToLower(repo)] = true
+				repos = append(repos, repo)
+			}
+		}
+	}
+	return repos
+}
+
+func queryRepos(query string) []string {
+	var repos []string
+	for _, field := range strings.Fields(query) {
+		if repo, ok := strings.CutPrefix(field, "repo:"); ok {
+			repos = append(repos, repo)
+		}
+	}
+	return repos
 }
 
 // SearchQuery scopes a rule to the configured repo and to open PRs. Rules only

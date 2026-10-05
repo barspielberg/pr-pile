@@ -27,7 +27,7 @@ func (m Model) detailOverlay() string {
 	}
 
 	lines := []string{
-		headerStyle.Render(fmt.Sprintf("  #%d", pr.Number)) + " " +
+		headerStyle.Render("  "+m.prRef(pr)) + " " +
 			mutedStyle.Render(clip(pr.Title, max(0, m.width-12))),
 		"",
 	}

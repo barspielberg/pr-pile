@@ -72,14 +72,14 @@ func TestWatchEventsStaySilentWhileANewRunStarts(t *testing.T) {
 func TestToggleWatchOnAndOff(t *testing.T) {
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
-	if m.watched[1] == nil {
+	if m.watched[prKey(1)] == nil {
 		t.Fatalf("expected #1 watched, got %v", m.watched)
 	}
 	if m.status != "watching #1" {
 		t.Errorf("status %q", m.status)
 	}
 	m = press(m, runeKey('m'))
-	if m.watched[1] != nil {
+	if m.watched[prKey(1)] != nil {
 		t.Error("a second m should stop the watch, not add another")
 	}
 }
@@ -89,9 +89,9 @@ func TestToggleWatchOnAndOff(t *testing.T) {
 func TestToggleWatchMixedSelectionWatchesAll(t *testing.T) {
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
-	m.selection = map[int]bool{1: true, 2: true}
+	m.selection = map[github.Key]bool{prKey(1): true, prKey(2): true}
 	m = press(m, runeKey('m'))
-	if m.watched[1] == nil || m.watched[2] == nil {
+	if m.watched[prKey(1)] == nil || m.watched[prKey(2)] == nil {
 		t.Fatalf("expected both watched, got %v", m.watched)
 	}
 	if len(m.selection) != 0 {
@@ -103,35 +103,35 @@ func TestWatchSurvivesRefresh(t *testing.T) {
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
 	next, _ := m.refresh()
-	if next.(Model).watched[1] == nil {
+	if next.(Model).watched[prKey(1)] == nil {
 		t.Error("a refresh dropped the watch")
 	}
 }
 
 func TestApplyWatchReportsAndMarksUnseen(t *testing.T) {
 	m := watchBoard(t)
-	m.selection = map[int]bool{1: true, 2: true}
+	m.selection = map[github.Key]bool{prKey(1): true, prKey(2): true}
 	m = press(m, runeKey('m'))
 
-	pr1 := m.watched[1].pr
+	pr1 := m.watched[prKey(1)].pr
 	pr1.CIState = "SUCCESS"
-	pr2 := m.watched[2].pr
+	pr2 := m.watched[prKey(2)].pr
 	pr2.CIState = "PENDING"
 	next, cmd := m.applyWatch(polled(map[int]github.Watched{1: open(pr1), 2: open(pr2)}))
 
 	if next.status != "#1 CI passed" {
 		t.Errorf("status %q", next.status)
 	}
-	if !next.watched[1].unseen || next.watched[2].unseen {
+	if !next.watched[prKey(1)].unseen || next.watched[prKey(2)].unseen {
 		t.Error("only the PR that changed should be unseen")
 	}
 	if cmd == nil {
 		t.Error("a change should send a notification")
 	}
-	if got, _ := next.watchCell(1); got != newsGlyph {
+	if got, _ := next.watchCell(prKey(1)); got != newsGlyph {
 		t.Errorf("unseen cell %q", got)
 	}
-	if got, _ := next.watchCell(2); got != watchGlyph {
+	if got, _ := next.watchCell(prKey(2)); got != watchGlyph {
 		t.Errorf("watched cell %q", got)
 	}
 }
@@ -143,9 +143,9 @@ func TestApplyWatchNotifiesEachChangedPR(t *testing.T) {
 		return nil
 	})
 	m := watchBoard(t)
-	m.selection = map[int]bool{1: true, 2: true}
+	m.selection = map[github.Key]bool{prKey(1): true, prKey(2): true}
 	m = press(m, runeKey('m'))
-	pr1, pr2 := m.watched[1].pr, m.watched[2].pr
+	pr1, pr2 := m.watched[prKey(1)].pr, m.watched[prKey(2)].pr
 	pr1.CIState, pr2.CIState = "SUCCESS", "FAILURE"
 	_, cmd := m.applyWatch(polled(map[int]github.Watched{1: open(pr1), 2: open(pr2)}))
 	runAll(cmd)
@@ -200,12 +200,12 @@ func TestApplyWatchEndsOnMergeAndLeavesTheBoard(t *testing.T) {
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
 	next, _ := m.applyWatch(polled(map[int]github.Watched{
-		1: {PR: m.watched[1].pr, State: "MERGED"},
+		1: {PR: m.watched[prKey(1)].pr, State: "MERGED"},
 	}))
 	if next.status != "#1 merged" {
 		t.Errorf("status %q", next.status)
 	}
-	if next.watched[1] != nil {
+	if next.watched[prKey(1)] != nil {
 		t.Error("a merged PR should stop being watched")
 	}
 	for _, r := range next.visibleRows() {
@@ -227,7 +227,7 @@ func TestRefreshKeepsWatchNews(t *testing.T) {
 	stubNotice(t, func(string, string, notice) error { return nil })
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
-	pr := m.watched[1].pr
+	pr := m.watched[prKey(1)].pr
 	pr.CIState = "SUCCESS"
 	m, _ = m.applyWatch(polled(map[int]github.Watched{1: open(pr)}))
 	next, _ := m.refresh()
@@ -246,7 +246,7 @@ func TestRefreshPollsWatchedPRs(t *testing.T) {
 	})
 	m := watchBoard(t)
 	m.client = &github.Client{}
-	m.selection = map[int]bool{1: true, 2: true}
+	m.selection = map[github.Key]bool{prKey(1): true, prKey(2): true}
 	m = press(m, runeKey('m'))
 	m.watchInflight = false // the poll the watch started has landed
 
@@ -280,10 +280,10 @@ func stubWatch(t *testing.T, f func(numbers []int) (map[int]github.Watched, erro
 func TestApplyWatchKeepsMergeableThroughUnknown(t *testing.T) {
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
-	pr := m.watched[1].pr
+	pr := m.watched[prKey(1)].pr
 	pr.Mergeable = "UNKNOWN"
 	m, _ = m.applyWatch(polled(map[int]github.Watched{1: open(pr)}))
-	if got := m.watched[1].pr.Mergeable; got != "MERGEABLE" {
+	if got := m.watched[prKey(1)].pr.Mergeable; got != "MERGEABLE" {
 		t.Fatalf("baseline mergeable %q", got)
 	}
 	pr.Mergeable = "CONFLICTING"
@@ -311,7 +311,7 @@ func TestApplyWatchFailureKeepsTheStatus(t *testing.T) {
 func TestRowDrawsTheFresherCopy(t *testing.T) {
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
-	pr := m.watched[1].pr
+	pr := m.watched[prKey(1)].pr
 	pr.CIState = "SUCCESS"
 	m, _ = m.applyWatch(polled(map[int]github.Watched{1: open(pr)}))
 	if got := m.statusPR(github.PR{Number: 1, CIState: "PENDING"}).CIState; got != "SUCCESS" {
@@ -326,9 +326,9 @@ func TestRowDrawsTheFresherCopy(t *testing.T) {
 func TestOpeningClearsUnseen(t *testing.T) {
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
-	m.watched[1].unseen = true
+	m.watched[prKey(1)].unseen = true
 	m = press(m, runeKey('d'))
-	if m.watched[1].unseen {
+	if m.watched[prKey(1)].unseen {
 		t.Error("d should clear the unseen mark")
 	}
 }
@@ -338,7 +338,7 @@ func TestWatchFlagSitsInThePickColumn(t *testing.T) {
 	m := watchBoard(t)
 	row := m.board.Sections()[0].Rows[0]
 	before := stripANSI(m.renderRow(row, false, false))
-	m.watched[row.PR.Number] = &watchEntry{pr: row.PR}
+	m.watched[row.PR.Key()] = &watchEntry{pr: row.PR}
 	after := stripANSI(m.renderRow(row, false, false))
 	if want := " " + watchGlyph + "  #1"; !strings.HasPrefix(after, want) {
 		t.Errorf("row starts %q, want %q", after, want)
@@ -356,12 +356,12 @@ func TestWatchFlagSitsInThePickColumn(t *testing.T) {
 func TestPickWinsTheSharedCell(t *testing.T) {
 	m := watchBoard(t)
 	row := m.board.Sections()[0].Rows[0]
-	m.watched[row.PR.Number] = &watchEntry{pr: row.PR, unseen: true}
-	m.selection = map[int]bool{row.PR.Number: true}
+	m.watched[row.PR.Key()] = &watchEntry{pr: row.PR, unseen: true}
+	m.selection = map[github.Key]bool{row.PR.Key(): true}
 	if got := stripANSI(m.renderRow(row, false, false)); !strings.HasPrefix(got, " •") {
 		t.Errorf("picked row starts %q, want the pick dot", got)
 	}
-	m.selection = map[int]bool{}
+	m.selection = map[github.Key]bool{}
 	if got := stripANSI(m.renderRow(row, true, false)); !strings.HasPrefix(got, "▌"+newsGlyph) {
 		t.Errorf("selected row starts %q, want the cursor then the flag", got)
 	}
@@ -382,7 +382,7 @@ func TestQuitAsksWhileWatching(t *testing.T) {
 		t.Errorf("footer %q", foot)
 	}
 	m = press(m, runeKey('x'))
-	if m.confirmQuit || m.watched[1] == nil {
+	if m.confirmQuit || m.watched[prKey(1)] == nil {
 		t.Error("any other key should cancel and keep the watch")
 	}
 
@@ -463,7 +463,7 @@ func TestTerminalIsStillATerminalFile(t *testing.T) {
 // Quitting asks in the same box as the 3+ confirm, listing what it would cut off.
 func TestQuitAsksInABoxOverTheBoard(t *testing.T) {
 	m := watchBoard(t)
-	m.selection = map[int]bool{1: true, 2: true}
+	m.selection = map[github.Key]bool{prKey(1): true, prKey(2): true}
 	m = press(m, runeKey('m'))
 	m.running = "worktree"
 	m = press(m, runeKey('q'))
@@ -528,23 +528,32 @@ func TestWatchConfirmationExpires(t *testing.T) {
 
 // polled is a poll that asked for exactly the PRs it got back.
 func polled(got map[int]github.Watched) watchMsg {
-	asked := make([]int, 0, len(got))
+	numbers := make([]int, 0, len(got))
 	for n := range got {
-		asked = append(asked, n)
+		numbers = append(numbers, n)
 	}
-	sort.Ints(asked)
-	return watchMsg{sent: time.Now(), asked: asked, got: got}
+	sort.Ints(numbers)
+	asked := make([]github.Key, 0, len(got))
+	keyed := make(map[github.Key]github.Watched, len(got))
+	for _, n := range numbers {
+		asked = append(asked, prKey(n))
+		keyed[prKey(n)] = got[n]
+	}
+	return watchMsg{sent: time.Now(), asked: asked, got: keyed}
 }
+
+// prKey is the key of a test PR, which carries no repo.
+func prKey(n int) github.Key { return github.Key{Number: n} }
 
 func TestWatchStartedDuringAPollIsPolledWhenItLands(t *testing.T) {
 	stubWatch(t, func([]int) (map[int]github.Watched, error) { return nil, nil })
 	m := watchBoard(t)
 	m.client = &github.Client{}
 	m = press(m, runeKey('m'))
-	pr1 := m.watched[1].pr
+	pr1 := m.watched[prKey(1)].pr
 	m = press(m, runeKey('j'))
 	m = press(m, runeKey('m'))
-	if m.watched[2] == nil {
+	if m.watched[prKey(2)] == nil {
 		t.Fatal("#2 is not watched")
 	}
 
@@ -553,7 +562,7 @@ func TestWatchStartedDuringAPollIsPolledWhenItLands(t *testing.T) {
 		t.Error("#2 was left for the next refresh")
 	}
 	next.watchInflight = false
-	next, _ = next.applyWatch(polled(map[int]github.Watched{1: open(pr1), 2: open(next.watched[2].pr)}))
+	next, _ = next.applyWatch(polled(map[int]github.Watched{1: open(pr1), 2: open(next.watched[prKey(2)].pr)}))
 	if next.watchInflight {
 		t.Error("a poll that covered every watch polled again")
 	}
@@ -561,14 +570,14 @@ func TestWatchStartedDuringAPollIsPolledWhenItLands(t *testing.T) {
 
 func TestApplyWatchDropsAPRThatNoLongerResolves(t *testing.T) {
 	m := watchBoard(t)
-	m.selection = map[int]bool{1: true, 2: true}
+	m.selection = map[github.Key]bool{prKey(1): true, prKey(2): true}
 	m = press(m, runeKey('m'))
-	pr1 := m.watched[1].pr
-	next, _ := m.applyWatch(watchMsg{sent: time.Now(), asked: []int{1, 2}, got: map[int]github.Watched{1: open(pr1)}})
-	if next.watched[2] != nil {
+	pr1 := m.watched[prKey(1)].pr
+	next, _ := m.applyWatch(watchMsg{sent: time.Now(), asked: []github.Key{prKey(1), prKey(2)}, got: map[github.Key]github.Watched{prKey(1): open(pr1)}})
+	if next.watched[prKey(2)] != nil {
 		t.Error("a PR GitHub no longer returns is still watched")
 	}
-	if next.watched[1] == nil {
+	if next.watched[prKey(1)] == nil {
 		t.Error("the PR that came back was dropped too")
 	}
 	if next.status != "#2 not found, stopped watching" {
@@ -580,8 +589,8 @@ func TestMergedPRLeavesTheSelection(t *testing.T) {
 	stubNotice(t, func(string, string, notice) error { return nil })
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
-	m.selection = map[int]bool{1: true}
-	next, _ := m.applyWatch(polled(map[int]github.Watched{1: {PR: m.watched[1].pr, State: "MERGED"}}))
+	m.selection = map[github.Key]bool{prKey(1): true}
+	next, _ := m.applyWatch(polled(map[int]github.Watched{1: {PR: m.watched[prKey(1)].pr, State: "MERGED"}}))
 	if len(next.selection) != 0 {
 		t.Errorf("selection %v still holds the merged PR", next.selection)
 	}
@@ -591,7 +600,7 @@ func TestNotifyFailureKeepsTheNews(t *testing.T) {
 	stubNotice(t, func(string, string, notice) error { return nil })
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))
-	pr := m.watched[1].pr
+	pr := m.watched[prKey(1)].pr
 	pr.CIState = "SUCCESS"
 	m, _ = m.applyWatch(polled(map[int]github.Watched{1: open(pr)}))
 	next, _ := m.Update(notifyFailedMsg{err: errTest})

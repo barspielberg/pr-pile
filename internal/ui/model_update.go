@@ -62,21 +62,22 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.fetchGeneration {
 			return m, nil
 		}
-		request, pending := m.inflight[msg.detail.Number]
+		key := msg.detail.Key()
+		request, pending := m.inflight[key]
 		if !pending || request.generation != msg.generation || request.head != msg.head {
 			return m, nil
 		}
-		head, ok := m.currentHead(msg.detail.Number)
+		head, ok := m.currentHead(key)
 		if !ok || head != msg.head {
 			return m, nil
 		}
-		delete(m.inflight, msg.detail.Number)
+		delete(m.inflight, key)
 		// A failed request costs the on-demand lines and nothing else: the
 		// overlay is already on screen and already useful without them, and
 		// saying so at the user would be noise about a page they are reading.
 		if msg.err == nil && msg.detail.Number != 0 {
-			m.detail[msg.detail.Number] = msg.detail
-			m.detailIdentity[msg.detail.Number] = request
+			m.detail[key] = msg.detail
+			m.detailIdentity[key] = request
 		}
 		return m, nil
 
@@ -163,9 +164,9 @@ func (m Model) refresh() (tea.Model, tea.Cmd) {
 	m.boardAt = time.Now()
 	m.statusSeq++
 	m.board.Refetch()
-	m.detail = make(map[int]github.Detail)
-	m.inflight = make(map[int]detailRequest)
-	m.detailIdentity = make(map[int]detailRequest)
+	m.detail = make(map[github.Key]github.Detail)
+	m.inflight = make(map[github.Key]detailRequest)
+	m.detailIdentity = make(map[github.Key]detailRequest)
 	m.fetching = true
 	if m.status != m.watchNews {
 		m.status = ""

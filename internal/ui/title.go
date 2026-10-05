@@ -14,6 +14,8 @@ const (
 	partType
 	partScope
 	partTicket
+	// partRepo is the tag a row from another repo draws before its title.
+	partRepo
 )
 
 // commitTypes is the set of conventional-commit type words that parse as a
@@ -186,7 +188,7 @@ func titlePartStyle(st lipgloss.Style, p titlePart) lipgloss.Style {
 	switch p {
 	case partType:
 		return st.Foreground(typeStyle.GetForeground())
-	case partScope, partTicket:
+	case partScope, partTicket, partRepo:
 		return st.Faint(true)
 	}
 	return st

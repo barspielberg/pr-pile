@@ -47,7 +47,8 @@ func (m Model) searchText(r board.Row, showAuthor bool) (string, searchCells) {
 	tw := m.searchTitleWidth(showAuthor)
 	cells.number = add(pad("#"+fmt.Sprint(r.PR.Number), numberWidth))
 	add(" ")
-	cells.title = add(pad(clip(r.PR.Title, tw), tw))
+	title, _ := m.titleText(r.PR)
+	cells.title = add(pad(clip(title, tw), tw))
 	if m.showsAuthor(showAuthor) {
 		add(" ")
 		cells.author = add(padLeft(initials(r.PR.Author), authorWidth))

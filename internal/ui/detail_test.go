@@ -12,14 +12,14 @@ import (
 )
 
 func detailResponse(m Model, detail github.Detail) detailMsg {
-	head, _ := m.currentHead(detail.Number)
-	m.inflight[detail.Number] = detailRequest{generation: m.fetchGeneration, head: head}
+	head, _ := m.currentHead(detail.Key())
+	m.inflight[detail.Key()] = detailRequest{generation: m.fetchGeneration, head: head}
 	return detailMsg{generation: m.fetchGeneration, head: head, detail: detail}
 }
 
 func markDetailInflight(m *Model, number int) {
-	head, _ := m.currentHead(number)
-	m.inflight[number] = detailRequest{generation: m.fetchGeneration, head: head}
+	head, _ := m.currentHead(prKey(number))
+	m.inflight[prKey(number)] = detailRequest{generation: m.fetchGeneration, head: head}
 }
 
 // detailModel is a board with one PR selected, which is what every test here
@@ -50,7 +50,7 @@ func TestDetailOverlayRendersTheStateBlock(t *testing.T) {
 		UpdatedAt: time.Now().Add(-25 * time.Hour),
 	}
 	m := detailModel(t, pr, 24)
-	m.detail[3186] = github.Detail{
+	m.detail[prKey(3186)] = github.Detail{
 		Number: 3186, BehindBy: 26, Unresolved: 9, DefaultBranch: "master",
 	}
 
@@ -88,7 +88,7 @@ func TestDetailOverlayDrawsNothingItCannotSay(t *testing.T) {
 		UpdatedAt: time.Now().Add(-9 * time.Minute),
 	}
 	m := detailModel(t, pr, 24)
-	m.detail[3253] = github.Detail{Number: 3253, DefaultBranch: "master"}
+	m.detail[prKey(3253)] = github.Detail{Number: 3253, DefaultBranch: "master"}
 
 	out := stripANSI(m.detailOverlay())
 	for _, unwanted := range []string{"conflicted", "unresolved", "opened", "behind", "base "} {
@@ -113,7 +113,7 @@ func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
 		UpdatedAt:   time.Now(),
 	}
 	m := detailModel(t, pr, 24)
-	m.detail[3109] = github.Detail{Number: 3109, DefaultBranch: "master"}
+	m.detail[prKey(3109)] = github.Detail{Number: 3109, DefaultBranch: "master"}
 
 	if out := stripANSI(m.detailOverlay()); !strings.Contains(out,
 		"base      fix-PROJ-1839-reject-legacy-option") {
@@ -124,7 +124,7 @@ func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
 	// it: the same base line would then be drawn for every PR on the board.
 	pr.BaseRefName = "main"
 	m2 := detailModel(t, pr, 24)
-	m2.detail[3109] = github.Detail{Number: 3109, DefaultBranch: "main"}
+	m2.detail[prKey(3109)] = github.Detail{Number: 3109, DefaultBranch: "main"}
 	if out := stripANSI(m2.detailOverlay()); strings.Contains(out, "base ") {
 		t.Errorf("base drawn for a repo whose default is main:\n%s", out)
 	}
@@ -152,7 +152,7 @@ func TestDetailOverlayClipsTheStateBlockBeforeTheChecks(t *testing.T) {
 		UpdatedAt:   time.Now().Add(-30 * time.Hour),
 	}
 	m := detailModel(t, pr, 14)
-	m.detail[3230] = github.Detail{Number: 3230, DefaultBranch: "master"}
+	m.detail[prKey(3230)] = github.Detail{Number: 3230, DefaultBranch: "master"}
 
 	out := stripANSI(m.detailOverlay())
 
@@ -334,8 +334,8 @@ func TestRepeatedPressesDoNotRefetch(t *testing.T) {
 	if cmd := m.fetchDetail(pr); cmd != nil {
 		t.Error("a second request was issued while the first was in flight")
 	}
-	delete(m.inflight, pr.Number)
-	m.detail[pr.Number] = github.Detail{Number: pr.Number}
+	delete(m.inflight, pr.Key())
+	m.detail[pr.Key()] = github.Detail{Number: pr.Number}
 	if cmd := m.fetchDetail(pr); cmd != nil {
 		t.Error("a request was issued for a PR already answered")
 	}
@@ -391,7 +391,7 @@ func TestDetailOverlayFitsEveryPane(t *testing.T) {
 		for _, w := range []int{80, 120, 200} {
 			m := detailModel(t, pr, h)
 			m.width = w
-			m.detail[3186] = github.Detail{
+			m.detail[prKey(3186)] = github.Detail{
 				Number: 3186, BehindBy: 26, Unresolved: 9, DefaultBranch: "master",
 				Reviewers: []github.Reviewer{{Login: "alicechen", Name: "Alice Chen", State: "APPROVED"}},
 			}
@@ -417,7 +417,7 @@ func TestStateBlockStaysBelowTheChecks(t *testing.T) {
 		Author: "someone", HeadRefName: "b", UpdatedAt: time.Now(),
 	}
 	m := detailModel(t, pr, 24)
-	m.detail[9] = github.Detail{Number: 9, Unresolved: 2, DefaultBranch: "master"}
+	m.detail[prKey(9)] = github.Detail{Number: 9, Unresolved: 2, DefaultBranch: "master"}
 
 	out := stripANSI(m.detailOverlay())
 	lastCheck := strings.Index(out, "3 passing")
@@ -441,7 +441,7 @@ func TestUnresolvedLineAgreesWithItsCount(t *testing.T) {
 			Number: 5, Title: "t", CIState: "SUCCESS", PassedCount: 1,
 			Author: "a", UpdatedAt: time.Now(),
 		}, 24)
-		m.detail[5] = github.Detail{Number: 5, Unresolved: n, DefaultBranch: "master"}
+		m.detail[prKey(5)] = github.Detail{Number: 5, Unresolved: n, DefaultBranch: "master"}
 		if out := stripANSI(m.detailOverlay()); !strings.Contains(out, want) {
 			t.Errorf("n=%d: missing %q:\n%s", n, want, fmt.Sprint(out))
 		}
@@ -533,7 +533,7 @@ func TestSpinnerKeepsTickingForTheDetailRequest(t *testing.T) {
 	}
 
 	// And it stops once nothing is out, so an idle board is not spinning.
-	m.inflight = map[int]detailRequest{}
+	m.inflight = map[github.Key]detailRequest{}
 	if _, cmd := m.Update(spinMsg(time.Now())); cmd != nil {
 		t.Error("the spinner kept ticking on an idle board")
 	}

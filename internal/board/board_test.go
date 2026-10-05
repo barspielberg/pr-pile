@@ -214,7 +214,7 @@ func TestHideExpires(t *testing.T) {
 
 	b := New(cfg("a"))
 	b.Apply(Result{Index: 0, PRs: []github.PR{pr(1), pr(2)}})
-	b.Hide(1)
+	b.Hide(pr(1).Key())
 	if got := nums(b.Sections()[0]); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("after Hide: %v", got)
 	}
@@ -226,5 +226,42 @@ func TestHideExpires(t *testing.T) {
 	b.Apply(Result{Index: 0, PRs: []github.PR{pr(1), pr(2)}})
 	if got := nums(b.Sections()[0]); len(got) != 2 {
 		t.Errorf("still hidden after the hold: %v", got)
+	}
+}
+
+// A rule that searches two repos can return the same number from each, and
+// they are two PRs: neither claims the other, and hiding one leaves the other.
+func TestSameNumberInTwoReposIsTwoPRs(t *testing.T) {
+	a := github.PR{Repo: "o/a", Number: 7, UpdatedAt: time.Unix(2, 0)}
+	other := github.PR{Repo: "o/b", Number: 7, UpdatedAt: time.Unix(1, 0)}
+
+	b := New(cfg("mine", "review"))
+	b.Apply(Result{Index: 0, PRs: []github.PR{a}})
+	b.Apply(Result{Index: 1, PRs: []github.PR{a, other}})
+	if got := b.Sections()[1].Rows; len(got) != 1 || got[0].PR.Repo != "o/b" {
+		t.Fatalf("section 2: want only o/b#7, got %v", got)
+	}
+
+	b.Hide(a.Key())
+	if got := b.Sections()[0].Rows; len(got) != 0 {
+		t.Errorf("section 1 after hiding o/a#7: want empty, got %v", got)
+	}
+	if got := b.Sections()[1].Rows; len(got) != 1 || got[0].PR.Repo != "o/b" {
+		t.Errorf("section 2 after hiding o/a#7: want only o/b#7, got %v", got)
+	}
+}
+
+// Branch names repeat across repos, so a PR stacks only on one in its own repo.
+func TestStacksStayInsideOneRepo(t *testing.T) {
+	base := github.PR{Repo: "o/a", Number: 1, HeadRefName: "fix", BaseRefName: "main", UpdatedAt: time.Unix(2, 0)}
+	elsewhere := github.PR{Repo: "o/b", Number: 2, HeadRefName: "next", BaseRefName: "fix", UpdatedAt: time.Unix(1, 0)}
+
+	b := New(config.Config{Repo: "o/a", Rules: []config.Rule{{Name: "mine", Query: "x", Tree: true}}})
+	b.Apply(Result{Index: 0, PRs: []github.PR{base, elsewhere}})
+
+	for _, r := range b.Sections()[0].Rows {
+		if r.Prefix != "" {
+			t.Errorf("%s#%d drew stack glyph %q across repos", r.PR.Repo, r.PR.Number, r.Prefix)
+		}
 	}
 }

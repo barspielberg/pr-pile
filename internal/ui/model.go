@@ -34,14 +34,14 @@ type Model struct {
 	// stays until something else takes the line.
 	clearSeq int
 
-	// The selection, by PR number, and the open `v` range: anchor..cursor
+	// The selection, by PR, and the open `v` range: anchor..cursor
 	// inclusive, recomputed on every move so walking back shrinks it.
 	// rangeOwned is what the range itself marked, kept apart from the user's
 	// own space marks so shrinking cannot eat them. See selection.go.
-	selection  map[int]bool
+	selection  map[github.Key]bool
 	anchor     int
 	ranging    bool
-	rangeOwned map[int]bool
+	rangeOwned map[github.Key]bool
 
 	// The pending confirm: the PR set captured when the prompt opened (nil
 	// when none is up), the action key it guards (empty for the builtin open),
@@ -85,19 +85,19 @@ type Model struct {
 	// displacing the closing keys that row exists to carry at every height.
 	helpStatus string
 
-	// detail holds what the on-demand request returned, keyed by PR number.
+	// detail holds what the on-demand request returned, keyed by PR.
 	// The key is what makes stale responses harmless: one that lands after the
 	// cursor has moved on files itself under the PR it describes rather than
 	// overwriting whatever is selected now, so nothing has to be cancelled.
-	detail map[int]github.Detail
+	detail map[github.Key]github.Detail
 	// inflight is the set of PRs already asked about, so holding `j` cannot
 	// fire the same request twice while the first is still out.
-	inflight       map[int]detailRequest
-	detailIdentity map[int]detailRequest
+	inflight       map[github.Key]detailRequest
+	detailIdentity map[github.Key]detailRequest
 
 	// Watches outlive a refresh, unlike the selection: they are keyed by
-	// number and nothing about a refetch makes them stale. See watch.go.
-	watched map[int]*watchEntry
+	// PR and nothing about a refetch makes them stale. See watch.go.
+	watched map[github.Key]*watchEntry
 	// One poll at a time: two out at once would diff against the same
 	// baseline and report the same change twice.
 	watchInflight bool
@@ -135,7 +135,7 @@ type asyncStatusMsg struct {
 	// failed after the selection was optimistically cleared. Clearing on the
 	// way out keeps the footer honest while the copy is in flight; a failure
 	// hands the user back exactly what they picked, so retrying is one key.
-	restore map[int]bool
+	restore map[github.Key]bool
 }
 
 type actionDoneMsg struct {
@@ -153,10 +153,10 @@ var spinFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
 func New(cfg config.Config, client *github.Client) Model {
 	return Model{cfg: cfg, client: client, board: board.New(cfg), width: 100, fetching: true,
-		fetchGeneration: 1, refreshSeq: 1, detail: map[int]github.Detail{},
-		inflight: map[int]detailRequest{}, detailIdentity: map[int]detailRequest{},
-		selection: map[int]bool{}, rangeOwned: map[int]bool{}, anchor: -1,
-		watched: map[int]*watchEntry{}, boardAt: time.Now()}
+		fetchGeneration: 1, refreshSeq: 1, detail: map[github.Key]github.Detail{},
+		inflight: map[github.Key]detailRequest{}, detailIdentity: map[github.Key]detailRequest{},
+		selection: map[github.Key]bool{}, rangeOwned: map[github.Key]bool{}, anchor: -1,
+		watched: map[github.Key]*watchEntry{}, boardAt: time.Now()}
 }
 
 func (m Model) Init() tea.Cmd {

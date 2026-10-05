@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/barspielberg/pr-pile/internal/config"
@@ -31,11 +32,25 @@ func run() error {
 		return err
 	}
 	// An org IP allow list makes every search return zero rather than failing,
-	// so an unreachable repo would render as a board with no PRs.
+	// so an unreachable repo would render as a board with no PRs. A mistyped
+	// repo: in a query fails the same quiet way, so every repo is checked.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := client.CheckRepo(ctx, cfg.Repo); err != nil {
-		return fmt.Errorf("cannot read %s: %w", cfg.Repo, err)
+	repos := cfg.Repos()
+	errs := make([]error, len(repos))
+	var wg sync.WaitGroup
+	for i, repo := range repos {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = client.CheckRepo(ctx, repo)
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			return fmt.Errorf("cannot read %s: %w", repos[i], err)
+		}
 	}
 
 	// Package-level styles capture the global colour profile at init, which is

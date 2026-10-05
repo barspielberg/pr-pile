@@ -34,7 +34,7 @@ func (m Model) fetchRule(i int, r config.Rule) tea.Cmd {
 // repo's default branch is. Measured at 1.2-1.9s, so the overlay draws without
 // it and these lines arrive late.
 //
-// Nothing is cancelled. Responses carry their PR number and file themselves
+// Nothing is cancelled. Responses carry their repo and number and file themselves
 // under it, so holding `j` with `d` at each row leaves requests that answer a
 // question nobody is asking any more -- harmless, and cheaper than threading
 // cancellation through Bubble Tea's command model. What is guarded is asking
@@ -45,45 +45,46 @@ func (m Model) fetchDetail(pr github.PR) tea.Cmd {
 	}
 	// It does not go stale within a session: behindBy and unresolved threads
 	// move on the scale of a working day, and `r` refetches the board anyway.
-	if _, done := m.detail[pr.Number]; done {
+	if _, done := m.detail[pr.Key()]; done {
 		return nil
 	}
-	if _, pending := m.inflight[pr.Number]; pending {
+	if _, pending := m.inflight[pr.Key()]; pending {
 		return nil
 	}
 
-	repo, number, head, generation := m.cfg.Repo, pr.Number, pr.HeadRefName, m.fetchGeneration
-	m.inflight[number] = detailRequest{generation: generation, head: head}
+	key, head, generation := pr.Key(), pr.HeadRefName, m.fetchGeneration
+	m.inflight[key] = detailRequest{generation: generation, head: head}
+	repo := m.repoOf(pr)
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		d, err := client.Detail(ctx, repo, number, head)
-		d.Number = number // so a failed response is still attributable
+		d, err := client.Detail(ctx, repo, key.Number, head)
+		d.Repo, d.Number = key.Repo, key.Number // so a failed response is still attributable
 		return detailMsg{generation: generation, head: head, detail: d, err: err}
 	}
 }
 
 func (m *Model) reconcileDetailIdentity() {
-	for number, request := range m.inflight {
-		head, ok := m.currentHead(number)
+	for key, request := range m.inflight {
+		head, ok := m.currentHead(key)
 		if request.generation != m.fetchGeneration || !ok || head != request.head {
-			delete(m.inflight, number)
+			delete(m.inflight, key)
 		}
 	}
-	for number, identity := range m.detailIdentity {
-		head, ok := m.currentHead(number)
+	for key, identity := range m.detailIdentity {
+		head, ok := m.currentHead(key)
 		if identity.generation != m.fetchGeneration || !ok || head != identity.head {
-			delete(m.detail, number)
-			delete(m.detailIdentity, number)
+			delete(m.detail, key)
+			delete(m.detailIdentity, key)
 		}
 	}
 }
 
-func (m Model) currentHead(number int) (string, bool) {
+func (m Model) currentHead(key github.Key) (string, bool) {
 	for _, section := range m.board.Sections() {
 		for _, row := range section.Rows {
-			if row.PR.Number == number {
+			if row.PR.Key() == key {
 				return row.PR.HeadRefName, true
 			}
 		}

@@ -102,6 +102,8 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 		{"no rules", Config{Repo: "o/r"}},
 		{"rule without name", Config{Repo: "o/r", Rules: []Rule{{Query: "b"}}}},
 		{"rule without query", Config{Repo: "o/r", Rules: []Rule{{Name: "a"}}}},
+		{"query repo without owner", Config{Repo: "o/r", Rules: []Rule{{Name: "a", Query: "b repo:api"}}}},
+		{"empty query repo", Config{Repo: "o/r", Rules: []Rule{{Name: "a", Query: "b repo:"}}}},
 	} {
 		if err := tc.cfg.Validate(); err == nil {
 			t.Errorf("%s: expected an error", tc.name)
@@ -136,5 +138,19 @@ func TestWatchKeyIsReserved(t *testing.T) {
 	cfg.Actions = []Action{{Key: "m", Name: "mine", Run: "true"}}
 	if err := cfg.Validate(); err == nil {
 		t.Error("binding m to an action should be refused")
+	}
+}
+
+// Repos is what startup checks for reachability: the configured repo first,
+// then each repo: a query adds, once each. -repo: narrows rather than widens.
+func TestReposAddsEachQueryRepoOnce(t *testing.T) {
+	c := Config{Repo: "o/r", Rules: []Rule{
+		{Name: "a", Query: "author:@me repo:o/api repo:O/R"},
+		{Name: "b", Query: "review-requested:@me repo:o/api repo:x/lib -repo:o/old"},
+	}}
+	got := c.Repos()
+	want := []string{"o/r", "o/api", "x/lib"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("want %v, got %v", want, got)
 	}
 }

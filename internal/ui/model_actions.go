@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -153,9 +154,13 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	repo, repoPath, err := m.actionRepo(pr)
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	err = t.Execute(&b, actionTemplateData{
-		Number: pr.Number, Repo: m.cfg.Repo, RepoPath: m.cfg.RepoPath,
+		Number: pr.Number, Repo: repo, RepoPath: repoPath,
 		Branch: shellQuote(pr.HeadRefName), Base: shellQuote(pr.BaseRefName),
 		URL: shellQuote(pr.URL), Author: shellQuote(pr.Author), Title: shellQuote(pr.Title),
 	})
@@ -177,7 +182,18 @@ func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data := multiActionTemplateData{Repo: m.cfg.Repo, RepoPath: m.cfg.RepoPath}
+	repo, repoPath, err := m.actionRepo(prs[0])
+	if err != nil {
+		return "", err
+	}
+	if templateMentions(tmpl, "Repo") || templateMentions(tmpl, "RepoPath") {
+		for _, pr := range prs[1:] {
+			if !strings.EqualFold(m.repoOf(pr), repo) {
+				return "", fmt.Errorf("the selection spans repos, and .Repo names one")
+			}
+		}
+	}
+	data := multiActionTemplateData{Repo: repo, RepoPath: repoPath}
 	var numbers, branches, bases, urls, authors, titles []string
 	for _, pr := range prs {
 		numbers = append(numbers, fmt.Sprint(pr.Number))
@@ -198,6 +214,25 @@ func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 	err = t.Execute(&b, data)
 	return b.String(), err
 }
+
+// actionRepo is the Repo and RepoPath an action sees for a PR. Repo goes into
+// the command unquoted, as config text always has, but a PR from a repo: in a
+// query takes it from GitHub, so it must look like a repo name before it is
+// trusted as shell text. RepoPath is configured for one repo, so a PR from any
+// other gets it empty, the same as a config without repoPath.
+func (m Model) actionRepo(pr github.PR) (repo, repoPath string, err error) {
+	repo = m.repoOf(pr)
+	if m.isConfiguredRepo(repo) {
+		return m.cfg.Repo, m.cfg.RepoPath, nil
+	}
+	if !repoName.MatchString(repo) {
+		return "", "", fmt.Errorf("repo %q is not owner/name", terminalText(repo))
+	}
+	return repo, "", nil
+}
+
+// repoName is the character set GitHub allows in owner and repository names.
+var repoName = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 
 type actionTemplateData struct {
 	Number            int

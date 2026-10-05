@@ -50,6 +50,20 @@ On first run inside a GitHub checkout, the repo is inferred with `gh` and a
 commented starter config is written. `PILE_REPO=owner/name` overrides the
 configured repo for one invocation.
 
+A rule can search more repos by adding `repo:` qualifiers to its query. GitHub
+ORs them with the configured repo, so the rule below covers both:
+
+```yaml
+  - name: Needs my review
+    query: review-requested:@me repo:acme/api
+```
+
+Rows from a repo other than `repo` carry its name before the title (`api`, or
+`owner/name` for another owner), and `d`, `m` and actions use the PR's own repo.
+Every `repo:` is checked at startup like `repo` itself, so a typo fails loudly
+rather than drawing an empty section. `repoPath` belongs to `repo`, so
+`{{.RepoPath}}` is empty for PRs from the others.
+
 ```yaml
 repo: owner/name
 repoPath: ~/Repos/owner/name
@@ -202,7 +216,10 @@ quoted, embedded, command-substitution, and heredoc contexts are rejected when
 the action is invoked. Explicit shell evaluators such as `sh -c` and `eval` are
 also rejected when the template uses a remote field. The trusted configured `Repo` and `RepoPath` values
 remain shell text, as does the command itself, so expansions, pipes and
-redirects written in `run` still work.
+redirects written in `run` still work. For a PR from a `repo:` in a query,
+`Repo` comes from GitHub and must look like `owner/name` before it is used.
+A `multi` action that uses `{{.Repo}}` or `{{.RepoPath}}` refuses a selection
+that spans repos.
 
 [docs/config-example.md](docs/config-example.md) works a five-section team board
 through end to end: what each rule claims versus what it actually shows once the

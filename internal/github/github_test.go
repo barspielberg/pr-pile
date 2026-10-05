@@ -78,6 +78,27 @@ func TestSearchBucketsChecksByState(t *testing.T) {
 	}
 }
 
+// A rule can search several repos, so each PR carries the repo it came from.
+func TestSearchCarriesEachPRsRepo(t *testing.T) {
+	const body = `{"data":{"search":{"nodes":[
+	  {"number":1,"repository":{"nameWithOwner":"o/r"}},
+	  {"number":1,"repository":{"nameWithOwner":"o/api"}}
+	]}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	prs, err := c.Search(context.Background(), "q", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 2 || prs[0].Key() != (Key{"o/r", 1}) || prs[1].Key() != (Key{"o/api", 1}) {
+		t.Errorf("want o/r#1 and o/api#1, got %+v", prs)
+	}
+}
+
 // A PR that no longer resolves comes back null beside the others, with an
 // error in the same body; the rest of the poll still counts.
 func TestWatchParsesEachAliasAndSkipsMissing(t *testing.T) {
