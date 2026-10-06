@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 	"github.com/barspielberg/pr-pile/internal/github"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"strings"
 )
 
@@ -19,7 +21,10 @@ import (
 // Two of those lines arrive on a second request and are simply absent until it
 // lands (docs/pr-detail.md §7). The page never waits for the network.
 //
-// It closes on the next movement key, so it reads as a look rather than a mode.
+// It navigates like the `?` page: the scroll keys scroll, everything else
+// closes, and the bottom row says so at every height. It used to clip on a
+// short pane, and j closed it and moved the board -- so scrolling down to read
+// the clipped lines threw the reader out instead.
 func (m Model) detailOverlay() string {
 	pr, ok := m.selected()
 	if !ok {
@@ -31,60 +36,75 @@ func (m Model) detailOverlay() string {
 			mutedStyle.Render(clip(pr.Title, max(0, m.width-12))),
 		"",
 	}
-	lines = append(lines, m.overlayBody(pr)...)
-	lines = append(lines, "", mutedStyle.Render("  any key closes"))
+	body := m.overlayBody(pr)
+	rows := m.detailRows(len(body))
+	top := m.detailTop(len(body))
+	lines = append(lines, body[top:top+rows]...)
+	lines = append(lines, m.detailHint(top, len(body), rows))
 
 	// No trailing newline: a pane is as many lines as it is tall, and one more
-	// scrolls the header off the top edge -- which at 14 rows is exactly where
-	// the page is already spending every line it has.
+	// scrolls the header off the top edge.
+	if m.height > 0 {
+		lines = lines[:min(len(lines), m.height)]
+	}
 	return strings.Join(lines, "\n")
 }
 
-// overlayBody assembles both blocks and enforces the degradation order: the
-// state block is clipped from its own bottom, entirely, before the checks block
-// gives up a single line. A PR with 8 failing checks must not drop a failure to
-// make room for its branch name -- that inverts what the page is for.
-// See docs/pr-detail.md §6.2.
+// overlayBody is both blocks, unclipped. The checks block comes first so it is
+// what a short pane shows before any scrolling. See docs/pr-detail.md §6.2.
 func (m Model) overlayBody(pr github.PR) []string {
 	checks := m.checkLines(pr)
 	state := m.stateLines(pr)
 	if len(state) == 0 {
 		return checks
 	}
-
-	// The checks block is clipped only once the state block is entirely gone,
-	// so its budget is whatever is left after the state block has shrunk to
-	// nothing -- which is the full body budget.
-	body := m.bodyBudget()
-	if body <= 0 {
-		return append(checks, state...)
-	}
-
-	// +1 for the blank line between the blocks.
-	if room := body - len(checks) - 1; room < len(state) {
-		if room < 1 {
-			// No honest room for any state line: the whole block goes, and the
-			// checks block takes over the clipping exactly as it does today.
-			return checks
-		}
-		hidden := len(state) - (room - 1)
-		state = append(state[:room-1],
-			"  "+mutedStyle.Render(fmt.Sprintf("… %s not shown", plural(hidden, "more line"))))
-	}
-
 	out := append([]string(nil), checks...)
 	out = append(out, "")
 	return append(out, state...)
 }
 
-// bodyBudget is how many lines both blocks together may occupy: the pane less
-// the #-header and its blank line, and the blank line and footer below.
-func (m Model) bodyBudget() int {
-	const chrome = 4
+// detailRows is how many body lines the page shows: the pane less the header,
+// its blank line, and the hint row.
+func (m Model) detailRows(total int) int {
 	if m.height <= 0 {
-		return 0
+		return total
 	}
-	return m.height - chrome
+	return max(0, min(total, m.height-3))
+}
+
+// detailTop clamps the stored offset to what the page can show, at render as
+// well as on the keypress so a resize cannot strand it past the end.
+func (m Model) detailTop(total int) int {
+	return max(0, min(m.detailScroll, total-m.detailRows(total)))
+}
+
+func (m *Model) clampDetailScroll() {
+	pr, ok := m.selected()
+	if !ok {
+		m.detailScroll = 0
+		return
+	}
+	m.detailScroll = m.detailTop(len(m.overlayBody(pr)))
+}
+
+// detailHint is the page's bottom row, worded like the `?` page's: which keys
+// close it, and where you are.
+func (m Model) detailHint(top, total, rows int) string {
+	left := "  esc q d close · j/k scroll · ? help"
+	right := fmt.Sprintf("%d-%d of %d  ", top+1, top+rows, total)
+	switch {
+	case rows >= total:
+		left = "  esc q d close · ? help"
+		right = fmt.Sprintf("all %d  ", total)
+	case top+rows >= total:
+		right = fmt.Sprintf("%d-%d of %d · end  ", top+1, total, total)
+	}
+	left = clip(left, max(0, m.width-lipgloss.Width(right)))
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		return mutedStyle.Render(clip(left, m.width))
+	}
+	return mutedStyle.Render(left + strings.Repeat(" ", gap) + right)
 }
 
 // checkLines is the overlay's body, split out so a test can assert on the list
@@ -122,35 +142,10 @@ func (m Model) checkLines(pr github.PR) []string {
 		}
 	}
 
-	// The tally is pinned below the elision rather than passed through it: it
-	// is what makes the numbers reconcile, so clipping it would leave the page
-	// silently short of GitHub's total.
-	out = m.fitChecks(out)
 	if tally := checkTally(pr); tally != "" {
 		out = append(out, "  "+okStyle.Render("✓")+" "+mutedStyle.Render(tally))
 	}
 	return out
-}
-
-// fitChecks keeps the overlay inside the pane. The list is already ranked by
-// what you came to read, so dropping from the bottom loses the least: a scroll
-// offset would add a second mode to something whose whole point is that any key
-// dismisses it. The elision line is honest about what it hid.
-//
-// Budget: the #-header and its blank line, the blank line and "any key closes"
-// below, the elision line itself, and the tally pinned under it.
-func (m Model) fitChecks(lines []string) []string {
-	const chrome = 6
-	if m.height <= 0 || len(lines) <= m.height-chrome {
-		return lines
-	}
-	keep := m.height - chrome
-	if keep < 1 {
-		keep = 1
-	}
-	hidden := len(lines) - keep
-	return append(lines[:keep],
-		"  "+mutedStyle.Render(fmt.Sprintf("… %s not shown", plural(hidden, "more line"))))
 }
 
 // checkTally closes the overlay's list the way `gh pr checks` closes its own:
@@ -173,4 +168,39 @@ func plural(n int, noun string) string {
 		return fmt.Sprintf("%d %s", n, noun)
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// scrollDetail moves the detail page on the `?` page's scroll keys, at every
+// height. It reports false for any other key, which closes the page.
+func (m Model) scrollDetail(msg tea.KeyMsg) (Model, bool) {
+	pr, ok := m.selected()
+	if !ok {
+		return m, false
+	}
+	// Steps are sized to this page's own window, which is two rows shorter
+	// than the legend's: the shared ones would skip a line on every pgdown.
+	full := max(1, m.height-4)
+	half := max(1, full/2)
+	switch msg.String() {
+	case "j", "down":
+		m.detailScroll++
+	case "k", "up":
+		m.detailScroll--
+	case "ctrl+d":
+		m.detailScroll += half
+	case "ctrl+u":
+		m.detailScroll -= half
+	case "pgdown":
+		m.detailScroll += full
+	case "pgup":
+		m.detailScroll -= full
+	case "g", "home":
+		m.detailScroll = 0
+	case "G", "end":
+		m.detailScroll = len(m.overlayBody(pr))
+	default:
+		return m, false
+	}
+	m.clampDetailScroll()
+	return m, true
 }

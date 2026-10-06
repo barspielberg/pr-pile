@@ -1260,9 +1260,9 @@ func TestAuthorColumnDoesNotStarveTheTitle(t *testing.T) {
 	}
 }
 
-// The checks overlay is a look, not a mode: a movement key closes it and moves
-// in one keypress, so inspecting a PR does not interrupt scanning the list.
-func TestChecksOverlayClosesOnMovement(t *testing.T) {
+// Like the `?` page, every key that is not a scroll key closes the checks
+// overlay, and none of them moves the board or quits behind it.
+func TestChecksOverlayClosesWithoutMoving(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
@@ -1271,31 +1271,28 @@ func TestChecksOverlayClosesOnMovement(t *testing.T) {
 	}})
 	m.board.Apply(board.Result{Index: 1})
 	m = onRow(t, m, 0)
+	want := m.cursor
 
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	if !m.showChecks {
-		t.Fatal("d should open the checks overlay")
-	}
-	if !strings.Contains(m.View(), "gate-one") {
-		t.Errorf("overlay missing the gate name:\n%s", m.View())
-	}
-
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	if m.showChecks {
-		t.Error("a movement key should close the overlay")
-	}
-	if want := m.rowSlot(1); m.cursor != want {
-		t.Errorf("the same keypress should also move: cursor %d, want %d", m.cursor, want)
-	}
-
-	// esc closes without moving, and without quitting.
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.showChecks {
-		t.Error("esc should close the overlay")
-	}
-	if want := m.rowSlot(1); m.cursor != want {
-		t.Errorf("esc should not move: cursor %d, want %d", m.cursor, want)
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyEsc},
+		{Type: tea.KeyRunes, Runes: []rune("q")},
+		{Type: tea.KeyRunes, Runes: []rune("d")},
+		{Type: tea.KeyRunes, Runes: []rune("l")},
+	} {
+		m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+		if !m.showChecks {
+			t.Fatal("d should open the checks overlay")
+		}
+		if !strings.Contains(m.View(), "gate-one") {
+			t.Errorf("overlay missing the gate name:\n%s", m.View())
+		}
+		m = press(m, key)
+		if m.showChecks {
+			t.Errorf("%s should close the overlay", key)
+		}
+		if m.cursor != want {
+			t.Errorf("%s should not move: cursor %d, want %d", key, m.cursor, want)
+		}
 	}
 }
 
@@ -1396,8 +1393,8 @@ func TestChecksOverlayOnGreenPRIsOneLine(t *testing.T) {
 	}
 }
 
-// The overlay grew a list that can outgrow the pane, so it must clip rather
-// than push its own footer off screen -- and say how much it hid.
+// The overlay grew a list that can outgrow the pane, so it scrolls rather than
+// push its own footer off screen -- and its last row says how to leave.
 func TestChecksOverlayFitsThePane(t *testing.T) {
 	var gates []string
 	for i := range 40 {
@@ -1417,23 +1414,21 @@ func TestChecksOverlayFitsThePane(t *testing.T) {
 		if n := len(strings.Split(strings.TrimRight(out, "\n"), "\n")); n > height {
 			t.Errorf("height %d: overlay is %d lines:\n%s", height, n, out)
 		}
-		// 40 gates genuinely fit a 50-row pane, so the notice is only owed
-		// when something was actually dropped.
+		// 40 gates genuinely fit a 50-row pane, so the scroll hint is only
+		// owed when something is off screen.
 		clipped := !strings.Contains(out, "failing-gate-39")
-		if clipped != strings.Contains(out, "not shown") {
-			t.Errorf("height %d: clipped=%v but the notice disagrees:\n%s", height, clipped, out)
+		if clipped != strings.Contains(out, "j/k scroll") {
+			t.Errorf("height %d: clipped=%v but the hint disagrees:\n%s", height, clipped, out)
 		}
-		// The footer has to survive the clip, or the overlay stops telling the
-		// user how to leave it.
-		if !strings.Contains(out, "any key closes") {
-			t.Errorf("height %d: clip ate the footer:\n%s", height, out)
+		if !strings.Contains(out, "close") {
+			t.Errorf("height %d: the page does not say how to leave:\n%s", height, out)
 		}
 	}
 }
 
 // The tally is what makes the overlay's numbers reconcile against GitHub, so
-// it has to survive a clip rather than be dropped as ordinary list content.
-func TestChecksOverlayTallySurvivesClipping(t *testing.T) {
+// it has to be reachable at the bottom of a list that overflows.
+func TestChecksOverlayTallyIsReachedByScrolling(t *testing.T) {
 	var gates []string
 	for i := range 40 {
 		gates = append(gates, fmt.Sprintf("failing-gate-%02d", i))
@@ -1446,14 +1441,12 @@ func TestChecksOverlayTallySurvivesClipping(t *testing.T) {
 	}}})
 	m.board.Apply(board.Result{Index: 1})
 	m = onRow(t, m, 0)
-	m.showChecks = true
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
 
 	out := stripANSI(m.View())
 	if !strings.Contains(out, "9 passing, 12 skipped") {
-		t.Errorf("the tally was clipped away:\n%s", out)
-	}
-	if !strings.Contains(out, "not shown") {
-		t.Errorf("clipped without saying so:\n%s", out)
+		t.Errorf("the tally is not at the bottom of the page:\n%s", out)
 	}
 	if n := len(strings.Split(strings.TrimRight(out, "\n"), "\n")); n > m.height {
 		t.Errorf("overlay is %d lines in a %d-row pane:\n%s", n, m.height, out)

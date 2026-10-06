@@ -85,7 +85,7 @@ func (m Model) helpBlocks() []helpBlock {
 		// so listing them here too would be the one redundancy a legend cannot
 		// justify -- it is the only section the reader can already see.
 		{"OVERLAYS", []helpRow{
-			row("d page", "any key closes it; j k l h close it and move"),
+			row("d page", "scrolls like this one; ? opens this one"),
 			row("? page", "scrolls and searches; see its bottom row"),
 		}},
 		{"SEARCH", []helpRow{

@@ -130,10 +130,10 @@ func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
 	}
 }
 
-// The state block is clipped before the checks block, entirely, and never
-// interleaved: a PR with 6 failing checks must not drop a failure to make room
-// for its branch name. §6.2, at the 14 rows the spec sizes the drop order for.
-func TestDetailOverlayClipsTheStateBlockBeforeTheChecks(t *testing.T) {
+// On a short pane the checks come first and the state block is reached by
+// scrolling, not dropped: it used to clip with "… N more lines not shown" and
+// no way to see them. §6.2, at the 14 rows the spec sizes the page for.
+func TestDetailOverlayScrollsToTheStateBlock(t *testing.T) {
 	pr := github.PR{Repo: testRepo,
 		Number: 3230, Title: "bump @types/send from 0.17.4 to 1.2.1",
 		CIState: "FAILURE", Author: "dependabot",
@@ -153,35 +153,51 @@ func TestDetailOverlayClipsTheStateBlockBeforeTheChecks(t *testing.T) {
 	}
 	m := detailModel(t, pr, 14)
 	m.detail[prKey(3230)] = github.Detail{Repo: testRepo, Number: 3230, DefaultBranch: "master"}
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 
-	out := stripANSI(m.detailOverlay())
-
-	// Every failing and pending gate survives, and so does the tally that makes
-	// the numbers reconcile.
+	out := stripANSI(m.View())
 	for _, g := range append(append([]string{}, pr.FailedGates...), pr.PendingGates...) {
 		if !strings.Contains(out, g) {
-			t.Errorf("a check line was dropped to fit a state line: %q\n%s", g, out)
+			t.Errorf("a check line is not on the first screen: %q\n%s", g, out)
 		}
 	}
 	if !strings.Contains(out, "9 passing, 12 skipped") {
-		t.Errorf("the tally did not survive:\n%s", out)
+		t.Errorf("the tally is not on the first screen:\n%s", out)
 	}
-	// The state block gave up its lowest-priority lines, in order, and said so.
-	if !strings.Contains(out, "author") {
-		t.Errorf("the highest-priority state line was dropped:\n%s", out)
-	}
-	for _, dropped := range []string{"branch", "opened", "size"} {
-		if strings.Contains(out, dropped) {
-			t.Errorf("%q survived a clip that should have dropped it:\n%s", dropped, out)
-		}
-	}
-	if !strings.Contains(out, "not shown") {
-		t.Errorf("the clip was silent about what it hid:\n%s", out)
+	if strings.Contains(out, "opened") || !strings.Contains(out, "j/k scroll") {
+		t.Errorf("expected an overflowing page with a scroll hint:\n%s", out)
 	}
 	// Counted as emitted, not trimmed: a trailing newline is a 15th line to the
 	// terminal and scrolls the header off the top, which is how this was found.
 	if lines := len(strings.Split(out, "\n")); lines > 14 {
 		t.Errorf("overlay emits %d lines into a 14-row pane:\n%s", lines, out)
+	}
+
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if !m.showChecks {
+		t.Fatal("j should scroll an overflowing page, not close it")
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	out = stripANSI(m.View())
+	for _, want := range []string{"#3230", "opened", "· end"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("after G, missing %q:\n%s", want, out)
+		}
+	}
+	if lines := len(strings.Split(out, "\n")); lines > 14 {
+		t.Errorf("scrolled overlay emits %d lines into a 14-row pane:\n%s", lines, out)
+	}
+
+	// Past the end, j stays put rather than storing an offset k has to undo.
+	at := m.detailScroll
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.detailScroll != at {
+		t.Errorf("j past the end moved the offset from %d to %d", at, m.detailScroll)
+	}
+
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if m.showChecks {
+		t.Error("q should close the page")
 	}
 }
 
@@ -341,9 +357,10 @@ func TestRepeatedPressesDoNotRefetch(t *testing.T) {
 	}
 }
 
-// `d` still opens instantly and still closes on the next movement, with the
-// state block present. The overlay grew a block; it did not grow a mode.
-func TestDetailOverlayStaysAGlance(t *testing.T) {
+// The page navigates like the `?` page even when it fits: j scrolls (here, a
+// no-op) rather than closing it and moving the board, so reaching for j to read
+// further never throws the reader out. `?` goes to the legend.
+func TestDetailOverlayNavigatesLikeTheHelpPage(t *testing.T) {
 	m := detailModel(t, github.PR{Repo: testRepo,
 		Number: 1, Title: "a", CIState: "FAILURE", FailedGates: []string{"gate-one"},
 		Author: "someone", HeadRefName: "b", UpdatedAt: time.Unix(9000, 0),
@@ -362,14 +379,22 @@ func TestDetailOverlayStaysAGlance(t *testing.T) {
 	if !strings.Contains(out, "gate-one") || !strings.Contains(out, "author") {
 		t.Errorf("overlay missing a block:\n%s", out)
 	}
-	if !strings.Contains(out, "any key closes") {
-		t.Errorf("overlay lost its footer:\n%s", out)
+	if !strings.Contains(out, "esc q d close") || !strings.Contains(out, "all ") {
+		t.Errorf("the bottom row should say how to close it at every height:\n%s", out)
 	}
 
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	if want := m.rowSlot(1); m.showChecks || m.cursor != want {
-		t.Errorf("one keypress should close and move: showChecks=%v cursor=%d want %d",
-			m.showChecks, m.cursor, want)
+	cursor := m.cursor
+	for _, k := range []string{"j", "k", "G", "g"} {
+		m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+		if !m.showChecks || m.cursor != cursor {
+			t.Errorf("%s should stay on the page: showChecks=%v cursor=%d want %d",
+				k, m.showChecks, m.cursor, cursor)
+		}
+	}
+
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	if m.showChecks || !m.showHelp {
+		t.Errorf("? should open the help page: showChecks=%v showHelp=%v", m.showChecks, m.showHelp)
 	}
 }
 
@@ -557,5 +582,38 @@ func TestDetailLoaderStopsWhenTheRequestFails(t *testing.T) {
 	}
 	if m.fetchDetail(pr) != nil {
 		t.Error("a failed PR was asked again before a refresh")
+	}
+}
+
+// Paging through the page shows every line: the step was the legend's, one row
+// longer than this page's window, so each pgdown skipped a line unseen.
+func TestDetailPageDownSkipsNothing(t *testing.T) {
+	var gates []string
+	for i := range 40 {
+		gates = append(gates, fmt.Sprintf("failing-gate-%02d", i))
+	}
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyPgDown}, {Type: tea.KeyCtrlD}} {
+		for _, h := range []int{6, 10, 14, 24} {
+			m := detailModel(t, github.PR{Repo: testRepo,
+				Number: 1, Title: "t", CIState: "FAILURE", FailedGates: gates,
+			}, h)
+			m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+
+			seen := map[string]bool{}
+			for range 100 {
+				out := stripANSI(m.View())
+				for _, g := range gates {
+					if strings.Contains(out, g) {
+						seen[g] = true
+					}
+				}
+				m = press(m, key)
+			}
+			for _, g := range gates {
+				if !seen[g] {
+					t.Errorf("%s at height %d: %s was never shown", key, h, g)
+				}
+			}
+		}
 	}
 }

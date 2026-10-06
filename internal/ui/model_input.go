@@ -100,12 +100,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
-		// A movement key closes the overlay AND moves, so checking a PR then
-		// carrying on down the list is one keypress, not two.
 		if m.showChecks {
+			if next, ok := m.scrollDetail(msg); ok {
+				return next, nil
+			}
 			m.showChecks = false
-			switch msg.String() {
-			case "j", "down", "k", "up", "l", "right", "h", "left", "g", "home", "G", "end":
+			if msg.String() == "?" {
 				return m.handleKey(msg)
 			}
 			return m, nil
@@ -172,7 +172,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		m.showChecks = true
+		m.showChecks, m.detailScroll = true, 0
 		m.markSeen(pr)
 		cmd := m.fetchDetail(pr)
 		if cmd == nil {
