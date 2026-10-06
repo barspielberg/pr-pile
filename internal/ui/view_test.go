@@ -2451,3 +2451,32 @@ func TestNoFixedCubeColoursAnywhereOnTheBoard(t *testing.T) {
 		}
 	}
 }
+
+// ↓ asks for attention only once being behind is the last thing left, and
+// never outranks a conflict or a draft.
+func TestBlockerCellBehind(t *testing.T) {
+	ready := github.PR{CIState: "SUCCESS", Review: "APPROVED", Mergeable: "MERGEABLE", MergeState: "BEHIND"}
+	with := func(f func(*github.PR)) github.PR { p := ready; f(&p); return p }
+
+	for _, tc := range []struct {
+		name  string
+		pr    github.PR
+		glyph string
+		style lipgloss.Style
+	}{
+		{"ready", ready, "↓", attentionStyle},
+		{"no review needed", with(func(p *github.PR) { p.Review = "" }), "↓", attentionStyle},
+		{"running checks", with(func(p *github.PR) { p.CIState = "PENDING" }), "↓", attentionStyle},
+		{"needs review", with(func(p *github.PR) { p.Review = "REVIEW_REQUIRED" }), "↓", mutedStyle},
+		{"failing", with(func(p *github.PR) { p.CIState = "FAILURE" }), "↓", mutedStyle},
+		{"draft wins", with(func(p *github.PR) { p.IsDraft = true }), "~", mutedStyle},
+		{"conflict wins", with(func(p *github.PR) { p.Mergeable = "CONFLICTING" }), "!", errorStyle},
+		{"not behind", with(func(p *github.PR) { p.MergeState = "CLEAN" }), " ", fgStyle},
+	} {
+		glyph, style := blockerCell(tc.pr)
+		if glyph != tc.glyph || style.GetForeground() != tc.style.GetForeground() ||
+			style.GetFaint() != tc.style.GetFaint() {
+			t.Errorf("%s: got %q, want %q (or the wrong style)", tc.name, glyph, tc.glyph)
+		}
+	}
+}

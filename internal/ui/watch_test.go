@@ -294,6 +294,45 @@ func TestApplyWatchKeepsMergeableThroughUnknown(t *testing.T) {
 	}
 }
 
+// Going out of date is news only once nothing else stands in the way.
+func TestWatchEventsOutOfDate(t *testing.T) {
+	ready := github.PR{Repo: testRepo, CIState: "SUCCESS", Review: "APPROVED", Mergeable: "MERGEABLE",
+		MergeState: "CLEAN", BaseRefName: "master"}
+	with := func(f func(*github.PR)) github.PR { p := ready; f(&p); return p }
+	behind := func(p *github.PR) { p.MergeState = "BEHIND" }
+
+	for _, tc := range []struct {
+		name     string
+		was, now github.PR
+		want     string
+	}{
+		{"ready goes behind", ready, with(behind), "out of date with master"},
+		{"still needs review", with(func(p *github.PR) { p.Review = "REVIEW_REQUIRED" }),
+			with(func(p *github.PR) { behind(p); p.Review = "REVIEW_REQUIRED" }), ""},
+		{"draft", with(func(p *github.PR) { p.IsDraft = true }),
+			with(func(p *github.PR) { behind(p); p.IsDraft = true }), ""},
+		{"from unknown is not a change", with(func(p *github.PR) { p.MergeState = "UNKNOWN" }), with(behind), ""},
+		{"already behind", with(behind), with(behind), ""},
+	} {
+		if got := strings.Join(watchEvents(tc.was, open(tc.now)), ", "); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestApplyWatchKeepsMergeStateThroughUnknown(t *testing.T) {
+	m := watchBoard(t)
+	m = press(m, runeKey('m'))
+	pr := m.watched[prKey(1)].pr
+	pr.MergeState = "BEHIND"
+	m, _ = m.applyWatch(polled(map[int]github.Watched{1: open(pr)}))
+	pr.MergeState = "UNKNOWN"
+	m, _ = m.applyWatch(polled(map[int]github.Watched{1: open(pr)}))
+	if got := m.watched[prKey(1)].pr.MergeState; got != "BEHIND" {
+		t.Errorf("baseline merge state %q", got)
+	}
+}
+
 func TestApplyWatchFailureKeepsTheStatus(t *testing.T) {
 	m := watchBoard(t)
 	m = press(m, runeKey('m'))

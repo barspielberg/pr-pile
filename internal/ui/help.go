@@ -115,6 +115,8 @@ func (m Model) helpBlocks() []helpBlock {
 		{"BLOCKERS", []helpRow{
 			glyph("!", "merge conflicts", errorStyle),
 			glyph("~", "draft", mutedStyle),
+			glyph("↓", "out of date; the repo requires updating", attentionStyle),
+			glyph("↓", "out of date, but something else blocks it too", mutedStyle),
 		}},
 		{"ROWS", []helpRow{
 			glyph("╭╴│╰╴", "a stack: each PR targets the one above", mutedStyle),
