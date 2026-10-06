@@ -111,15 +111,15 @@ const prFields = `
         commits(last: 1) {
           nodes {
             commit {
+              rollupState: statusCheckRollup { state }
               statusCheckRollup {
-                state
                 contexts(first: 100) {
                   pageInfo { hasNextPage }
                   nodes {
                     __typename
                     ... on CheckRun {
                       name status conclusion startedAt
-                      checkSuite { workflowRun { workflow { name } } }
+                      checkSuite { workflowRun { runNumber event workflow { databaseId } } }
                     }
                     ... on StatusContext { context state }
                   }
@@ -178,8 +178,10 @@ type prNode struct {
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
+				RollupState *struct {
+					State string `json:"state"`
+				} `json:"rollupState"`
 				StatusCheckRollup *struct {
-					State    string `json:"state"`
 					Contexts struct {
 						PageInfo struct {
 							HasNextPage bool `json:"hasNextPage"`
@@ -200,8 +202,10 @@ type contextNode struct {
 	StartedAt  time.Time `json:"startedAt"`
 	CheckSuite *struct {
 		WorkflowRun *struct {
-			Workflow struct {
-				Name string `json:"name"`
+			RunNumber int    `json:"runNumber"`
+			Event     string `json:"event"`
+			Workflow  struct {
+				DatabaseID int64 `json:"databaseId"`
 			} `json:"workflow"`
 		} `json:"workflowRun"`
 	} `json:"checkSuite"`
@@ -209,12 +213,23 @@ type contextNode struct {
 	State   string `json:"state"`
 }
 
-// workflow is empty for a CheckRun posted by an app rather than by Actions.
-func (n contextNode) workflow() string {
+// workflowKey identifies a workflow file and the event that started it, as gh
+// pr checks does (cli/cli#7618): a push run and a pull_request run of the same
+// workflow are separate checks. The ID rather than the name, because two files
+// can share a name while numbering their runs apart.
+type workflowKey struct {
+	id    int64
+	event string
+}
+
+// workflow is the zero key and run 0 for a CheckRun posted by an app rather
+// than by Actions.
+func (n contextNode) workflow() (workflowKey, int) {
 	if n.CheckSuite == nil || n.CheckSuite.WorkflowRun == nil {
-		return ""
+		return workflowKey{}, 0
 	}
-	return n.CheckSuite.WorkflowRun.Workflow.Name
+	r := n.CheckSuite.WorkflowRun
+	return workflowKey{r.Workflow.DatabaseID, r.Event}, r.RunNumber
 }
 
 // CheckRepo verifies the repo is actually reachable. The search index reports
@@ -419,7 +434,17 @@ func (n prNode) toPR() PR {
 	if len(n.Commits.Nodes) == 0 {
 		return pr
 	}
-	rollup := n.Commits.Nodes[0].Commit.StatusCheckRollup
+	commit := n.Commits.Nodes[0].Commit
+	// GitHub answers rollup.state two ways, and which one depends on the
+	// selection: asked alone it counts only each workflow's newest run, as the
+	// PR page and branch protection do; asked next to contexts it counts every
+	// run on the commit, so a run cancelled by a newer one turns it FAILURE.
+	// Undocumented; seen in dlvhdr/gh-dash#114 and pvcnt/mergeable#189, and
+	// reproduced on biomejs/biome@745bf42. Hence the separate alias.
+	if commit.RollupState != nil {
+		pr.CIState = commit.RollupState.State
+	}
+	rollup := commit.StatusCheckRollup
 	if rollup == nil {
 		return pr
 	}
@@ -430,14 +455,13 @@ func (n prNode) toPR() PR {
 	pending := map[string]bool{}
 	cancelled := map[string]bool{}
 	passed := map[string]bool{}
-	var anyFailed, anyPending, anyCancelled, anyDone bool
+	var anyFailed, anyCancelled bool
 	for _, c := range latestChecks(rollup.Contexts.Nodes) {
 		if c.state == "SKIPPED" {
 			pr.SkippedCount++
-			anyDone = true
 			continue
 		}
-		// Umbrella gates still count toward CIState, since they can be the
+		// Umbrella gates still count toward anyFailed, since they can be the
 		// only thing that failed; they are just never named.
 		leaf := gateName(c.name)
 		switch {
@@ -448,7 +472,6 @@ func (n prNode) toPR() PR {
 				pr.FailedGates = append(pr.FailedGates, leaf)
 			}
 		case isPending(c.state):
-			anyPending = true
 			if leaf != "" && !pending[leaf] {
 				pending[leaf] = true
 				pr.PendingGates = append(pr.PendingGates, leaf)
@@ -460,42 +483,28 @@ func (n prNode) toPR() PR {
 				pr.CancelledGates = append(pr.CancelledGates, leaf)
 			}
 		case isSuccess(c.state):
-			anyDone = true
 			if leaf != "" && !passed[leaf] {
 				passed[leaf] = true
 				pr.PassedCount++
 			}
 		}
 	}
-	// Derived rather than taken from rollup.state, which counts every run on
-	// the commit: a run cancelled by a newer one keeps the rollup FAILURE
-	// while GitHub's own PR page shows green.
-	switch {
-	case anyFailed:
-		pr.CIState = "FAILURE"
-	case anyPending:
-		pr.CIState = "PENDING"
-	case anyCancelled:
+	// StatusState has no cancelled value, so a cancel reads as FAILURE. When a
+	// cancel is all that is wrong, say so rather than paint it red; past the
+	// first page of contexts the failure may just be one not fetched.
+	if (pr.CIState == "FAILURE" || pr.CIState == "ERROR") && !anyFailed && anyCancelled &&
+		!rollup.Contexts.PageInfo.HasNextPage {
 		pr.CIState = "CANCELLED"
-	case anyDone:
-		pr.CIState = "SUCCESS"
-	default:
-		pr.CIState = rollup.State
-	}
-	// Past the first page a check's newest run, or a failure, may be unseen,
-	// and the rollup is the only state that covers them all.
-	if rollup.Contexts.PageInfo.HasNextPage {
-		pr.CIState = rollup.State
 	}
 	return pr
 }
 
 type check struct{ name, state string }
 
-// latestChecks keeps only the newest run of each workflow's job, as GitHub's PR
-// page does. A re-run or a superseded workflow run leaves the older runs on
-// the commit, so without this a cancelled or since-fixed run stays red. The
-// workflow is part of the key because two workflows can both have a "test" job.
+// latestChecks keeps what GitHub's PR page shows: only the newest run of each
+// workflow, and within it the newest attempt of each job. A superseded run
+// leaves its checks on the commit, so without this a cancelled or since-fixed
+// run stays listed, including jobs the newer run has not reached yet.
 // StatusContexts need nothing: GitHub already keeps only the latest per context.
 func latestChecks(nodes []contextNode) []check {
 	type run struct {
@@ -503,11 +512,25 @@ func latestChecks(nodes []contextNode) []check {
 		start  time.Time
 		queued bool
 	}
+	latestRun := map[workflowKey]int{}
+	for _, n := range nodes {
+		if wf, num := n.workflow(); num > latestRun[wf] {
+			latestRun[wf] = num
+		}
+	}
 	var out []check
-	newest := map[[2]string]run{}
+	type jobKey struct {
+		wf   workflowKey
+		name string
+	}
+	newest := map[jobKey]run{}
 	for _, n := range nodes {
 		if n.TypeName == "StatusContext" {
 			out = append(out, check{n.Context, n.State})
+			continue
+		}
+		wf, num := n.workflow()
+		if num < latestRun[wf] {
 			continue
 		}
 		state := n.Conclusion
@@ -519,7 +542,7 @@ func latestChecks(nodes []contextNode) []check {
 		// A queued run has no startedAt yet, and is the newest by definition.
 		// A finished run can also lack one, if it was cancelled while queued.
 		queued := n.StartedAt.IsZero() && n.Status != "COMPLETED"
-		key := [2]string{n.workflow(), n.Name}
+		key := jobKey{wf, n.Name}
 		cur, seen := newest[key]
 		if !seen {
 			newest[key] = run{len(out), n.StartedAt, queued}
