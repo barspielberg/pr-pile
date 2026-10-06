@@ -63,6 +63,8 @@ type Model struct {
 	searchOrigin int
 	showHelp     bool
 	showChecks   bool
+	// detailScroll is the detail page's top body line.
+	detailScroll int
 	// helpScroll is the help page's top line. The legend outgrows a short pane
 	// and the reader needs all of it, so that page scrolls rather than clips.
 	helpScroll int
