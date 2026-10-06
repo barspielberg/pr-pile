@@ -109,7 +109,8 @@ author or a markdown link instead, also one per line.
 
 `m` watches the selected PRs (or the one under the cursor) and `m` again stops.
 Watched PRs are checked on every refresh: the timed one (`refresh`) and `r`.
-When CI passes or first fails, a review lands, conflicts appear or clear, or the
+When CI passes or first fails, a review lands, conflicts appear or clear, an
+otherwise ready PR falls behind a base it must be up to date with, or the
 PR merges or closes, the status line says so and a desktop notification goes
 out. A merged or closed PR leaves the board straight away. A watched row shows
 `⚐` in the column left of its number, and `⚑` until you open it with `enter` or
@@ -252,7 +253,7 @@ authors.
 | `g` / `G` | top / bottom (also `home` / `end`) |
 | `ctrl+d` / `ctrl+u` | down / up half a page (`pgdn` / `pgup` move a full page) |
 | `enter` / `o` | open in the default browser |
-| `d` | detail for the selected PR: failing and running checks named, passing counted, plus conflict, unresolved comments, author, reviewer, size and branches |
+| `d` | detail for the selected PR: failing and running checks named, passing counted, plus conflict or a required update from base, unresolved comments, author, reviewer, size and branches |
 | `y` | copy the PR url to the clipboard (`pbcopy`) |
 | `m` | watch / stop watching |
 | `/` | search |

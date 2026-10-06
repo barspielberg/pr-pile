@@ -265,3 +265,30 @@ func TestStacksStayInsideOneRepo(t *testing.T) {
 		}
 	}
 }
+
+// GitHub recomputes mergeability lazily, so a refresh that lands mid-recompute
+// must not blank a ! or ↓ the board already knew about.
+func TestRefreshKeepsKnownMergeStateThroughUnknown(t *testing.T) {
+	b := New(cfg("mine"))
+	behind := pr(1)
+	behind.Mergeable, behind.MergeState = "MERGEABLE", "BEHIND"
+	b.Apply(Result{Index: 0, PRs: []github.PR{behind}})
+
+	b.Refetch()
+	unknown := pr(1)
+	unknown.Mergeable, unknown.MergeState = "UNKNOWN", "UNKNOWN"
+	b.Apply(Result{Index: 0, PRs: []github.PR{unknown}})
+
+	got := b.Sections()[0].Rows[0].PR
+	if got.Mergeable != "MERGEABLE" || got.MergeState != "BEHIND" {
+		t.Errorf("got mergeable %q, state %q; want the last known answer", got.Mergeable, got.MergeState)
+	}
+
+	b.Refetch()
+	clean := pr(1)
+	clean.Mergeable, clean.MergeState = "MERGEABLE", "CLEAN"
+	b.Apply(Result{Index: 0, PRs: []github.PR{clean}})
+	if got := b.Sections()[0].Rows[0].PR.MergeState; got != "CLEAN" {
+		t.Errorf("a real answer must replace the carried one, got %q", got)
+	}
+}

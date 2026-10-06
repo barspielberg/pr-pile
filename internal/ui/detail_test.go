@@ -617,3 +617,41 @@ func TestDetailPageDownSkipsNothing(t *testing.T) {
 		}
 	}
 }
+
+// BEHIND says the repo enforces being up to date, which the count alone cannot,
+// so it gets its own headline; it draws from the row and the count joins later.
+func TestDetailNamesAnEnforcedUpdate(t *testing.T) {
+	pr := github.PR{Repo: testRepo, Number: 5, Title: "t", CIState: "SUCCESS", Review: "APPROVED",
+		Mergeable: "MERGEABLE", MergeState: "BEHIND", BaseRefName: "master"}
+	m := detailModel(t, pr, 40)
+
+	if out := stripANSI(m.detailOverlay()); !strings.Contains(out, "↓ update from master before merging") {
+		t.Errorf("headline missing before behindBy:\n%s", out)
+	}
+	m.detail[prKey(5)] = github.Detail{Repo: testRepo, Number: 5, BehindBy: 4, DefaultBranch: "master"}
+	if out := stripANSI(m.detailOverlay()); !strings.Contains(out, "↓ update from master before merging · 4 commits behind") {
+		t.Errorf("count did not join the headline:\n%s", out)
+	}
+
+	pr.MergeState = "CLEAN"
+	m = detailModel(t, pr, 40)
+	m.detail[prKey(5)] = github.Detail{Repo: testRepo, Number: 5, BehindBy: 4, DefaultBranch: "master"}
+	out := stripANSI(m.detailOverlay())
+	if strings.Contains(out, "↓") || !strings.Contains(out, "· 4 commits behind master") {
+		t.Errorf("an unenforced lag should stay the quiet line:\n%s", out)
+	}
+}
+
+// Without a base name the headline borrows the default branch, as the quiet
+// line does, rather than leaving a gap where the branch should be.
+func TestDetailEnforcedUpdateWithoutABaseName(t *testing.T) {
+	pr := github.PR{Repo: testRepo, Number: 6, Title: "t", Mergeable: "MERGEABLE", MergeState: "BEHIND"}
+	m := detailModel(t, pr, 40)
+	if out := stripANSI(m.detailOverlay()); !strings.Contains(out, "↓ update from its base before merging") {
+		t.Errorf("before the default branch is known:\n%s", out)
+	}
+	m.detail[prKey(6)] = github.Detail{Repo: testRepo, Number: 6, BehindBy: 2, DefaultBranch: "main"}
+	if out := stripANSI(m.detailOverlay()); !strings.Contains(out, "↓ update from main before merging · 2 commits behind") {
+		t.Errorf("after it is known:\n%s", out)
+	}
+}

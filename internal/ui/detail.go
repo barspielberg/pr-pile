@@ -100,19 +100,31 @@ func (m Model) pendingLine(pr github.PR) string {
 // case and 8x at worst against a real merge, so it fabricates rather than
 // merely omits. See docs/pr-detail.md §4.
 func (m Model) mergeLine(pr github.PR, d github.Detail, loaded bool) string {
+	// Named against the PR's own base, not the repo default: a stacked PR
+	// is behind the branch it targets, and saying "behind master" there
+	// would be a different and wrong number.
+	base := pr.BaseRefName
+	if base == "" {
+		base = d.DefaultBranch
+	}
+	base = terminalText(base)
 	behind := ""
 	if loaded && d.BehindBy > 0 {
-		// Named against the PR's own base, not the repo default: a stacked PR
-		// is behind the branch it targets, and saying "behind master" there
-		// would be a different and wrong number.
-		base := pr.BaseRefName
-		if base == "" {
-			base = d.DefaultBranch
-		}
-		base = terminalText(base)
 		behind = fmt.Sprintf("%s behind %s", plural(d.BehindBy, "commit"), base)
 	}
 	switch {
+	case pr.Mergeable != "CONFLICTING" && pr.MergeState == "BEHIND":
+		// From the row's data, so it draws before behindBy lands and the
+		// count joins it without moving it.
+		if base == "" {
+			base = "its base"
+		}
+		text := "update from " + base + " before merging"
+		if behind != "" {
+			text += " · " + plural(d.BehindBy, "commit") + " behind"
+		}
+		_, style := blockerCell(pr)
+		return "  " + style.Render("↓") + " " + mutedStyle.Render(text)
 	case pr.Mergeable == "CONFLICTING" && behind != "":
 		return "  " + errorStyle.Render("!") + " " + mutedStyle.Render("conflicted · "+behind)
 	case pr.Mergeable == "CONFLICTING":

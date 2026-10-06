@@ -116,8 +116,34 @@ func (b *Board) Apply(res Result) {
 	if res.Index < 0 || res.Index >= len(b.results) {
 		return
 	}
+	res.PRs = b.keepKnownMergeState(res.PRs)
 	b.results[res.Index] = &res
 	b.rebuild()
+}
+
+// keepKnownMergeState carries the last real answer through UNKNOWN. GitHub
+// computes both fields lazily and a refresh often lands mid-recompute, which
+// would blank a row's ! or ↓ for one refresh and bring it back the next.
+func (b *Board) keepKnownMergeState(prs []github.PR) []github.PR {
+	shown := map[github.Key]github.PR{}
+	for _, s := range b.sections {
+		for _, r := range s.Rows {
+			shown[r.PR.Key()] = r.PR
+		}
+	}
+	out := make([]github.PR, len(prs))
+	for i, pr := range prs {
+		if was, ok := shown[pr.Key()]; ok {
+			if pr.Mergeable == "UNKNOWN" {
+				pr.Mergeable = was.Mergeable
+			}
+			if pr.MergeState == "UNKNOWN" {
+				pr.MergeState = was.MergeState
+			}
+		}
+		out[i] = pr
+	}
+	return out
 }
 
 // Frontier is how far down the board is drawable: the first rule that has not
