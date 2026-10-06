@@ -186,6 +186,9 @@ func (m Model) applyWatch(msg watchMsg) (Model, tea.Cmd) {
 		if !knownMergeable(now.Mergeable) {
 			now.Mergeable = e.pr.Mergeable
 		}
+		if !knownMergeState(now.MergeState) {
+			now.MergeState = e.pr.MergeState
+		}
 		// The board's copy keeps its own repo, so the row's key does not change.
 		now.PR.Repo = e.pr.Repo
 		e.pr, e.at = now.PR, msg.sent
@@ -259,10 +262,18 @@ func watchEvents(was github.PR, now github.Watched) []string {
 			events = append(events, "conflicts cleared")
 		}
 	}
+	// Only once it is the last thing left, so the news is "update and merge",
+	// not a running commentary on a PR that is nowhere near ready.
+	if knownMergeState(was.MergeState) && was.MergeState != "BEHIND" && now.MergeState == "BEHIND" &&
+		!now.IsDraft && waitsOnlyOnUpdate(now.PR) {
+		events = append(events, "out of date with "+terminalText(now.BaseRefName))
+	}
 	return events
 }
 
 func knownMergeable(s string) bool { return s == "MERGEABLE" || s == "CONFLICTING" }
+
+func knownMergeState(s string) bool { return s != "" && s != "UNKNOWN" }
 
 // ciOutcome counts a single failed check as failed while others still run,
 // which is what lets a failure be reported without waiting for the slowest job.

@@ -153,7 +153,7 @@ the following gutter — never push the status cluster right.
 | +2 | 1 | gutter |
 | +3 | 1 | review state glyph |
 | +4 | 1 | gutter |
-| +5 | 1 | blocker (conflict or draft) |
+| +5 | 1 | blocker (conflict, draft or behind) |
 | +6 | 1 | gutter / reserved |
 
 Every sub-slot is always emitted, blank when absent, so nothing ever shifts as
@@ -169,10 +169,17 @@ review required (`attention`) · `·` none (`muted`). Reusing `✓`/`✗` is
 deliberate: same meaning, different column, and position disambiguates. `○` is
 the one hollow glyph — "not yet done" without a convention to learn.
 
-**Blocker** — one cell, precedence **conflicts > draft**: `!` when
-`Mergeable == "CONFLICTING"` (`error`), `~` when `IsDraft` (`muted`), else
-space. A conflicted draft is primarily conflicted — the conflict is what will
-bite. Both are ASCII so no font can break this slot. Draft *additionally* mutes
+**Blocker** — one cell, precedence **conflicts > draft > behind**: `!` when
+`Mergeable == "CONFLICTING"` (`error`), `~` when `IsDraft` (`muted`), `↓`
+U+2193 when `MergeState == "BEHIND"`, else space. A conflicted draft is
+primarily conflicted — the conflict is what will bite — and a draft cannot
+merge whether or not it is behind. `BEHIND` only happens where the repo
+requires an up-to-date branch, so `↓` means "update before you can merge", not
+"some commits landed on base". It is `attention` when being behind is the last
+thing left (review not pending or refused, CI not failing) and `muted`
+otherwise, so a busy board does not light up with arrows on PRs that will be
+updated again anyway. `!` and `~` are ASCII; `↓` is the one exception, no
+riskier than the `◐` and `○` already in the cluster. Draft *additionally* mutes
 the whole title: a draft is by definition not actionable, so it recedes. The only
 case where a boolean modifies the row.
 
@@ -183,6 +190,7 @@ Monochrome read-out, with all colour stripped:
 ✓  ✓      passing, approved, clean
 ◐  ○      running, review required, clean
 ·  · ~    no CI, no review decision, draft
+✓  ✓ ↓    passing, approved, must update from base to merge
 ```
 
 ### 3.3 Colour tokens

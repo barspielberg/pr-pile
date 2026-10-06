@@ -48,18 +48,36 @@ func reviewCell(pr github.PR) (string, lipgloss.Style) {
 	}
 }
 
-// One cell for both booleans: a conflicted draft is primarily conflicted, since
-// the conflict is the thing that will bite. Both glyphs are ASCII so no font can
-// break this slot.
+// One cell for what stops a merge: a conflicted draft is primarily conflicted,
+// since the conflict is the thing that will bite, and a draft cannot merge
+// whether or not it is behind. ↓ is the cell's one non-ASCII glyph, no riskier
+// than the ◐ and ○ already beside it.
 func blockerCell(pr github.PR) (string, lipgloss.Style) {
 	switch {
 	case pr.Mergeable == "CONFLICTING":
 		return "!", errorStyle
 	case pr.IsDraft:
 		return "~", mutedStyle
+	case pr.MergeState == "BEHIND" && waitsOnlyOnUpdate(pr):
+		return "↓", attentionStyle
+	case pr.MergeState == "BEHIND":
+		return "↓", mutedStyle
 	default:
 		return " ", fgStyle
 	}
+}
+
+// waitsOnlyOnUpdate is whether being behind is the last thing left. Only then
+// does ↓ ask for attention: on a PR still waiting for review or fixes, updating
+// the branch now just means updating it again later.
+func waitsOnlyOnUpdate(pr github.PR) bool {
+	switch {
+	case pr.Review == "REVIEW_REQUIRED", pr.Review == "CHANGES_REQUESTED":
+		return false
+	case pr.CIState == "FAILURE", pr.CIState == "ERROR":
+		return false
+	}
+	return true
 }
 
 // numberWidth fits "#99999" and is named because the search has to reproduce

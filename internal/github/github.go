@@ -86,6 +86,12 @@ type PR struct {
 	// rather than about the PR. Counted so the overlay can reconcile its
 	// total against GitHub's, never listed.
 	SkippedCount int
+
+	// MergeState is mergeStateStatus, and only BEHIND is drawn: it is the one
+	// state that says the repo requires the branch to be up to date, which
+	// BehindBy cannot. The rest repeat what review and CI already show. See
+	// docs/pr-detail.md §5.12.
+	MergeState string // BEHIND | BLOCKED | CLEAN | DIRTY | HAS_HOOKS | UNSTABLE | UNKNOWN
 }
 
 func (p PR) Key() Key { return Key{Repo: p.Repo, Number: p.Number} }
@@ -102,7 +108,7 @@ func (p PR) CompareRef() string {
 // prFields is everything a row draws. The watch poll asks for the same fields
 // so a watched PR parses into the same PR the board holds.
 const prFields = `
-        number title url isDraft reviewDecision mergeable updatedAt createdAt
+        number title url isDraft reviewDecision mergeable mergeStateStatus updatedAt createdAt
         headRefName baseRefName
         isCrossRepository headRepositoryOwner { login }
         repository { nameWithOwner }
@@ -157,6 +163,7 @@ type prNode struct {
 	IsDraft        bool      `json:"isDraft"`
 	ReviewDecision string    `json:"reviewDecision"`
 	Mergeable      string    `json:"mergeable"`
+	MergeState     string    `json:"mergeStateStatus"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 	CreatedAt      time.Time `json:"createdAt"`
 	HeadRefName    string    `json:"headRefName"`
@@ -419,6 +426,7 @@ func (n prNode) toPR() PR {
 		IsDraft:     n.IsDraft,
 		Review:      n.ReviewDecision,
 		Mergeable:   n.Mergeable,
+		MergeState:  n.MergeState,
 		UpdatedAt:   n.UpdatedAt,
 		CreatedAt:   n.CreatedAt,
 		HeadRefName: n.HeadRefName,
