@@ -36,8 +36,10 @@ stacked PRs, which this board has — what it is actually targeting. Everything
 stays in tier (a) or (b) except two fields worth one on-demand request measured
 at **1.2–1.9 s**, fetched on `c` press, which I recommend accepting because it
 is paid once for the one PR you asked about rather than 100 times for the board.
-The overlay stays a glance: no scrolling, no sections you navigate, any key
-still closes it.
+The overlay stays a glance: no sections you navigate. (Later change: it now
+navigates like the `?` page -- j/k scroll, any other key closes, `?` opens
+help. It used to clip on a short pane, and j closed it and moved the board,
+so scrolling down to read the clipped lines threw the reader out.)
 
 ---
 
