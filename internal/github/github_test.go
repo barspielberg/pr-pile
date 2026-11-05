@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -378,5 +379,216 @@ func TestSearchCarriesAForksHeadOwner(t *testing.T) {
 	}
 	if got := prs[1].CompareRef(); got != "fix" {
 		t.Errorf("same repo: got %q, want fix", got)
+	}
+}
+
+// Shaped like Autofleet/autorepo stack 2904: three merged PRs keep positions
+// 1-3, so the lowest open one sits at 4 with its base retargeted to master.
+func TestSearchCarriesThePRsStack(t *testing.T) {
+	const body = `{"data":{"search":{"nodes":[
+	  {"number":2902,"stack":{"number":2904,"size":5,"baseRefName":"master"},"stackEntry":{"position":4}},
+	  {"number":7,"stack":null,"stackEntry":null}
+	]}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+	prs, err := c.Search(context.Background(), "q", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Stack{Number: 2904, Size: 5, Base: "master", Position: 4}); prs[0].Stack != want {
+		t.Errorf("got %+v, want %+v", prs[0].Stack, want)
+	}
+	if prs[1].Stack != (Stack{}) {
+		t.Errorf("a PR outside a stack got %+v", prs[1].Stack)
+	}
+}
+
+// The error GitHub sent for an unknown field on PullRequest, captured live.
+const stackRejected = `{"errors":[{"path":["query","search","nodes","... on PullRequest","stack"],
+  "extensions":{"code":"undefinedField","typeName":"PullRequest","fieldName":"stack"},
+  "message":"Field 'stack' doesn't exist on type 'PullRequest'"}]}`
+
+// rejectStacks answers any query that asks for stack with the schema error,
+// and anything else with ok. It counts the queries that asked.
+func rejectStacks(t *testing.T, ok string, asked *int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Query string }
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		if strings.Contains(in.Query, "stack") {
+			*asked++
+			_, _ = w.Write([]byte(stackRejected))
+			return
+		}
+		_, _ = w.Write([]byte(ok))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// The stack fields are undocumented. If GitHub drops them, the board loses the
+// stacks and keeps every section, and stops asking for the rest of the session.
+func TestSearchFallsBackWhenStacksAreRejected(t *testing.T) {
+	var asked int
+	srv := rejectStacks(t, `{"data":{"search":{"nodes":[{"number":1}]}}}`, &asked)
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+
+	for range 2 {
+		prs, err := c.Search(context.Background(), "q", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(prs) != 1 || prs[0].Number != 1 {
+			t.Fatalf("got %+v", prs)
+		}
+	}
+	if asked != 1 {
+		t.Errorf("asked for stacks %d times, want once", asked)
+	}
+}
+
+func TestWatchFallsBackWhenStacksAreRejected(t *testing.T) {
+	var asked int
+	srv := rejectStacks(t, `{"data":{"repository":{"p7":{"number":7,"state":"OPEN"}}}}`, &asked)
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+
+	got, err := c.Watch(context.Background(), "o/r", []int{7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[7].State != "OPEN" {
+		t.Errorf("got %+v", got)
+	}
+	if _, err := c.Search(context.Background(), "q", 10); err != nil {
+		t.Fatal(err)
+	}
+	if asked != 1 {
+		t.Errorf("asked for stacks %d times, want once", asked)
+	}
+}
+
+// Every rule searches at once, so several can be rejected before the first
+// one records it; each must still retry rather than fail its section.
+func TestConcurrentSearchesAllFallBack(t *testing.T) {
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Query string }
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		mu.Lock()
+		defer mu.Unlock()
+		if strings.Contains(in.Query, "stack") {
+			_, _ = w.Write([]byte(stackRejected))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"search":{"nodes":[]}}}`))
+	}))
+	defer srv.Close()
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = c.Search(context.Background(), "q", 10)
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("search %d: %v", i, err)
+		}
+	}
+}
+
+// Any other error still fails the section rather than being retried away.
+func TestSearchDoesNotRetryOtherErrors(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"errors":[{"path":["search"],"message":"rate limited"}]}`))
+	}))
+	defer srv.Close()
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+
+	if _, err := c.Search(context.Background(), "q", 10); err == nil {
+		t.Error("expected an error")
+	}
+	if calls != 1 || c.noStacks.Load() {
+		t.Errorf("calls = %d, noStacks = %v", calls, c.noStacks.Load())
+	}
+}
+
+func TestDetailListsTheStackBottomFirst(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Query string }
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		query = in.Query
+		_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"stack":{"entries":{"nodes":[
+		  {"position":2,"pullRequest":{"number":11,"title":"top","state":"OPEN","isDraft":true}},
+		  {"position":1,"pullRequest":{"number":10,"title":"bottom","state":"MERGED"}}
+		]}}}}}}`))
+	}))
+	defer srv.Close()
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+
+	d, err := c.Detail(context.Background(), "o/r", 11, "h", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []StackEntry{
+		{Position: 1, Number: 10, Title: "bottom", State: "MERGED"},
+		{Position: 2, Number: 11, Title: "top", State: "OPEN", IsDraft: true},
+	}
+	if fmt.Sprint(d.Stack) != fmt.Sprint(want) {
+		t.Errorf("got %+v, want %+v", d.Stack, want)
+	}
+	if _, err := c.Detail(context.Background(), "o/r", 11, "h", false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(query, "stack") {
+		t.Error("a PR in no stack should not ask for one")
+	}
+}
+
+func TestDetailFallsBackWhenStacksAreRejected(t *testing.T) {
+	var asked int
+	srv := rejectStacks(t, `{"data":{"repository":{"pullRequest":{"baseRef":{"compare":{"behindBy":4}}}}}}`, &asked)
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+
+	d, err := c.Detail(context.Background(), "o/r", 1, "h", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.BehindBy != 4 || len(d.Stack) != 0 || asked != 1 || !c.noStackEntries.Load() {
+		t.Errorf("got %+v, asked %d", d, asked)
+	}
+	// The board's stack fields are separate and may still work.
+	if c.noStacks.Load() {
+		t.Error("losing the stack entries turned off the board's stacks")
+	}
+}
+
+// One PR's stack failing to load is a data error, not a schema change, and
+// must not turn stacks off for the session.
+func TestAnErrorOnOnePRsStackKeepsStacksOn(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"data":{"search":{"nodes":[{"number":1,"stack":null}]}},
+		  "errors":[{"type":"FORBIDDEN","path":["search","nodes",0,"stack"],"message":"Resource not accessible"}]}`))
+	}))
+	defer srv.Close()
+	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
+
+	_, _ = c.Search(context.Background(), "q", 10)
+	if calls != 1 || c.noStacks.Load() {
+		t.Errorf("calls = %d, noStacks = %v", calls, c.noStacks.Load())
 	}
 }

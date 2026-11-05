@@ -172,7 +172,7 @@ func TestCopyMenuFitsAShortPane(t *testing.T) {
 			t.Fatalf("height %d: frame is %d lines", h, n)
 		}
 		// The cursor sits on the last field, so the window has to follow it.
-		if h > 2 && !strings.Contains(ansi.Strip(frame), "markdown") {
+		if h > 2 && !strings.Contains(ansi.Strip(frame), copyFields[len(copyFields)-1].name) {
 			t.Fatalf("height %d: highlighted field not on screen:\n%s", h, ansi.Strip(frame))
 		}
 	}

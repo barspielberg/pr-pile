@@ -623,6 +623,24 @@ with `d` at each row leaves requests answering questions nobody is asking, which
 is harmless and cheaper than threading cancellation through the command model.
 A PR already answered is never re-asked within a session.
 
+**A PR in a GitHub native stack ends the page with a stack block**, last so
+that its late half only grows the bottom of the page. Its header is from the
+search, so it draws at once: `stack  #4215 · 8 PRs · on master`. The entries
+come with the same second request, behind a `⠹ listing the stack` loader,
+bottom first (position 1 to the top), merged and closed PRs included:
+
+```
+  stack     #2904 · 5 PRs · on master
+    1  #2899  merged  [1/5] feat(ordering-ms): accept a one-time XLR8 code
+    4  #2902  open    [4/5] test(ordering-e2e): stub the XLR8 code exchange
+  ▌ 5  #2906  open    [5/5] refactor(ordering-e2e): rewrite the upstream stub
+```
+
+`▌` marks the PR the page is about. States are words, not glyphs: `✓` and `✗`
+already mean CI and review everywhere else. An open PR that is not on the board
+says `(not on board)`; merged and closed ones never are, so they do not. The
+size counts merged PRs, as GitHub's own stack page does.
+
 The state block is clipped **before** the checks block and never interleaved
 with it. Drop order, first dropped first: head branch, age, base (when it was
 going to say the default anyway), size, author, review, unresolved comments,
@@ -667,14 +685,22 @@ losing them would silently change the meaning of adjacent rows.
 | first (base of stack) | `╭╴` U+256D U+2574 |
 | middle | `│ ` U+2502 + space |
 | last (top of stack) | `╰╴` U+2570 U+2574 |
+| an end where a native stack goes on outside this section | `╎╴` U+254E U+2574 |
+| a middle row with a PR of the stack missing just below it | `╎ ` U+254E + space |
 | not stacked | two spaces |
+
+The dashed `╎` is the one glyph a native stack adds (§4.1): the stroke is
+broken where the chain leads to a PR this section does not show. It is `muted`
+like the rest. There is no separate glyph family for a native stack against a
+branch chain; the `d` page says which it is.
 
 They cannot be confused with status or selection on three independent grounds:
 glyph family (box-drawing vs dingbats), position (2–3 vs 11–17 vs 0), and
 treatment (always faint; selection is a filled block, no tree glyph is filled).
 
-A chain is one PR targeting another's head branch, emitted contiguously
-root-first. An unset base ref must not match an unset head ref, or every PR looks
+A chain is a GitHub native stack, ordered by each PR's position in it; a PR in
+no native stack falls back to one PR targeting another's head branch. Either
+way a chain is emitted contiguously, root-first, where its root would sort. An unset base ref must not match an unset head ref, or every PR looks
 stacked on every other and none is emitted as a root. A base/head cycle is
 guarded with a seen set. Tree glyphs are now never disturbed: the search does not
 reorder or hide rows, so a chain stays contiguous and no `╰╴` can dangle.
@@ -807,8 +833,8 @@ rejects unknown fields so a misspelling cannot silently become dead config.
 | `name` | string | required; the section header, uppercased on render |
 | `query` | string | required; GitHub search syntax. Scoped automatically: `repo:<each repo> is:pr is:open <query>` — a rule carries only what distinguishes it. `repo:` in the query is refused: GitHub ORs `repo:` qualifiers, so it would widen the rule rather than narrow it. |
 | `repos` | `[]string` | labels of the repos this rule searches; every repo when empty. Still one search, so `limit` is shared between them |
-| `limit` | int | page size: `0` defaults to 20, otherwise `1..100`. Applied as `first:N` on the search, so it truncates before `tree` groups anything |
-| `tree` | bool | group stacked PRs into a chain. Chains are computed from the PRs *in that section*, so first-match-wins splits a stack into per-section sub-chains (§4.1) |
+| `limit` | int | page size: `0` defaults to 20, otherwise `1..100`. Applied as `first:N` on the search, so it truncates before `tree` groups anything; a native stack it cuts is marked with `╎`, a branch chain is not (§4.1) |
+| `tree` | bool | group stacked PRs into a chain. Chains are drawn from the PRs *in that section*, so first-match-wins splits a stack into per-section sub-chains (§4.1) |
 | `author` | bool | show the author's initials column |
 
 Rules are fetched in parallel but revealed in order, so a slow rule near the top
@@ -816,10 +842,42 @@ stalls everything under it — cheap, high-value rules go first.
 
 ### 4.1 `tree` across section boundaries
 
-`stacks()` derives a chain from the head/base refs of the PRs a section actually
-claimed, not from the repo's true stack graph. Since first-match-wins routinely
-splits one stack across two sections, this is the common case, not an edge case.
-It degrades in a defined way:
+A section only draws the PRs it claimed, and first-match-wins routinely splits
+one stack across two sections, so this is the common case, not an edge case.
+
+**A GitHub native stack** knows its whole shape: the search returns each PR's
+stack number, size and base, and its position (1 is the bottom, on the base).
+`stacks()` groups a section's PRs by stack and orders them by position, so a
+gap is a gap rather than a break, and the section says what it is missing:
+
+| case | renders |
+|---|---|
+| whole stack in one section | full `╭╴ │ ╰╴` chain |
+| the PRs below are elsewhere | the first row is `╎╴` |
+| the PRs above are elsewhere | the last row is `╎╴` |
+| a gap in the middle | the PR stacked on the missing one is `╎ `, or `╎╴` if it is the last row |
+| one PR here, the rest elsewhere | `╎╴` on that row alone |
+| one PR open, the rest merged | no glyph — an ordinary row |
+
+Merged PRs keep their positions, and GitHub retargets the lowest open PR to the
+stack's base. So "something is missing below" is read off the base branch (it
+is not the stack's base, or not the head of the row before), never off
+position 1, or the bottom open PR of a half-merged stack would always look cut.
+"Missing above" is `position < size`, which over-reports only if a PR above
+was closed without merging.
+
+The fields are undocumented. If GitHub rejects them, the search runs again
+without them and stops asking for the session, so the board loses the stacks
+and keeps every section. Only a schema error counts: an error loading one PR's
+stack fails that fetch as any error does, and does not turn stacks off. The
+`d` page's stack entries are separate fields with their own switch, so losing
+them leaves the board's grouping alone.
+
+**A PR in no native stack** falls back to matching one PR's base to another's
+head branch, from the PRs the section holds. A native stack takes part in that
+matching as one unit, so a plain PR on top of a native stack, or a native stack
+built on a plain PR, still draws as one chain. A branch chain degrades in a
+defined way:
 
 | case | renders |
 |---|---|
@@ -829,14 +887,15 @@ It degrades in a defined way:
 | a gap in the middle | the sub-chain below the gap groups; the PR above it falls out as a plain row |
 
 The glyph sequence is always well-formed and a child is never orphaned from a
-parent that is on screen. The honest reading of `╭╴` is "stacked on something in
-this section", not "stacked" — the gap case is the one where a root is stacked
-on something not shown and nothing says so.
+parent that is on screen. For a branch chain, the honest reading of `╭╴` is
+"stacked on something in this section", not "stacked": the gap case is the one
+where a root is stacked on something not shown and nothing says so.
 
 Because `limit` is `first:N` on the search and results come back newest-first,
-a limit that cuts a chain cuts it at the **root** (the oldest PR), leaving the
-children to regroup into a valid but shorter chain. Tree rules therefore want a
-limit above the number of PRs they match.
+a limit that cuts a chain cuts it at the **root** (the oldest PR). A native
+stack marks the cut with `╎╴`; a branch chain regroups into a valid but shorter
+chain with no sign of it. Tree rules therefore still want a limit above the
+number of PRs they match.
 
 ### Action
 
@@ -1049,8 +1108,9 @@ output is piped, so test the resolved path rather than the exit code.
 | `l` `h` / `→` `←` | next / previous section (empty sections skipped; `h` goes to the start of the current section first, then back) |
 | `g` `G` / home end | top / bottom. Documented as `g` rather than `gg`: bare `g` is the whole move, so advertising a chord that is one key repeated read as confusing. Typing `gg` still works — top is its own fixed point, so the second press lands in the same place, and there is no pending-key mode to wedge |
 | `enter` `o` | open in the default browser. Three or more at once asks first (§4.5) |
+| `S` | open the GitHub stack page of every selected PR, once per stack, since several PRs of one stack are the usual selection. A PR in no stack says `not in a stack`. Three or more stacks asks first, as `enter` does. The API has no url for a stack, so it is built as `github.com/<repo>/stack/<number>`. A config that already binds `S` to an action now fails to load |
 | `y` | copy the url of every selected PR, or of the row under the cursor when nothing is selected; several are joined one per line |
-| `Y` | copy menu, after lazygit's: number, title, url, branch, author login or a markdown link, each on its own letter with a preview. It acts on the same PRs as `y`, one value per line; any key that is not a field or `j`/`k`/`enter` closes it |
+| `Y` | copy menu, after lazygit's: number, title, url, branch, author login, a markdown link or the stack link, each on its own letter with a preview. It acts on the same PRs as `y`, one value per line, except the stack link, which is copied once per stack; any key that is not a field or `j`/`k`/`enter` closes it |
 | `space` | select or deselect the PR under the cursor |
 | `v` | select a contiguous range from here; `v` again leaves the mode |
 | `r` | reload |

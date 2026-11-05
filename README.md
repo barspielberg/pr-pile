@@ -105,7 +105,7 @@ actions:
 
 Select PRs with `space` (one) or `v` (a range), then `y` copies every selected
 url, one per line. `Y` opens a copy menu for the number, title, url, branch,
-author or a markdown link instead, also one per line.
+author, a markdown link or the stack link instead, also one per line.
 
 `m` watches the selected PRs (or the one under the cursor) and `m` again stops.
 Watched PRs are checked on every refresh: the timed one (`refresh`) and `r`.
@@ -253,6 +253,7 @@ authors.
 | `g` / `G` | top / bottom (also `home` / `end`) |
 | `ctrl+d` / `ctrl+u` | down / up half a page (`pgdn` / `pgup` move a full page) |
 | `enter` / `o` | open in the default browser |
+| `S` | open the PR's stack page on GitHub |
 | `d` | detail for the selected PR: failing and running checks named, passing counted, plus conflict or a required update from base, unresolved comments, author, reviewer, size and branches |
 | `y` | copy the PR url to the clipboard (`pbcopy`) |
 | `m` | watch / stop watching |

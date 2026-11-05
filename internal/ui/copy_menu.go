@@ -14,40 +14,45 @@ import (
 type copyField struct {
 	key, name, plural string
 	value             func(github.PR) string
+	// distinct copies a value once however many PRs share it.
+	distinct bool
 }
 
 var (
-	urlField = copyField{"u", "url", "urls", func(pr github.PR) string { return pr.URL }}
+	urlField = copyField{key: "u", name: "url", plural: "urls", value: func(pr github.PR) string { return pr.URL }}
 
 	// The author is the login, not the display name: the login is what you
 	// @-mention, and the display name is missing for a third of this board.
 	copyFields = []copyField{
-		{"n", "number", "numbers", func(pr github.PR) string { return "#" + strconv.Itoa(pr.Number) }},
-		{"t", "title", "titles", func(pr github.PR) string { return pr.Title }},
+		{key: "n", name: "number", plural: "numbers", value: func(pr github.PR) string { return "#" + strconv.Itoa(pr.Number) }},
+		{key: "t", name: "title", plural: "titles", value: func(pr github.PR) string { return pr.Title }},
 		urlField,
-		{"b", "branch", "branches", func(pr github.PR) string { return pr.HeadRefName }},
-		{"a", "author", "authors", func(pr github.PR) string {
+		{key: "b", name: "branch", plural: "branches", value: func(pr github.PR) string { return pr.HeadRefName }},
+		{key: "a", name: "author", plural: "authors", value: func(pr github.PR) string {
 			if pr.Author == "" {
 				return ""
 			}
 			return "@" + pr.Author
 		}},
-		{"m", "markdown", "markdown links", func(pr github.PR) string {
+		{key: "m", name: "markdown", plural: "markdown links", value: func(pr github.PR) string {
 			if pr.URL == "" {
 				return ""
 			}
 			return fmt.Sprintf("[#%d %s](%s)", pr.Number, pr.Title, pr.URL)
 		}},
+		{key: "s", name: "stack link", plural: "stack links", value: github.PR.StackURL, distinct: true},
 	}
 )
 
 // fieldValues also returns the number of the PR the first value came from,
 // which is not prs[0] when that PR has no value.
 func fieldValues(prs []github.PR, f copyField) (values []string, first int) {
+	seen := map[string]bool{}
 	for _, pr := range prs {
 		// A PR with no value contributes nothing rather than an empty line, and
 		// the reported count follows what was actually copied.
-		if v := f.value(pr); v != "" {
+		if v := f.value(pr); v != "" && !(f.distinct && seen[v]) {
+			seen[v] = true
 			if values == nil {
 				first = pr.Number
 			}

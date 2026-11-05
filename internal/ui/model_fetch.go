@@ -57,12 +57,12 @@ func (m Model) fetchDetail(pr github.PR) tea.Cmd {
 
 	key, head, generation := pr.Key(), pr.HeadRefName, m.fetchGeneration
 	m.inflight[key] = detailRequest{generation: generation, head: head}
-	repo, compare := pr.Repo, pr.CompareRef()
+	repo, compare, stacked := pr.Repo, pr.CompareRef(), pr.Stack.Number != 0
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		d, err := client.Detail(ctx, repo, key.Number, compare)
+		d, err := client.Detail(ctx, repo, key.Number, compare, stacked)
 		d.Repo, d.Number = key.Repo, key.Number // so a failed response is still attributable
 		return detailMsg{generation: generation, head: head, detail: d, err: err}
 	}
