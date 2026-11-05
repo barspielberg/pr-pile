@@ -219,57 +219,119 @@ func layout(prs []github.PR, tree bool) []Row {
 // one PR must not stack on the other's.
 type branch struct{ repo, name string }
 
-// stacks finds chains where one PR targets another's head branch and emits
-// each chain contiguously, root first.
+// stack is a GitHub native stack within one repo.
+type stack struct {
+	repo   string
+	number int
+}
+
+// stacks emits each chain contiguously, bottom first, where its bottom PR
+// would sort. A native stack is kept together and ordered by position; then
+// one PR, or one native stack, chains onto another whose head branch it
+// targets, so a plain PR on a native stack still draws with it.
 func stacks(prs []github.PR) []Row {
-	byBase := map[branch][]github.PR{}
-	heads := map[branch]bool{}
+	order := map[github.Key]int{}
+	for i, pr := range prs {
+		order[pr.Key()] = i
+	}
+	var units [][]github.PR
+	at := map[stack]int{}
 	for _, pr := range prs {
-		// An empty ref would make every PR look stacked on every other, since
-		// an unset base would "match" an unset head.
-		if pr.HeadRefName != "" {
-			heads[branch{pr.Repo, pr.HeadRefName}] = true
+		if pr.Stack.Number == 0 {
+			units = append(units, []github.PR{pr})
+			continue
+		}
+		s := stack{pr.Repo, pr.Stack.Number}
+		if i, ok := at[s]; ok {
+			units[i] = append(units[i], pr)
+			continue
+		}
+		at[s] = len(units)
+		units = append(units, []github.PR{pr})
+	}
+	for _, u := range units {
+		sort.SliceStable(u, func(i, j int) bool { return u[i].Stack.Position < u[j].Stack.Position })
+	}
+	sort.SliceStable(units, func(i, j int) bool { return order[units[i][0].Key()] < order[units[j][0].Key()] })
+
+	owner := map[branch]int{}
+	for i, u := range units {
+		for _, pr := range u {
+			// An empty ref would make every PR look stacked on every other,
+			// since an unset base would "match" an unset head.
+			if pr.HeadRefName != "" {
+				owner[branch{pr.Repo, pr.HeadRefName}] = i
+			}
 		}
 	}
-	stacked := func(pr github.PR) bool {
-		return pr.BaseRefName != "" && heads[branch{pr.Repo, pr.BaseRefName}]
+	parent := func(i int) bool {
+		bottom := units[i][0]
+		p, ok := owner[branch{bottom.Repo, bottom.BaseRefName}]
+		return bottom.BaseRefName != "" && ok && p != i
 	}
-	for _, pr := range prs {
-		if stacked(pr) {
-			base := branch{pr.Repo, pr.BaseRefName}
-			byBase[base] = append(byBase[base], pr)
+	kids := map[int][]int{}
+	for i, u := range units {
+		if parent(i) {
+			p := owner[branch{u[0].Repo, u[0].BaseRefName}]
+			kids[p] = append(kids[p], i)
 		}
 	}
 
 	var rows []Row
-	for _, pr := range prs {
-		// Roots only: a PR stacked on another is emitted by its parent's chain.
-		if stacked(pr) {
+	for i := range units {
+		// Roots only: a unit stacked on another is emitted by its parent's chain.
+		if parent(i) {
 			continue
 		}
-		chain := walk(pr, byBase, map[github.Key]bool{})
-		if len(chain) == 1 {
-			rows = append(rows, Row{PR: chain[0]})
-			continue
-		}
-		for i, p := range chain {
-			rows = append(rows, Row{PR: p, Prefix: glyph(i, len(chain)), Last: i == len(chain)-1})
-		}
+		rows = append(rows, chainRows(walk(i, units, kids, map[int]bool{}))...)
 	}
 	return rows
 }
 
 // seen guards against a base/head cycle, which would otherwise recurse forever.
-func walk(pr github.PR, byBase map[branch][]github.PR, seen map[github.Key]bool) []github.PR {
-	if seen[pr.Key()] {
+func walk(i int, units [][]github.PR, kids map[int][]int, seen map[int]bool) []github.PR {
+	if seen[i] {
 		return nil
 	}
-	seen[pr.Key()] = true
-	out := []github.PR{pr}
-	for _, child := range byBase[branch{pr.Repo, pr.HeadRefName}] {
-		out = append(out, walk(child, byBase, seen)...)
+	seen[i] = true
+	out := append([]github.PR(nil), units[i]...)
+	for _, k := range kids[i] {
+		out = append(out, walk(k, units, kids, seen)...)
 	}
 	return out
+}
+
+// chainRows draws one chain. A native stack knows what is missing, unlike a
+// branch chain: a ╎ marks each end or gap where it goes on outside this
+// section, whether another section claimed that PR or the limit cut it.
+// Merged PRs keep their positions, so "below" is read off the base branch
+// rather than off position 1.
+func chainRows(chain []github.PR) []Row {
+	n := len(chain)
+	heads := map[string]bool{}
+	for _, pr := range chain {
+		heads[pr.HeadRefName] = true
+	}
+	cut := func(pr github.PR) bool {
+		return pr.Stack.Number != 0 && pr.BaseRefName != pr.Stack.Base && !heads[pr.BaseRefName]
+	}
+	end := chain[n-1]
+	top := end.Stack.Number != 0 && end.Stack.Position < end.Stack.Size
+	rows := make([]Row, n)
+	for i, pr := range chain {
+		first, last := i == 0, i == n-1
+		g := glyph(i, n)
+		switch {
+		case (first && cut(pr)) || (last && (cut(pr) || top)):
+			g = "╎╴"
+		case n == 1:
+			g = ""
+		case !first && !last && cut(pr):
+			g = "╎ "
+		}
+		rows[i] = Row{PR: pr, Prefix: g, Last: last}
+	}
+	return rows
 }
 
 func glyph(i, n int) string {

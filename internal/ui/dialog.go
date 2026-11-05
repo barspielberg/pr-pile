@@ -79,6 +79,9 @@ func (m Model) confirmQuestion() string {
 	if m.confirmVerb != "" {
 		return fmt.Sprintf("%s on %d PRs?", m.confirmVerb, len(m.confirmOpen))
 	}
+	if m.confirmStacks {
+		return fmt.Sprintf("open %d stacks in the browser?", len(m.confirmOpen))
+	}
 	return fmt.Sprintf("open %d PRs in the browser?", len(m.confirmOpen))
 }
 

@@ -47,9 +47,11 @@ type Model struct {
 	// when none is up), the action key it guards (empty for the builtin open),
 	// and what to call it on the footer. The set is held rather than a count
 	// so a refresh landing mid-prompt cannot change what the answer acts on.
+	// confirmStacks makes the builtin open take each PR's stack page.
 	confirmOpen   []github.PR
 	confirmAction string
 	confirmVerb   string
+	confirmStacks bool
 
 	// The open `Y` menu: the PRs it copies from (nil when closed) and the
 	// highlighted field.

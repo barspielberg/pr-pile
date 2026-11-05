@@ -126,7 +126,7 @@ func TestValidateRejectsWhitespaceActionFields(t *testing.T) {
 // The guide's rule is that a taken key is refused loudly rather than silently
 // losing to the builtin.
 func TestSelectionKeysAreReserved(t *testing.T) {
-	for _, key := range []string{"v", " ", "space"} {
+	for _, key := range []string{"v", " ", "space", "S"} {
 		c := Config{
 			Repos:   []Repo{{Name: "o/r"}},
 			Rules:   []Rule{{Name: "Mine", Query: "author:@me"}},

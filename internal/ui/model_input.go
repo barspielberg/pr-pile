@@ -73,14 +73,59 @@ func (m Model) doOpen(prs []github.PR) (Model, tea.Cmd) {
 	if len(urls) == 0 {
 		return m.setStatus("no URL for this PR"), nil
 	}
+	next := m
+	next.markSeen(prs...)
+	return next.openAll(urls, "PRs")
+}
+
+// openStacks opens the stack page of every selected PR, once per stack:
+// selecting several PRs of one stack is the common case, and wants one tab.
+func (m Model) openStacks() (Model, tea.Cmd) {
+	prs := m.actionPRs()
+	if len(prs) == 0 {
+		return m, nil
+	}
+	stacks := oneEachStack(prs)
+	if len(stacks) == 0 {
+		return m.setStatus("not in a stack"), nil
+	}
+	if len(stacks) >= confirmThreshold {
+		m.confirmOpen, m.confirmStacks = stacks, true
+		return m, nil
+	}
+	return m.doOpenStacks(stacks)
+}
+
+func (m Model) doOpenStacks(stacks []github.PR) (Model, tea.Cmd) {
+	urls := make([]string, len(stacks))
+	for i, pr := range stacks {
+		urls[i] = pr.StackURL()
+	}
+	return m.openAll(urls, "stacks")
+}
+
+// oneEachStack keeps the first PR of each stack, in order, and drops PRs that
+// are in none.
+func oneEachStack(prs []github.PR) []github.PR {
+	seen := map[string]bool{}
+	var out []github.PR
+	for _, pr := range prs {
+		if url := pr.StackURL(); url != "" && !seen[url] {
+			seen[url] = true
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+func (m Model) openAll(urls []string, plural string) (Model, tea.Cmd) {
 	m.statusSeq++
 	seq := m.statusSeq
 	text := ""
 	if len(urls) > 1 {
-		text = fmt.Sprintf("opened %d PRs", len(urls))
+		text = fmt.Sprintf("opened %d %s", len(urls), plural)
 	}
 	next := m
-	next.markSeen(prs...)
 	next.clearSelection()
 	next.clearConfirm()
 	return next, func() tea.Msg {
@@ -247,6 +292,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter", "o":
 		next, cmd := m.openSelected()
 		return next, cmd
+	case "S":
+		next, cmd := m.openStacks()
+		return next, cmd
 	case "y":
 		next, cmd := m.copySelected()
 		return next, cmd
@@ -355,8 +403,11 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "y", "enter":
-		prs, key := m.confirmOpen, m.confirmAction
+		prs, key, stacks := m.confirmOpen, m.confirmAction, m.confirmStacks
 		m.clearConfirm()
+		if stacks {
+			return m.doOpenStacks(prs)
+		}
 		if key != "" {
 			next, cmd, _ := m.runAction(key, prs)
 			return next, cmd
@@ -371,5 +422,5 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) clearConfirm() {
-	m.confirmOpen, m.confirmAction, m.confirmVerb = nil, "", ""
+	m.confirmOpen, m.confirmAction, m.confirmVerb, m.confirmStacks = nil, "", "", false
 }
