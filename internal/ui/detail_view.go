@@ -50,17 +50,17 @@ func (m Model) detailOverlay() string {
 	return strings.Join(lines, "\n")
 }
 
-// overlayBody is both blocks, unclipped. The checks block comes first so it is
+// overlayBody is every block, unclipped. The checks block comes first so it is
 // what a short pane shows before any scrolling. See docs/pr-detail.md §6.2.
 func (m Model) overlayBody(pr github.PR) []string {
-	checks := m.checkLines(pr)
-	state := m.stateLines(pr)
-	if len(state) == 0 {
-		return checks
+	out := append([]string(nil), m.checkLines(pr)...)
+	for _, block := range [][]string{m.stateLines(pr), m.stackLines(pr)} {
+		if len(block) > 0 {
+			out = append(out, "")
+			out = append(out, block...)
+		}
 	}
-	out := append([]string(nil), checks...)
-	out = append(out, "")
-	return append(out, state...)
+	return out
 }
 
 // detailRows is how many body lines the page shows: the pane less the header,

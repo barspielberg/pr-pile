@@ -260,13 +260,18 @@ Two cases are worth knowing about:
 In every case the glyph sequence is well-formed and no child is orphaned from its
 parent — the layout degrades to a shorter chain, never a broken one.
 
+Both cases apply only to a chain found by branch. A GitHub native stack knows
+its whole shape, so its rows keep their order across a gap, and a dashed `╎`
+marks each end or gap where the stack goes on in another section
+(`DESIGN.md` §4.1).
+
 ### `limit` can hide a stack's base
 
 `limit` is `first: N` on the search itself, so GitHub truncates before the tool
 sees anything. Since results come back newest-first and the newest PR in a stack
 is its *top*, a limit that cuts a chain cuts it at the **root** — leaving the
 children to regroup into a valid but shorter chain, with no sign the base is
-missing.
+missing. A native stack does show it, with `╎╴` on its first row.
 
 This is why the tree rules above carry `limit: 50` rather than the default 20.
 Keep a tree rule's limit comfortably above its raw count (the table above: the

@@ -2,6 +2,7 @@ package board
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -290,5 +291,114 @@ func TestRefreshKeepsKnownMergeStateThroughUnknown(t *testing.T) {
 	b.Apply(Result{Index: 0, PRs: []github.PR{clean}})
 	if got := b.Sections()[0].Rows[0].PR.MergeState; got != "CLEAN" {
 		t.Errorf("a real answer must replace the carried one, got %q", got)
+	}
+}
+
+// stacked is a PR at position in native stack 7 of size, on master at the
+// bottom, with branches named after positions.
+func stacked(position, size int, updated int64) github.PR {
+	base := "master"
+	if position > 1 {
+		base = fmt.Sprintf("s%d", position-1)
+	}
+	return github.PR{
+		Repo: "o/r", Number: 100 + position, UpdatedAt: time.Unix(updated, 0),
+		HeadRefName: fmt.Sprintf("s%d", position), BaseRefName: base,
+		Stack: github.Stack{Number: 7, Size: size, Base: "master", Position: position},
+	}
+}
+
+func treeRows(prs ...github.PR) []Row {
+	b := New(config.Config{Repos: []config.Repo{{Name: "o/r"}}, Rules: []config.Rule{{Name: "m", Query: "x", Tree: true}}})
+	b.Apply(Result{Index: 0, PRs: prs})
+	return b.Sections()[0].Rows
+}
+
+func prefixes(rows []Row) []string {
+	out := []string{}
+	for _, r := range rows {
+		out = append(out, fmt.Sprintf("%d%s", r.PR.Number, r.Prefix))
+	}
+	return out
+}
+
+func TestNativeStackOrdersByPosition(t *testing.T) {
+	rows := treeRows(stacked(2, 3, 5), pr(1), stacked(3, 3, 1), stacked(1, 3, 2))
+	want := []string{"101╭╴", "102│ ", "103╰╴", "1"}
+	if got := prefixes(rows); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// Stack 2904: the first three merged and #2902 was retargeted to master, so
+// position 4 is the bottom of what is open and nothing is missing below it.
+func TestNativeStackBottomAfterMergesIsClosed(t *testing.T) {
+	four, five := stacked(4, 5, 2), stacked(5, 5, 1)
+	four.BaseRefName = "master"
+	if got := prefixes(treeRows(four, five)); fmt.Sprint(got) != "[104╭╴ 105╰╴]" {
+		t.Errorf("got %v", got)
+	}
+}
+
+// What a section misses of a stack, it says: another section claimed it, or
+// the limit cut it.
+func TestNativeStackMarksWhatGoesOnElsewhere(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		prs  []github.PR
+		want string
+	}{
+		{"above", []github.PR{stacked(1, 3, 2), stacked(2, 3, 1)}, "[101╭╴ 102╎╴]"},
+		{"below", []github.PR{stacked(2, 3, 2), stacked(3, 3, 1)}, "[102╎╴ 103╰╴]"},
+		{"gap", []github.PR{stacked(1, 4, 3), stacked(2, 4, 2), stacked(4, 4, 1)}, "[101╭╴ 102│  104╎╴]"},
+		{"middle gap", []github.PR{stacked(1, 4, 3), stacked(3, 4, 2), stacked(4, 4, 1)}, "[101╭╴ 103╎  104╰╴]"},
+		{"lone top", []github.PR{stacked(3, 3, 1)}, "[103╎╴]"},
+		{"lone bottom", []github.PR{stacked(1, 3, 1)}, "[101╎╴]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fmt.Sprint(prefixes(treeRows(tc.prs...))); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A lone PR whose stack is otherwise all merged is a plain row.
+func TestNativeStackOfOneOpenPRDrawsNoGlyph(t *testing.T) {
+	last := stacked(3, 3, 1)
+	last.BaseRefName = "master"
+	if got := fmt.Sprint(prefixes(treeRows(last))); got != "[103]" {
+		t.Errorf("got %v", got)
+	}
+}
+
+// A PR outside any native stack still chains by branch, beside native ones.
+func TestBranchChainsStillWorkBesideNativeStacks(t *testing.T) {
+	a := github.PR{Repo: "o/r", Number: 1, HeadRefName: "a", BaseRefName: "main", UpdatedAt: time.Unix(9, 0)}
+	b := github.PR{Repo: "o/r", Number: 2, HeadRefName: "b", BaseRefName: "a", UpdatedAt: time.Unix(8, 0)}
+	got := fmt.Sprint(prefixes(treeRows(a, b, stacked(1, 1, 1))))
+	if got != "[1╭╴ 2╰╴ 101]" {
+		t.Errorf("got %v", got)
+	}
+}
+
+// A PR in no native stack that targets one's branch still draws on top of it,
+// as it did when every chain was found by branch.
+func TestPlainPROnANativeStackChainsWithIt(t *testing.T) {
+	plain := github.PR{Repo: "o/r", Number: 9, HeadRefName: "p", BaseRefName: "s2", UpdatedAt: time.Unix(9, 0)}
+	got := fmt.Sprint(prefixes(treeRows(plain, pr(1), stacked(1, 2, 3), stacked(2, 2, 2))))
+	if got != "[101╭╴ 102│  9╰╴ 1]" {
+		t.Errorf("got %v", got)
+	}
+}
+
+// And a native stack built on a plain PR's branch draws under it.
+func TestNativeStackOnAPlainPRChainsUnderIt(t *testing.T) {
+	plain := github.PR{Repo: "o/r", Number: 9, HeadRefName: "p", BaseRefName: "main", UpdatedAt: time.Unix(1, 0)}
+	one, two := stacked(1, 2, 3), stacked(2, 2, 2)
+	one.BaseRefName, one.Stack.Base, two.Stack.Base = "p", "p", "p"
+	got := fmt.Sprint(prefixes(treeRows(one, two, plain)))
+	if got != "[9╭╴ 101│  102╰╴]" {
+		t.Errorf("got %v", got)
 	}
 }

@@ -123,9 +123,10 @@ repos:
 refresh: 3m
 
 rules:
-  # A chain is worked out from the PRs in this section only, and limit truncates
-  # before that happens -- keep a tree rule's limit above the number of PRs it
-  # matches, or a stack can lose its base and regroup into a shorter chain.
+  # A chain is drawn from the PRs in this section only, and limit truncates
+  # before that happens. A GitHub native stack marks what it is missing with a
+  # dashed ╎; a chain found by branch cannot, so keep a tree rule's limit above
+  # the number of PRs it matches or such a chain can lose its base unseen.
   - name: Mine
     query: author:@me
     tree: true          # group stacked PRs into a chain
@@ -352,6 +353,7 @@ var reservedActionKeys = map[string]bool{
 	// loudly rather than silently ignored.
 	"v": true, " ": true, "space": true, "m": true,
 	"enter": true, "o": true, "r": true, "d": true, "y": true, "Y": true, "?": true,
+	"S": true,
 	"j": true, "down": true, "k": true, "up": true, "l": true, "right": true,
 	"h": true, "left": true, "g": true, "home": true, "G": true, "end": true,
 	"ctrl+d": true, "ctrl+u": true, "pgdown": true, "pgup": true,

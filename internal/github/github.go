@@ -14,7 +14,10 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"slices"
+	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,6 +30,13 @@ type Client struct {
 	// endpoint is a field only so tests can point it at a stub; production
 	// always uses the const above.
 	endpoint string
+
+	// noStacks is set once GitHub rejects the stack fields, so the rest of the
+	// session asks without them instead of failing and retrying every time.
+	// The detail page's stack entries are a separate set of fields, so losing
+	// them does not cost the board its stacks.
+	noStacks       atomic.Bool
+	noStackEntries atomic.Bool
 }
 
 func (c *Client) url() string {
@@ -92,9 +102,29 @@ type PR struct {
 	// BehindBy cannot. The rest repeat what review and CI already show. See
 	// docs/pr-detail.md §5.12.
 	MergeState string // BEHIND | BLOCKED | CLEAN | DIRTY | HAS_HOOKS | UNSTABLE | UNKNOWN
+
+	Stack Stack // zero when the PR is not in a native stack
+}
+
+// Stack is the PR's place in a GitHub native stack. Merged PRs keep their
+// positions, so the lowest open PR can sit above 1; it is the one whose base
+// is Base.
+type Stack struct {
+	Number   int
+	Size     int
+	Base     string
+	Position int // 1 is the bottom, on Base; Size is the top
 }
 
 func (p PR) Key() Key { return Key{Repo: p.Repo, Number: p.Number} }
+
+// StackURL is built by hand: the API has no url field for a stack.
+func (p PR) StackURL() string {
+	if p.Stack.Number == 0 || p.Repo == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/stack/%d", p.Repo, p.Stack.Number)
+}
 
 // CompareRef names the PR's head for a compare against its base. A fork's
 // branch is not in the base repo, so it needs the owner:branch form.
@@ -113,7 +143,7 @@ const prFields = `
         isCrossRepository headRepositoryOwner { login }
         repository { nameWithOwner }
         additions deletions changedFiles
-        author { login ... on User { name } }
+        author { login ... on User { name } }` + stackMarker + `
         commits(last: 1) {
           nodes {
             commit {
@@ -135,11 +165,66 @@ const prFields = `
           }
         }`
 
+// stackFields are undocumented, and an unknown field fails the whole query,
+// so they replace stackMarker only until GitHub rejects them.
+const (
+	stackMarker = "\n        #stack"
+	stackFields = "\n        stack { number size baseRefName } stackEntry { position }"
+)
+
+func fields(stacks bool) string {
+	if !stacks {
+		return strings.Replace(prFields, stackMarker, "", 1)
+	}
+	return strings.Replace(prFields, stackMarker, stackFields, 1)
+}
+
+// stacksRejected is GitHub refusing the stack fields themselves, which is a
+// schema change to ride out. Only a query that failed validation carries an
+// extensions code; an error fetching one PR's stack carries a type instead
+// (FORBIDDEN, NOT_FOUND) and must not cost the session its stacks.
+func stacksRejected(errs []gqlError) bool {
+	for _, e := range errs {
+		if e.Extensions.Code == "" || e.Type != "" {
+			continue
+		}
+		if slices.Contains(e.Path, any("stack")) || slices.Contains(e.Path, any("stackEntry")) {
+			return true
+		}
+	}
+	return false
+}
+
+type gqlError struct {
+	Message    string `json:"message"`
+	Type       string `json:"type"`
+	Path       []any  `json:"path"`
+	Extensions struct {
+		Code string `json:"code"`
+	} `json:"extensions"`
+}
+
+// postStacks sends query(true) unless off says GitHub has rejected those
+// stack fields before. If it rejects them now, off is set and query(false)
+// is sent instead, so a schema change costs the stacks and nothing else.
+func postStacks[T any](ctx context.Context, c *Client, off *atomic.Bool, stacks bool,
+	query func(stacks bool) string, vars map[string]any, errs func(T) []gqlError) (T, error) {
+	stacks = stacks && !off.Load()
+	var out T
+	if err := c.post(ctx, query(stacks), vars, &out); err != nil || !stacks || !stacksRejected(errs(out)) {
+		return out, err
+	}
+	off.Store(true)
+	var retry T
+	err := c.post(ctx, query(false), vars, &retry)
+	return retry, err
+}
+
 const searchQuery = `
 query($q: String!, $n: Int!) {
   search(query: $q, type: ISSUE, first: $n) {
     nodes {
-      ... on PullRequest {` + prFields + `
+      ... on PullRequest {%s
       }
     }
   }
@@ -151,9 +236,7 @@ type graphQLResponse struct {
 			Nodes []prNode `json:"nodes"`
 		} `json:"search"`
 	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
+	Errors []gqlError `json:"errors"`
 }
 
 type prNode struct {
@@ -182,6 +265,14 @@ type prNode struct {
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	} `json:"author"`
+	Stack *struct {
+		Number      int    `json:"number"`
+		Size        int    `json:"size"`
+		BaseRefName string `json:"baseRefName"`
+	} `json:"stack"`
+	StackEntry *struct {
+		Position int `json:"position"`
+	} `json:"stackEntry"`
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
@@ -291,35 +382,15 @@ func (c *Client) CheckRepo(ctx context.Context, repo string) error {
 // Search runs one rule's query. The search index is noisy (the same query has
 // ranged 1.4s-4.1s), so callers should run rules concurrently.
 func (c *Client) Search(ctx context.Context, query string, limit int) ([]PR, error) {
-	body, err := json.Marshal(map[string]any{
-		"query":     searchQuery,
-		"variables": map[string]any{"q": query, "n": limit},
-	})
+	out, err := postStacks(ctx, c, &c.noStacks, true,
+		func(stacks bool) string { return fmt.Sprintf(searchQuery, fields(stacks)) },
+		map[string]any{"q": query, "n": limit},
+		func(r graphQLResponse) []gqlError { return r.Errors })
 	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github returned %s", resp.Status)
-	}
-	var out graphQLResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
 	// GraphQL reports query errors in a 200 body, so this is not redundant
-	// with the status check above.
+	// with the status check in post.
 	if len(out.Errors) > 0 {
 		return nil, fmt.Errorf("github: %s", out.Errors[0].Message)
 	}
@@ -329,6 +400,32 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]PR, err
 		prs = append(prs, n.toPR())
 	}
 	return prs, nil
+}
+
+// post sends one GraphQL request and decodes the body into out. Errors in a
+// 200 body are left in out for the caller, which knows which ones are fatal.
+func (c *Client) post(ctx context.Context, query string, vars map[string]any, out any) error {
+	body, err := json.Marshal(map[string]any{"query": query, "variables": vars})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github returned %s", resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 // Watched is a PR as the watch poll saw it. State is OPEN, MERGED or CLOSED:
@@ -349,50 +446,28 @@ func (c *Client) Watch(ctx context.Context, repo string, numbers []int) (map[int
 	if !ok {
 		return nil, fmt.Errorf("repo %q must be owner/name", repo)
 	}
-	var q strings.Builder
-	q.WriteString("query($o: String!, $r: String!) {\n  repository(owner: $o, name: $r) {\n")
-	for _, n := range numbers {
-		fmt.Fprintf(&q, "    p%d: pullRequest(number: %d) { state %s\n    }\n", n, n, prFields)
+	query := func(stacks bool) string {
+		var q strings.Builder
+		q.WriteString("query($o: String!, $r: String!) {\n  repository(owner: $o, name: $r) {\n")
+		for _, n := range numbers {
+			fmt.Fprintf(&q, "    p%d: pullRequest(number: %d) { state %s\n    }\n", n, n, fields(stacks))
+		}
+		q.WriteString("  }\n}")
+		return q.String()
 	}
-	q.WriteString("  }\n}")
-
-	body, err := json.Marshal(map[string]any{
-		"query":     q.String(),
-		"variables": map[string]any{"o": owner, "r": name},
-	})
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github returned %s", resp.Status)
-	}
-	var out struct {
+	vars := map[string]any{"o": owner, "r": name}
+	type response struct {
 		Data struct {
 			Repository map[string]*struct {
 				prNode
 				State string `json:"state"`
 			} `json:"repository"`
 		} `json:"data"`
-		Errors []struct {
-			Message string   `json:"message"`
-			Type    string   `json:"type"`
-			Path    []string `json:"path"`
-		} `json:"errors"`
+		Errors []gqlError `json:"errors"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	out, err := postStacks(ctx, c, &c.noStacks, true, query, vars,
+		func(r response) []gqlError { return r.Errors })
+	if err != nil {
 		return nil, err
 	}
 
@@ -438,6 +513,14 @@ func (n prNode) toPR() PR {
 	}
 	if n.IsCross && n.HeadOwner != nil {
 		pr.HeadOwner = n.HeadOwner.Login
+	}
+	if n.Stack != nil && n.StackEntry != nil {
+		pr.Stack = Stack{
+			Number:   n.Stack.Number,
+			Size:     n.Stack.Size,
+			Base:     n.Stack.BaseRefName,
+			Position: n.StackEntry.Position,
+		}
 	}
 	if len(n.Commits.Nodes) == 0 {
 		return pr
@@ -625,6 +708,18 @@ type Detail struct {
 	Unresolved    int
 	Reviewers     []Reviewer
 	DefaultBranch string
+
+	// Stack is every PR in the PR's native stack, bottom first, merged and
+	// closed ones included. Empty when it is in none.
+	Stack []StackEntry
+}
+
+type StackEntry struct {
+	Position int
+	Number   int
+	Title    string
+	State    string // OPEN | MERGED | CLOSED
+	IsDraft  bool
 }
 
 func (d Detail) Key() Key { return Key{Repo: d.Repo, Number: d.Number} }
@@ -647,45 +742,35 @@ query($o: String!, $r: String!, $n: Int!, $head: String!) {
       reviewThreads(first: 100) { nodes { isResolved isOutdated } }
       latestOpinionatedReviews(first: 10) {
         nodes { state author { login ... on User { name } } }
-      }
+      }%s
     }
   }
 }`
 
+const stackEntries = `
+      stack {
+        entries(first: 100) {
+          nodes { position pullRequest { number title state isDraft } }
+        }
+      }`
+
 // Detail fetches the on-demand half of the overlay. The caller renders without
 // it first and lets these lines arrive late, so a failure here costs the two
-// lines and nothing else.
-func (c *Client) Detail(ctx context.Context, repo string, number int, head string) (Detail, error) {
+// lines and nothing else. The stack's entries are asked for only when the
+// search said the PR is in one.
+func (c *Client) Detail(ctx context.Context, repo string, number int, head string, stacked bool) (Detail, error) {
 	owner, name, ok := strings.Cut(repo, "/")
 	if !ok {
 		return Detail{}, fmt.Errorf("repo %q must be owner/name", repo)
 	}
-	body, err := json.Marshal(map[string]any{
-		"query": detailQuery,
-		"variables": map[string]any{
-			"o": owner, "r": name, "n": number, "head": head,
-		},
-	})
-	if err != nil {
-		return Detail{}, err
+	vars := map[string]any{"o": owner, "r": name, "n": number, "head": head}
+	query := func(stacks bool) string {
+		if !stacks {
+			return fmt.Sprintf(detailQuery, "")
+		}
+		return fmt.Sprintf(detailQuery, stackEntries)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
-	if err != nil {
-		return Detail{}, err
-	}
-	req.Header.Set("Authorization", "bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return Detail{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return Detail{}, fmt.Errorf("github returned %s", resp.Status)
-	}
-
-	var out struct {
+	type response struct {
 		Data struct {
 			Repository struct {
 				DefaultBranchRef *struct {
@@ -712,14 +797,27 @@ func (c *Client) Detail(ctx context.Context, repo string, number int, head strin
 							} `json:"author"`
 						} `json:"nodes"`
 					} `json:"latestOpinionatedReviews"`
+					Stack *struct {
+						Entries struct {
+							Nodes []struct {
+								Position    int `json:"position"`
+								PullRequest struct {
+									Number  int    `json:"number"`
+									Title   string `json:"title"`
+									State   string `json:"state"`
+									IsDraft bool   `json:"isDraft"`
+								} `json:"pullRequest"`
+							} `json:"nodes"`
+						} `json:"entries"`
+					} `json:"stack"`
 				} `json:"pullRequest"`
 			} `json:"repository"`
 		} `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
+		Errors []gqlError `json:"errors"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	out, err := postStacks(ctx, c, &c.noStackEntries, stacked, query, vars,
+		func(r response) []gqlError { return r.Errors })
+	if err != nil {
 		return Detail{}, err
 	}
 	if len(out.Errors) > 0 {
@@ -748,6 +846,15 @@ func (c *Client) Detail(ctx context.Context, repo string, number int, head strin
 		d.Reviewers = append(d.Reviewers, Reviewer{
 			Login: r.Author.Login, Name: r.Author.Name, State: r.State,
 		})
+	}
+	if pr.Stack != nil {
+		for _, e := range pr.Stack.Entries.Nodes {
+			p := e.PullRequest
+			d.Stack = append(d.Stack, StackEntry{
+				Position: e.Position, Number: p.Number, Title: p.Title, State: p.State, IsDraft: p.IsDraft,
+			})
+		}
+		sort.Slice(d.Stack, func(i, j int) bool { return d.Stack[i].Position < d.Stack[j].Position })
 	}
 	return d, nil
 }
