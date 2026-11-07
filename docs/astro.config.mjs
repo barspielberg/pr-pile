@@ -19,6 +19,10 @@ export default defineConfig({
           label: 'Getting started',
           items: ['getting-started/install', 'getting-started/first-run'],
         },
+        {
+          label: 'Reference',
+          items: ['reference/config'],
+        },
       ],
     }),
   ],
