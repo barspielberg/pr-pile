@@ -535,25 +535,26 @@ once the URL is live, everything else is writing.
 
 ---
 
-## 8. Decisions needed from Bar
+## 8. Decisions
 
-1. **Generator** — Starlight (recommended) or VitePress (lighter) or a Go-native
-   option (Hugo/mdBook)? This decides the rest.
-2. **Publish the research archive?** Recommended yes, curated and prefaced. The
-   studies are the project's most distinctive writing; hiding them wastes the
-   best content it has.
-3. **License** — MIT for code (recommended; nothing today means "all rights
-   reserved" by default) and CC BY 4.0 for docs, or MIT for both?
-4. **Install story** — add `goreleaser` + a Homebrew tap before launch so the
-   install page can promise `brew install`, or ship the docs saying "build from
-   a checkout" for now (recommended: goreleaser, it is a day's work and it is
-   what the docs need to be honest).
-5. **Domain** — project URL `barspielberg.github.io/pr-pile/` now (recommended,
-   zero DNS) or a custom domain at launch (needs a DNS record and your sign-off)?
-6. **Platform claim** — document "macOS, tested" (recommended, honest) or port
-   `open`/`pbcopy` to Linux first and document both?
-7. **Screenshots** — public repo or a sanitised demo board for the captures? The
-   board itself is the product; the safest is a public repo with real PR titles.
+Resolved 2026-11-07 (Phase 0). Each recommendation adopted as stated.
+
+1. **Generator — Starlight.** Adopted. The only candidate satisfying all ten
+   requirements with no config for search/sitemap/404/a11y/theming; gh-dash is
+   the peer precedent.
+2. **Publish the research archive — yes.** Adopted, curated and prefaced as
+   historical. The studies are the project's most distinctive writing.
+3. **License — MIT for code, CC BY 4.0 for docs.** Adopted. Two files, two
+   scopes.
+4. **Install story — goreleaser + Homebrew tap.** Adopted, added before launch
+   so the install page can honestly promise `brew install`; `go install @latest`
+   already works today and only `brew` is gated on the release.
+5. **Domain — project URL now.** Adopted: `https://barspielberg.github.io/pr-pile/`,
+   zero DNS. A custom domain later needs a DNS record and Bar's sign-off.
+6. **Platform claim — "macOS, tested".** Adopted, honest today. Port
+   `open`/`pbcopy` to Linux before documenting both.
+7. **Screenshots — public repo.** Adopted: capture a public repo with real PR
+   titles; the board itself is the product.
 
 ---
 
