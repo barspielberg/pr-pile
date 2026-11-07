@@ -1,0 +1,66 @@
+---
+title: pile
+description: A terminal PR board for GitHub. Rules are the board; one keypress is one line.
+template: splash
+hero:
+  tagline: A terminal PR board for GitHub. Rules are the board; one keypress is one line.
+  actions:
+    - text: Install
+      link: /getting-started/install/
+      icon: right-arrow
+    - text: First run
+      link: /getting-started/first-run/
+      variant: secondary
+---
+
+import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+
+pile fetches every open PR for a repo and renders each as one line, ordered by
+rules you write. It opens PRs in the browser, shows the checks and review state
+that decide what to do next, and gets out of the way between uses.
+
+```text
+MINE (2)
+  ▌ #143 add --since flag to the sync command    ✓ ✓ ✓    imm
+    #141 stop double-fetching the rollup           ◐       jdo
+
+NEEDS MY REVIEW (1)
+    #138 drop the per-rule timeout                 ✗       amb
+
+ALL OPEN (3)
+    ...
+```
+
+<Aside type="note">
+  No screenshot yet — the board above is a text sketch. A real recording lands
+  in phase 4, generated from `assets/demo.tape` so it cannot drift.
+</Aside>
+
+<CardGrid stagger>
+  <Card title="Rules are the board">
+    A PR is shown under the first rule that matches it, so ordering is the
+    configuration. Four starter rules ship out of the box.
+  </Card>
+  <Card title="One keypress, one line">
+    Every row is exactly one line, so scrolling is steady and predictable, and a
+    header is a position the cursor can sit on.
+  </Card>
+  <Card title="Detail overlay">
+    Failing checks, conflicts, reviewers and size are one key away — `d` — not
+    in the list.
+  </Card>
+</CardGrid>
+
+## Install
+
+```sh
+go install github.com/barspielberg/pr-pile/cmd/pile@latest
+```
+
+macOS today, `gh` logged in, Go 1.24+ to build from source. See
+[Install](/getting-started/install/) for the Homebrew and checkout options.
+
+## Status
+
+A personal tool at 0.x with no tagged releases yet; these docs track `main`.
+Tested on macOS. Not built: write actions, multi-repo, a preview pane.
