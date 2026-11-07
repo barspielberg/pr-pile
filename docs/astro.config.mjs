@@ -13,6 +13,7 @@ export default defineConfig({
       title: 'pile',
       description: 'A terminal PR board for GitHub.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/barspielberg/pr-pile' }],
+      customCss: ['/src/styles/custom.css'],
       editLink: { baseUrl: 'https://github.com/barspielberg/pr-pile/edit/main/docs/' },
       sidebar: [
         {
