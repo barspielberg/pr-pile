@@ -48,16 +48,20 @@ into the error above.
 
 ## Opening a PR creates another browser tab
 
-`enter` / `o` uses `open` in the default browser. Opening the same PR twice
+`enter` / `o` uses `open` on macOS or `xdg-open` on Linux to launch the default
+browser. On Linux, install `xdg-utils` and run inside a graphical session.
+Opening the same PR twice
 creates two tabs; pile does not script Arc or reuse tabs. Use a browser tab
 deduplication extension if you want repeated opens to focus an existing tab.
 
 ## `y` does not copy anything
 
-`y` copies the selected PR's URL with `pbcopy`, a macOS binary. There is no
-error if it is missing — the copy just does nothing. This is one of the
-reasons pile is [macOS-tested only](../../getting-started/install/): `open`,
-and `pbcopy` are macOS tools. On anything else, treat those integrations as unavailable.
+`y` copies the selected PR's URL; `Y` opens the copy menu. Copy failures appear
+in the status line. macOS uses `pbcopy`. On Linux, install `wl-clipboard` for
+Wayland (`wl-copy`) or `xclip` / `xsel` for X11. pile prefers `wl-copy` when
+`WAYLAND_DISPLAY` is set, then tries `xclip` and `xsel` when `DISPLAY` is set.
+A headless or SSH session without access to a desktop clipboard cannot copy
+through these tools.
 
 ## A section looks empty while the board loads
 

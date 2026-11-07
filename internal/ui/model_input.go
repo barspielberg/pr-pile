@@ -3,25 +3,14 @@ package ui
 import (
 	"fmt"
 	"github.com/barspielberg/pr-pile/internal/browser"
+	"github.com/barspielberg/pr-pile/internal/clipboard"
 	"github.com/barspielberg/pr-pile/internal/github"
 	tea "github.com/charmbracelet/bubbletea"
-	"os/exec"
-	"strings"
 )
 
-// copyToClipboard shells out to pbcopy rather than taking a clipboard
-// dependency, which is the same trade browser.Open makes with `open`. DESIGN.md
-// turned down bubbles/textinput partly because it drags in a clipboard
-// shell-out for a binding we did not want -- the objection was to the
-// dependency, not to the pipe, and this is the pipe on its own.
-//
-// It is a var so a test can watch what would be copied without writing to the
+// copyToClipboard is a var so tests can watch what would be copied without writing to the
 // developer's real clipboard.
-var copyToClipboard = func(s string) error {
-	cmd := exec.Command("pbcopy")
-	cmd.Stdin = strings.NewReader(s)
-	return cmd.Run()
-}
+var copyToClipboard = clipboard.Copy
 
 // copySelected yanks the url of every selected PR, or of the row under the
 // cursor when nothing is selected.
