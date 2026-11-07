@@ -14,7 +14,7 @@ actions:
   - key: w
     name: worktree
     run: wt switch -x nvim pr:{{.Number}}
-  - key: v
+  - key: W
     name: review
     run: tuicr pr {{.Number}}
     mode: suspend
@@ -31,8 +31,8 @@ author has would fail with `command not found` on anyone else's.
 | field | value |
 | --- | --- |
 | `{{.Number}}` | the PR number |
-| `{{.Repo}}` | `owner/name` from `repo:` |
-| `{{.RepoPath}}` | the local checkout path from `repoPath:` |
+| `{{.Repo}}` | the PR's own repo name from `repos` |
+| `{{.RepoPath}}` | that repo's checkout `path` |
 | `{{.Branch}}` | the PR's head branch |
 | `{{.Base}}` | the PR's base branch |
 | `{{.URL}}` | the PR's URL |
@@ -62,8 +62,13 @@ names the mechanism rather than the problem.
 
 Actions are matched **last**, after every navigation and built-in key, so a
 configured action cannot shadow `j`, `d`, `/` or the rest. Binding an action to
-`d` or `j` means it never fires; pick a key the [Keys](../../reference/keys/)
-table does not use.
+`d` or `j` is a configuration error; pick a key the [Keys](../../reference/keys/)
+table does not use. `v` and `m` are also reserved for selection and watches.
+
+Remote template fields are already shell-quoted: use them as standalone,
+unquoted words. Actions run in the PR's configured checkout. See the
+[reference](../../reference/actions/#shell-quoting-and-repository-context)
+for quoting restrictions and `multi: true` selection behavior.
 
 A second press of the same key while an action is still running is a no-op with
 a `still running` message rather than a second process.

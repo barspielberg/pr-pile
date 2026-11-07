@@ -46,26 +46,18 @@ simply has no open PRs. Without the startup check you would get a board that
 looks empty when it is actually blocked. The check turns that silent failure
 into the error above.
 
-## Opening a PR always opens a new Arc tab
+## Opening a PR creates another browser tab
 
-Opening a PR (`enter` / `o`) tries to reuse an existing Arc tab for that URL,
-so opening the same PR twice focuses the tab you already have instead of
-duplicating it. It does this with AppleScript, and if macOS has not granted
-`osascript` permission to control Arc, the script fails and pile silently falls
-back to `open <url>` — which always creates a new tab.
-
-You can tell the difference: if the same PR keeps piling up duplicate tabs,
-tab reuse is not running. Grant the automation permission when macOS asks (or
-in System Settings → Privacy & Security → Automation), or just live with `open`
-behaviour. Other browsers are never scripted and always use `open`.
+`enter` / `o` uses `open` in the default browser. Opening the same PR twice
+creates two tabs; pile does not script Arc or reuse tabs. Use a browser tab
+deduplication extension if you want repeated opens to focus an existing tab.
 
 ## `y` does not copy anything
 
 `y` copies the selected PR's URL with `pbcopy`, a macOS binary. There is no
-error if it is missing — the copy just does nothing. This is one of the three
+error if it is missing — the copy just does nothing. This is one of the
 reasons pile is [macOS-tested only](../../getting-started/install/): `open`,
-`pbcopy` and `osascript` are all macOS tools. On anything else, treat `y` and
-the Arc reuse above as unavailable.
+and `pbcopy` are macOS tools. On anything else, treat those integrations as unavailable.
 
 ## A section looks empty while the board loads
 

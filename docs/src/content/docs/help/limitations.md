@@ -18,8 +18,7 @@ thing `gh pr list` does not give us, so it drags in an extra GraphQL query or a
 per-row lazy fetch.
 
 **Not built:** detail/preview pane; write actions (approve, comment, re-run CI,
-mark ready) — the action model should not make them awkward to add; multi-repo
-(config takes a repo, not a list — do not bake the assumption deeper); a
+mark ready); a
 `glyphs = "ascii"` escape hatch (specified, cheap because widths are already
 fixed); a config key for the scroll margin (hardcoded on purpose — there is one
 user).

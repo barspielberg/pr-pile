@@ -1,0 +1,531 @@
+package ui
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"text/template"
+	"time"
+
+	"github.com/barspielberg/pr-pile/internal/github"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func (m Model) actionFor(key string) (Model, tea.Cmd, bool) {
+	prs := m.actionPRs()
+	if len(prs) == 0 {
+		return m, nil, false
+	}
+	// A multi action over a big selection runs one command across every PR in
+	// it, so it gets the same "this many at once" guard `enter` has: ask first,
+	// and capture the set now rather than re-reading it when the answer comes.
+	for _, a := range m.cfg.Actions {
+		if a.Key == key && strings.TrimSpace(a.Run) != "" &&
+			a.Multi && len(prs) >= confirmThreshold {
+			// Refuse here rather than after the answer: runAction would turn
+			// the confirmed `y` into "still running" with the prompt already
+			// gone, losing the action the user just agreed to. A prompt that
+			// appears is one that will be honoured.
+			if m.running != "" {
+				m.status = m.running + " still running"
+				m.clearSeq = 0
+				return m, nil, true
+			}
+			m.confirmOpen, m.confirmAction, m.confirmVerb = prs, key, a.Name
+			return m, nil, true
+		}
+	}
+	return m.runAction(key, prs)
+}
+
+// runAction is actionFor once the PR set is settled -- either straight from the
+// board, or handed back by a confirm prompt.
+func (m Model) runAction(key string, prs []github.PR) (Model, tea.Cmd, bool) {
+	for _, a := range m.cfg.Actions {
+		if a.Key != key || strings.TrimSpace(a.Run) == "" {
+			continue
+		}
+		// An action that did not opt in refuses a selection rather than
+		// running on whichever PR happens to be first. Silently acting on one
+		// of several is the failure that takes longest to notice, and the
+		// singular fields cannot mean a list without breaking every config
+		// written before selections existed.
+		if !a.Multi && len(prs) > 1 {
+			return m.setStatus(a.Name + ": one PR at a time"), nil, true
+		}
+		// A second press while one is still out would start a second process
+		// and lose the first's result to the seq check. Saying so is more
+		// useful than silently doing nothing.
+		if m.running != "" {
+			running := m.running
+			m.status = running + " still running"
+			m.clearSeq = 0
+			return m, nil, true
+		}
+		// A multi action with nothing selected gets the cursor row as a list of
+		// one, so its template needs no special case for that.
+		var line string
+		var err error
+		if a.Multi {
+			line, err = m.renderMultiAction(a.Run, prs)
+		} else {
+			line, err = m.renderAction(a.Run, prs[0])
+		}
+		if err != nil {
+			return m.setStatus("action: " + err.Error()), nil, true
+		}
+		dir, err := m.actionDir(a.Run, prs)
+		if err != nil {
+			return m.setStatus("action: " + err.Error()), nil, true
+		}
+		m.runSeq++
+		m.statusSeq++
+		m.clearSeq = 0
+		cmd := exec.Command("sh", "-c", line)
+		cmd.Dir = dir
+		if a.Mode == "suspend" {
+			// Hand the terminal over for TUI commands (a diff pager, a review
+			// session), then repaint when they exit.
+			name := a.Name
+			statusSeq := m.statusSeq
+			m.clearSelection()
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+				if err != nil {
+					return asyncStatusMsg{seq: statusSeq, text: name + " failed: " + err.Error()}
+				}
+				return asyncStatusMsg{seq: statusSeq}
+			}), true
+		}
+		m.running, m.status = a.Name, ""
+		m.clearSelection()
+		seq := m.runSeq
+		work := runAction(cmd, a.Name, seq, m.statusSeq)
+		if m.fetching || len(m.inflight) > 0 {
+			return m, work, true
+		}
+		return m, tea.Batch(work, spinTick()), true
+	}
+	return m, nil, false
+}
+
+// statusHold is how long a succeeded action holds the footer. Long enough to
+// read after looking back from whatever the action opened, short enough that
+// the line is not still claiming an action when the user next looks down.
+const statusHold = 4 * time.Second
+
+type clearStatusMsg int
+
+func clearStatusIn(d time.Duration, seq int) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return clearStatusMsg(seq) })
+}
+
+// runAction waits for the process off the UI goroutine and reports how it went.
+// It also reaps, which the fire-and-forget version did only as a side effect of
+// throwing the result away.
+func runAction(cmd *exec.Cmd, name string, seq int, statusSeq uint64) tea.Cmd {
+	// Bounded, because a command that streams to stderr should not be able to
+	// grow the board's memory; the tail is the part that says what failed.
+	var errBuf tailWriter
+	errBuf.limit = 4096
+	cmd.Stderr = &errBuf
+	return func() tea.Msg {
+		err := cmd.Run()
+		return actionDoneMsg{name: name, seq: seq, statusSeq: statusSeq, err: err, detail: errBuf.lastLine()}
+	}
+}
+
+// actionResult is the one line the footer shows when an action ends. A failure
+// prefers what the command said on stderr to Go's exit-status wording, which
+// names the mechanism and not the problem.
+func actionResult(msg actionDoneMsg) string {
+	if msg.err == nil {
+		return msg.name + " ✓"
+	}
+	if d := msg.detail; d != "" {
+		return msg.name + " failed: " + d
+	}
+	return msg.name + " failed: " + msg.err.Error()
+}
+
+func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
+	if err := validateRemoteActionFields(tmpl); err != nil {
+		return "", err
+	}
+	if err := rejectFields(tmpl, pluralActionFields); err != nil {
+		return "", err
+	}
+	t, err := template.New("action").Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
+	repo, repoPath, err := m.actionRepo(tmpl, pr)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	err = t.Execute(&b, actionTemplateData{
+		Number: pr.Number, Repo: repo, RepoPath: repoPath,
+		Branch: shellQuote(pr.HeadRefName), Base: shellQuote(pr.BaseRefName),
+		URL: shellQuote(pr.URL), Author: shellQuote(pr.Author), Title: shellQuote(pr.Title),
+	})
+	return b.String(), err
+}
+
+// renderMultiAction renders a `multi: true` action once for the whole
+// selection. The plural fields carry the same attacker-controlled data as the
+// singular ones, so they get the same validation and the same per-element
+// quoting.
+func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
+	if err := validateRemoteActionFields(tmpl); err != nil {
+		return "", err
+	}
+	if err := rejectFields(tmpl, singularActionFields); err != nil {
+		return "", err
+	}
+	t, err := template.New("action").Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
+	repo, repoPath, err := m.actionRepo(tmpl, prs[0])
+	if err != nil {
+		return "", err
+	}
+	if templateMentionsAny(tmpl, repoBoundFields) {
+		for _, pr := range prs[1:] {
+			if !strings.EqualFold(pr.Repo, repo) {
+				return "", fmt.Errorf("the selection spans repos, and this action works in one")
+			}
+		}
+	}
+	data := multiActionTemplateData{Repo: repo, RepoPath: repoPath}
+	var numbers, branches, bases, urls, authors, titles []string
+	for _, pr := range prs {
+		numbers = append(numbers, fmt.Sprint(pr.Number))
+		branches = append(branches, shellQuote(pr.HeadRefName))
+		bases = append(bases, shellQuote(pr.BaseRefName))
+		urls = append(urls, shellQuote(pr.URL))
+		authors = append(authors, shellQuote(pr.Author))
+		titles = append(titles, shellQuote(pr.Title))
+	}
+	data.Numbers = strings.Join(numbers, " ")
+	data.Branches = strings.Join(branches, " ")
+	data.Bases = strings.Join(bases, " ")
+	data.URLs = strings.Join(urls, " ")
+	data.Authors = strings.Join(authors, " ")
+	data.Titles = strings.Join(titles, " ")
+
+	var b strings.Builder
+	err = t.Execute(&b, data)
+	return b.String(), err
+}
+
+// actionRepo is the Repo and RepoPath an action sees for a PR. Both come from
+// the PR's entry in repos: rather than from GitHub, so they stay trusted config
+// text. A template that uses RepoPath refuses a repo without a path: expanded
+// empty and unquoted, it would shift every argument after it, or cd into $HOME.
+func (m Model) actionRepo(tmpl string, pr github.PR) (repo, repoPath string, err error) {
+	r, ok := m.repoOf(pr)
+	if !ok {
+		return "", "", fmt.Errorf("%s is not in repos", terminalText(pr.Repo))
+	}
+	if r.Path == "" && templateMentions(tmpl, "RepoPath") {
+		return "", "", fmt.Errorf(".RepoPath needs a path for %s in repos", r.Tag())
+	}
+	return r.Name, r.Path, nil
+}
+
+type actionTemplateData struct {
+	Number            int
+	Repo, RepoPath    string
+	Branch, Base, URL string
+	Author, Title     string
+}
+
+type multiActionTemplateData struct {
+	Numbers         string
+	Repo, RepoPath  string
+	Branches, Bases string
+	URLs            string
+	Authors, Titles string
+}
+
+// Every template field whose value comes from GitHub, and is therefore
+// attacker-controlled. Each must appear as a bare, standalone placeholder at
+// top-level shell context. TestRemoteFieldListCoversEveryStringField keeps this
+// list from falling behind the structs.
+var remoteActionFields = []string{
+	"Branch", "Base", "URL", "Author", "Title",
+	"Branches", "Bases", "URLs", "Authors", "Titles",
+}
+
+// A singular template in a multi action (or the reverse) is an error rather
+// than an empty expansion: `{{.URL}}` in a multi action would render nothing at
+// all, and an action that silently does the wrong thing is worse than one that
+// refuses. Checked when the action runs, not at startup -- these validators
+// live here and config cannot import ui.
+var singularActionFields = []string{"Number", "Branch", "Base", "URL", "Author", "Title"}
+var pluralActionFields = []string{"Numbers", "Branches", "Bases", "URLs", "Authors", "Titles"}
+
+// actionUsesToken reports whether a template action references exactly this
+// field, splitting on the characters that can delimit a field in a template
+// action so a longer field name cannot answer for a shorter one.
+func actionUsesToken(action, token string) bool {
+	for _, word := range strings.FieldsFunc(action, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '(' || r == ')' || r == '|'
+	}) {
+		if word == token {
+			return true
+		}
+	}
+	return false
+}
+
+// rejectFields fails if the template mentions any of the given fields.
+func rejectFields(tmpl string, fields []string) error {
+	for _, field := range fields {
+		if templateMentions(tmpl, field) {
+			return fmt.Errorf("field %s does not belong in this action", "."+field)
+		}
+	}
+	return nil
+}
+
+// templateMentions reports whether a template uses a given field, matching the
+// whole name so .URL does not answer for .URLs.
+// repoBoundFields only mean something inside one repo: #12 or a branch name
+// names a different PR, or nothing, in another. URLs, authors and titles do not
+// depend on where the command runs.
+var repoBoundFields = []string{"Repo", "RepoPath", "Number", "Numbers", "Branch", "Branches", "Base", "Bases"}
+
+func templateMentionsAny(tmpl string, fields []string) bool {
+	for _, f := range fields {
+		if templateMentions(tmpl, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// actionDir is where an action runs: the PR's checkout when its repo has a
+// path, so a command like `tuicr pr {{.Number}}` finds the right #12. Without
+// one it runs where pile was started, as it always has. On a board with
+// several repos that is a guess, so an action that needs a repo and does not
+// name one with .Repo or .RepoPath refuses instead.
+func (m Model) actionDir(tmpl string, prs []github.PR) (string, error) {
+	r, ok := m.repoOf(prs[0])
+	if !ok {
+		return "", nil
+	}
+	for _, pr := range prs[1:] {
+		if !strings.EqualFold(pr.Repo, r.Name) {
+			return "", nil
+		}
+	}
+	if r.Path != "" {
+		return expandHome(r.Path), nil
+	}
+	if m.multiRepo() && templateMentionsAny(tmpl, repoBoundFields) &&
+		!templateMentions(tmpl, "Repo") && !templateMentions(tmpl, "RepoPath") {
+		return "", fmt.Errorf("set a path for %s in repos, so this runs in its checkout", r.Tag())
+	}
+	return "", nil
+}
+
+// expandHome resolves a leading ~, which the shell would have done for a path
+// written into the command but nothing does for a working directory.
+func expandHome(path string) string {
+	rest, ok := strings.CutPrefix(path, "~")
+	if !ok || (rest != "" && rest[0] != '/') {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, rest)
+}
+
+func templateMentions(tmpl, field string) bool {
+	for offset := 0; ; {
+		rel := strings.Index(tmpl[offset:], "{{")
+		if rel < 0 {
+			return false
+		}
+		start := offset + rel
+		closeRel := strings.Index(tmpl[start+2:], "}}")
+		if closeRel < 0 {
+			return false
+		}
+		end := start + 2 + closeRel
+		for _, token := range strings.FieldsFunc(tmpl[start+2:end], func(r rune) bool {
+			return r == ' ' || r == '\t' || r == '(' || r == ')' || r == '|'
+		}) {
+			if token == "."+field {
+				return true
+			}
+		}
+		offset = end + 2
+	}
+}
+
+func validateRemoteActionFields(tmpl string) error {
+	for offset := 0; ; {
+		rel := strings.Index(tmpl[offset:], "{{")
+		if rel < 0 {
+			return nil
+		}
+		start := offset + rel
+		closeRel := strings.Index(tmpl[start+2:], "}}")
+		if closeRel < 0 {
+			return nil
+		}
+		end := start + 2 + closeRel
+		action := strings.TrimSpace(tmpl[start+2 : end])
+		for _, field := range remoteActionFields {
+			token := "." + field
+			// Whole-token, not substring: `.URL` is a prefix of `.URLs`, so a
+			// Contains check reports the wrong field and rejects a valid
+			// plural template outright.
+			if !actionUsesToken(action, token) {
+				continue
+			}
+			if action != token || !standaloneActionField(tmpl, start, end+2) ||
+				strings.Contains(tmpl, "<<") || usesIndirectEvaluator(tmpl) ||
+				!topLevelShellContext(tmpl[:start]) {
+				return fmt.Errorf("remote field %s must be an unquoted standalone placeholder", token)
+			}
+		}
+		offset = end + 2
+	}
+}
+
+func usesIndirectEvaluator(tmpl string) bool {
+	normalized := strings.NewReplacer("'", "", `"`, "", `\`, "").Replace(tmpl)
+	words := strings.FieldsFunc(normalized, func(r rune) bool {
+		return strings.ContainsRune(" \t\r\n;&|()", r)
+	})
+	for i, word := range words {
+		if slash := strings.LastIndexByte(word, '/'); slash >= 0 {
+			word = word[slash+1:]
+		}
+		if word == "eval" {
+			return true
+		}
+		if word != "sh" && word != "bash" && word != "dash" && word != "zsh" && word != "ksh" {
+			continue
+		}
+		for _, option := range words[i+1:] {
+			if strings.HasPrefix(option, "-") && strings.Contains(strings.TrimLeft(option, "-"), "c") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func standaloneActionField(tmpl string, start, end int) bool {
+	return (start == 0 || shellSpace(tmpl[start-1])) &&
+		(end == len(tmpl) || shellSpace(tmpl[end]))
+}
+
+func shellSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+func topLevelShellContext(prefix string) bool {
+	var quote byte
+	parenDepth, braceDepth, bracketDepth := 0, 0, 0
+	for i := 0; i < len(prefix); i++ {
+		if i+1 < len(prefix) && prefix[i:i+2] == "{{" {
+			if end := strings.Index(prefix[i+2:], "}}"); end >= 0 {
+				i += end + 3
+				continue
+			}
+		}
+		c := prefix[i]
+		if c == '\\' && quote != '\'' {
+			i++
+			continue
+		}
+		switch quote {
+		case '\'':
+			if c == '\'' {
+				quote = 0
+			}
+			continue
+		case '"':
+			if c == '"' {
+				quote = 0
+			}
+			continue
+		case '`':
+			if c == '`' {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+		case '$':
+			if i+1 < len(prefix) && prefix[i+1] == '(' {
+				parenDepth++
+				i++
+			} else if i+1 < len(prefix) && prefix[i+1] == '{' {
+				braceDepth++
+				i++
+			} else if i+1 < len(prefix) && prefix[i+1] == '[' {
+				bracketDepth++
+				i++
+			}
+		case '(':
+			if parenDepth > 0 {
+				parenDepth++
+			}
+		case ')':
+			if parenDepth > 0 {
+				parenDepth--
+			}
+		case '}':
+			if braceDepth > 0 {
+				braceDepth--
+			}
+		case ']':
+			if bracketDepth > 0 {
+				bracketDepth--
+			}
+		}
+	}
+	return quote == 0 && parenDepth == 0 && braceDepth == 0 && bracketDepth == 0
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+type tailWriter struct {
+	buf   []byte
+	limit int
+}
+
+func (w *tailWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	if over := len(w.buf) - w.limit; over > 0 {
+		w.buf = w.buf[over:]
+	}
+	return len(p), nil
+}
+
+// lastLine is the final non-blank line, which is where a shell script's
+// diagnostic lands. Anything above it is usually a tool's own progress noise.
+func (w *tailWriter) lastLine() string {
+	lines := strings.Split(strings.TrimRight(string(w.buf), "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
+}

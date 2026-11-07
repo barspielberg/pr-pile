@@ -45,7 +45,7 @@ Commit `pnpm-lock.yaml` when changing dependencies.
 | `internal/github` | the GraphQL client: `Search`, `Detail`, and the `CheckRepo` startup check |
 | `internal/board` | turns per-rule results into ordered sections, first-match-wins bucketing, tree grouping |
 | `internal/ui` | the Bubble Tea model, rendering, search, the detail overlay, the help page |
-| `internal/browser` | `open`, plus the Arc tab-reuse AppleScript |
+| `internal/browser` | `open` in the default browser |
 
 The dependency graph is one direction: `cmd` → `internal/*`, and `internal/ui`
 reads `internal/board`, `internal/config` and `internal/github` but not the

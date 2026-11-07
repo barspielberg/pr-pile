@@ -16,16 +16,27 @@ to the board and the help page.
 | `pgdn` / `pgup` | a full page down / up |
 | `l` / `h` | next / previous section (also `right` / `left`) |
 | `g` / `G` | top / bottom (also `home` / `end`) |
-| `enter` / `o` | open the selected PR in the browser |
+| `enter` / `o` | open the selected PRs in the browser; three or more asks first |
+| `S` | open the GitHub stack page, once per selected stack |
 | `d` | open the detail overlay for the selected PR |
-| `y` | copy the selected PR's URL |
+| `space` | select or deselect the PR under the cursor |
+| `v` | select a range; press again to leave range mode |
+| `y` | copy selected PR URLs, one per line |
+| `Y` | copy menu: number, title, URL, branch, author, Markdown or stack link |
+| `m` | watch the selected PRs; press again to stop watching |
 | `/` | open the search prompt |
 | `n` / `N` | next / previous match, wrapping |
 | `r` | refresh the board |
 | `?` | open the help page |
 | `q` / `esc` / `ctrl+c` | quit |
 
-`esc` clears the search highlights when a query is live, and quits otherwise.
+`esc` first clears a selection, then a live search, then quits. `q` asks before
+quitting while watches or actions are running; `ctrl+c` quits immediately.
+Three or more opens or multi actions ask first: `y` or `enter` confirms, any
+other key cancels and keeps the selection. Reloading clears the selection.
+
+Watched rows show `⚐`; `⚑` means something changed. Opening the PR with
+`enter` or `d` clears that unread marker. Watches end when pile quits.
 
 ## Search prompt
 
@@ -44,14 +55,18 @@ navigation moves to chords.
 
 ## Detail overlay
 
-The overlay is a look, not a mode: `d` opens it and it closes on the next
-movement key.
+The detail page scrolls and searches like help. It stays open while you read.
 
 | key | action |
 | --- | --- |
-| `j` / `k` / `l` / `h` | close and move (also the arrow keys) |
-| `g` / `G` | close and go to top / bottom |
-| any other key | close |
+| `j` / `k` / `down` / `up` | scroll down / up |
+| `ctrl+d` / `ctrl+u` | half a page down / up |
+| `pgdn` / `pgup` | a full page down / up |
+| `g` / `G` / `home` / `end` | top / bottom |
+| `/` | search within the detail page |
+| `n` / `N` | next / previous match |
+| `?` | open help |
+| `esc` / `q` / `d` | clear a live search or close the page |
 | `ctrl+c` | quit |
 
 ## Help page

@@ -28,6 +28,20 @@ Left to right:
 | `imm` | the author's initials, lowercase, on rules with `author: true`. |
 | `2h` | how long ago the PR was last updated. |
 
+On a multi-repo board, a repository label precedes the PR number. The detail
+header and notifications use `label#N` to distinguish matching numbers across
+repos. `space` selects a PR and `v` selects a range. `y` copies all selected
+URLs, and `Y` opens the copy menu. `S` opens a native GitHub stack page.
+
+`m` watches selected PRs, or the row under the cursor. A watched row shows `⚐`;
+`⚑` announces a change until you open it with `enter` or `d`. Watches are checked
+on refresh and can announce CI, reviews, conflict and required-base-update
+changes, merges and closes. See [watch configuration](../../reference/config/#watch-notifications).
+
+Native GitHub stacks retain their order across missing rows; dashed `╎` marks
+where the stack continues outside the section. Chains inferred from branches
+only know the PRs present in that section.
+
 ## The status cluster
 
 Three glyphs, always in the same order, always at the same screen offset.
@@ -39,6 +53,7 @@ Three glyphs, always in the same order, always at the same screen offset.
 | `✓` | checks passing |
 | `✗2` | `2` checks failing — the number is the count of failing gates |
 | `◐` | still running |
+| `⊘` | cancelled, with nothing failing |
 | `·` | no checks |
 
 The failing count saturates at `✗+` for ten or more. Failing and running checks
@@ -59,6 +74,7 @@ are named in the [detail](../detail/) overlay; the row only counts them.
 | --- | --- |
 | `!` | merge conflict |
 | `~` | draft |
+| `↓` | behind its base when the repo requires an update; muted if another state also blocks it |
 | (blank) | neither |
 
 One cell holds both: a conflicted draft shows `!`, because the conflict is the

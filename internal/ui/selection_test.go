@@ -1,0 +1,758 @@
+package ui
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/barspielberg/pr-pile/internal/board"
+	"github.com/barspielberg/pr-pile/internal/github"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// selectBoard is a two-section board -- 3 PRs under Mine, 2 under Review
+// requested, both resolved -- so a range has somewhere to cross a boundary.
+// The slot space is header, row, row, row, header, row, row.
+func selectBoard(t *testing.T) Model {
+	t.Helper()
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 20
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Repo: testRepo, Number: 1, Title: "first", URL: "https://x/1"},
+		{Repo: testRepo, Number: 2, Title: "second", URL: "https://x/2"},
+		{Repo: testRepo, Number: 3, Title: "third", URL: "https://x/3"},
+	}})
+	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{
+		{Repo: testRepo, Number: 4, Title: "fourth", URL: "https://x/4"},
+		{Repo: testRepo, Number: 5, Title: "fifth", URL: "https://x/5"},
+	}})
+	m.fetching = false
+	m.cursor = m.firstRowSlot()
+	return m
+}
+
+// selectedNumbers is the selection in board order, as numbers, for terse asserts.
+func selectedNumbers(m Model) []int {
+	var out []int
+	for _, pr := range m.selectedPRs() {
+		out = append(out, pr.Number)
+	}
+	return out
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func pressKey(m Model, key string) Model {
+	if key == " " {
+		return press(m, tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	}
+	return press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+}
+
+func TestSpaceSelectsThePRUnderTheCursor(t *testing.T) {
+	m := pressKey(selectBoard(t), " ")
+	if got := selectedNumbers(m); !equalInts(got, []int{1}) {
+		t.Fatalf("selection = %v, want [1]", got)
+	}
+}
+
+func TestSpaceOnAHeaderSelectsNothing(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.headerSlot(0)
+	m = pressKey(m, " ")
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want empty", got)
+	}
+	// A no-op, not a failure: the cursor is allowed to rest on a header.
+	if m.status != "" {
+		t.Fatalf("status = %q, want none", m.status)
+	}
+}
+
+func TestSpaceOnANoteSelectsNothing(t *testing.T) {
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 20
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 1, Title: "a"}}})
+	m.board.Apply(board.Result{Index: 1}) // resolves empty, so it draws a note
+	m.fetching = false
+	for i, s := range m.slots() {
+		if s.isNote() {
+			m.cursor = i
+		}
+	}
+	m = pressKey(m, " ")
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want empty", got)
+	}
+}
+
+// k9s closed "make mark advance to the next line" as not-planned: it saves a
+// keypress going down and costs one going up. Without a test, someone will
+// "improve" this.
+func TestSpaceDoesNotMoveTheCursor(t *testing.T) {
+	m := selectBoard(t)
+	before := m.cursor
+	if got := pressKey(m, " ").cursor; got != before {
+		t.Fatalf("cursor = %d after space, want %d", got, before)
+	}
+}
+
+func TestSelectionSpansSections(t *testing.T) {
+	m := selectBoard(t)
+	m = pressKey(m, " ")
+	m.cursor = m.rowSlot(3) // first row of the second section
+	m = pressKey(m, " ")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 4}) {
+		t.Fatalf("selection = %v, want [1 4]", got)
+	}
+}
+
+// The selection is keyed by PR number precisely so a refresh that reorders a
+// section cannot silently change what is selected.
+func TestSelectionSurvivesRowsMovingOnRefresh(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(1) // PR 2
+	m = pressKey(m, " ")
+
+	m.board.Refetch()
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Repo: testRepo, Number: 9, Title: "new arrival", URL: "https://x/9"},
+		{Repo: testRepo, Number: 1, Title: "first", URL: "https://x/1"},
+		{Repo: testRepo, Number: 2, Title: "second", URL: "https://x/2"},
+	}})
+	m.board.Apply(board.Result{Index: 1, PRs: []github.PR{{Repo: testRepo, Number: 4, Title: "fourth"}}})
+
+	if got := selectedNumbers(m); !equalInts(got, []int{2}) {
+		t.Fatalf("selection = %v after reorder, want [2] -- selection must key on PR number", got)
+	}
+}
+
+func TestSelectionDropsPRsThatLeftTheBoard(t *testing.T) {
+	m := selectBoard(t)
+	m = pressKey(m, " ") // PR 1
+	m.board.Refetch()
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 2, Title: "second"}}})
+	m.board.Apply(board.Result{Index: 1})
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want empty once the PR left the board", got)
+	}
+}
+
+// The design guide's "does it make a healthy board louder" check, as an assert.
+func TestUnselectedBoardLooksExactlyAsBefore(t *testing.T) {
+	plain := selectBoard(t).View()
+	marked := pressKey(selectBoard(t), " ")
+	cleared := pressKey(marked, " ") // toggled back off
+	if cleared.View() != plain {
+		t.Fatal("a board with nothing selected must render identically to before")
+	}
+}
+
+func TestCursorAndSelectionAreSeparateMarks(t *testing.T) {
+	m := pressKey(selectBoard(t), " ")
+	row := stripANSI(m.View())
+	if !strings.Contains(row, "▌•") {
+		t.Fatal("expected cursor and selection marks together:\n" + row)
+	}
+	m.cursor = m.rowSlot(2)
+	moved := stripANSI(m.View())
+	if !strings.Contains(moved, "•") {
+		t.Fatal("selection mark should survive the cursor moving away:\n" + moved)
+	}
+	if strings.Contains(moved, "▌•") {
+		t.Fatal("cursor mark should have moved off the selected row:\n" + moved)
+	}
+}
+
+// The three rungs in order: selection, then search, then quit. Walked in one
+// test because the point is the ordering -- each rung only claims esc when it
+// has something to clear.
+func TestEscClearsSelectionThenSearchThenQuits(t *testing.T) {
+	m := selectBoard(t)
+	m.query = "first"
+	m = pressKey(m, " ")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want the first esc to clear it", got)
+	}
+	if m.query != "first" {
+		t.Fatalf("query = %q, want it to survive the first esc", m.query)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if m.query != "" {
+		t.Fatalf("query = %q, want the second esc to clear it", m.query)
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("third esc should quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("third esc should return tea.Quit")
+	}
+}
+
+// The new rung must not cost a keypress to anyone who never selects anything.
+func TestEscQuitsWhenNothingIsSelected(t *testing.T) {
+	_, cmd := selectBoard(t).Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("esc on a clean board should quit on the first press")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("esc on a clean board should return tea.Quit")
+	}
+}
+
+func TestRangeSelectsFromAnchorToCursor(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2, 3}) {
+		t.Fatalf("selection = %v, want [1 2 3]", got)
+	}
+}
+
+// A range that only works downward is the obvious bug here.
+func TestRangeExtendsBackwards(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(2) // PR 3
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "k"), "k")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2, 3}) {
+		t.Fatalf("selection = %v, want [1 2 3]", got)
+	}
+}
+
+// The range tracks the cursor; it does not accumulate.
+func TestRangeShrinksWhenTheCursorComesBack(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(pressKey(m, "j"), "j"), "k")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v, want [1 2] -- the range must shrink, not trail", got)
+	}
+}
+
+func TestRangeSkipsHeadersAndNotes(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(2) // last row of section one
+	m = pressKey(m, "v")
+	// j crosses the section-two header and lands on its first row.
+	m = pressKey(pressKey(m, "j"), "j")
+	got := selectedNumbers(m)
+	if !equalInts(got, []int{3, 4}) {
+		t.Fatalf("selection = %v, want [3 4] -- the header between them is not a PR", got)
+	}
+}
+
+func TestRangeOverAHeaderOnlySelectsNothing(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.headerSlot(0)
+	m = pressKey(m, "v")
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want empty", got)
+	}
+}
+
+func TestVAgainEndsRangeAndKeepsSelection(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	m = pressKey(m, "v") // end the range
+	if m.ranging {
+		t.Fatal("v again should leave range mode")
+	}
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v, want [1 2] kept after leaving the mode", got)
+	}
+	// Moving now must not extend anything.
+	m = pressKey(m, "j")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v after moving outside the mode, want [1 2]", got)
+	}
+}
+
+func TestEscDuringRangeClearsIt(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want cleared", got)
+	}
+	if m.ranging {
+		t.Fatal("esc should leave range mode")
+	}
+}
+
+// The documented route to a scattered selection, so it has to actually work.
+func TestRangeAddsToAnExistingSelection(t *testing.T) {
+	m := selectBoard(t)
+	m = pressKey(m, " ") // PR 1 on its own
+	m.cursor = m.rowSlot(3)
+	m = pressKey(m, "v") // range over PR 4..5
+	m = pressKey(m, "j")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 4, 5}) {
+		t.Fatalf("selection = %v, want [1 4 5]", got)
+	}
+}
+
+// Shrinking a range must release only what the range selected, never a mark the
+// user made with space beforehand.
+func TestShrinkingARangeKeepsEarlierSpaceMarks(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(1)
+	m = pressKey(m, " ") // PR 2, by hand
+	m.cursor = m.rowSlot(0)
+	m = pressKey(m, "v")                // range from PR 1
+	m = pressKey(pressKey(m, "j"), "j") // covers 1,2,3
+	m = pressKey(pressKey(m, "k"), "k") // back to just 1
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v, want [1 2] -- the hand-made mark on 2 must survive", got)
+	}
+}
+
+func TestFooterShowsRangeKeysWhileRanging(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	if !strings.Contains(stripANSI(m.View()), "esc clear") {
+		t.Fatal("footer should say how to leave range mode:\n" + stripANSI(m.View()))
+	}
+}
+
+func TestFooterShowsTheSelectionCount(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	if !strings.Contains(stripANSI(m.View()), "y copy 3") {
+		t.Fatal("footer should show the count:\n" + stripANSI(m.View()))
+	}
+}
+
+func TestFooterReturnsToNormalWhenSelectionCleared(t *testing.T) {
+	m := pressKey(selectBoard(t), " ")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !strings.Contains(stripANSI(next.(Model).View()), "/ search") {
+		t.Fatal("footer should return to the default legend")
+	}
+}
+
+// copyCapture swaps the clipboard shell-out for the duration of a test and
+// returns what would have been written.
+func copyCapture(t *testing.T, fail error) *string {
+	t.Helper()
+	var got string
+	prev := copyToClipboard
+	copyToClipboard = func(s string) error {
+		got = s
+		return fail
+	}
+	t.Cleanup(func() { copyToClipboard = prev })
+	return &got
+}
+
+func TestCopyWithNothingSelectedCopiesTheCursorRow(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := drain(t, selectBoard(t), nil)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if *got != "https://x/1" {
+		t.Fatalf("copied %q, want the cursor row's url", *got)
+	}
+	if m.status != "copied #1 url" {
+		t.Fatalf("status = %q, want the single-PR wording unchanged", m.status)
+	}
+}
+
+func TestCopyCopiesEverySelectedURL(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	drain(t, next.(Model), cmd)
+	for _, want := range []string{"https://x/1", "https://x/2", "https://x/3"} {
+		if !strings.Contains(*got, want) {
+			t.Fatalf("copied %q, missing %s", *got, want)
+		}
+	}
+}
+
+// Decided: one url per line.
+func TestCopyJoinsWithNewlines(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	drain(t, next.(Model), cmd)
+	if *got != "https://x/1\nhttps://x/2" {
+		t.Fatalf("copied %q, want newline-joined with no trailing newline", *got)
+	}
+}
+
+// A Go map has no iteration order, so without this the url order is random.
+func TestCopyUsesBoardOrderNotSelectionOrder(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(2) // select bottom-up
+	m = pressKey(m, " ")
+	m.cursor = m.rowSlot(0)
+	m = pressKey(m, " ")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	drain(t, next.(Model), cmd)
+	if *got != "https://x/1\nhttps://x/3" {
+		t.Fatalf("copied %q, want board order regardless of selection order", *got)
+	}
+}
+
+func TestCopyReportsTheCount(t *testing.T) {
+	copyCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if m.status != "copied 3 urls" {
+		t.Fatalf("status = %q, want \"copied 3 urls\"", m.status)
+	}
+}
+
+func TestCopySkipsSelectedPRsWithNoURL(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := New(testCfg(), nil)
+	m.width, m.height = 120, 20
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
+		{Repo: testRepo, Number: 1, Title: "a", URL: "https://x/1"},
+		{Repo: testRepo, Number: 2, Title: "b"}, // no url
+		{Repo: testRepo, Number: 3, Title: "c", URL: "https://x/3"},
+	}})
+	m.board.Apply(board.Result{Index: 1})
+	m.fetching = false
+	m.cursor = m.firstRowSlot()
+	m = pressKey(m, "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if *got != "https://x/1\nhttps://x/3" {
+		t.Fatalf("copied %q, want the two real urls only", *got)
+	}
+	if m.status != "copied 2 urls" {
+		t.Fatalf("status = %q, want the count to match what was copied", m.status)
+	}
+}
+
+func TestCopyClearsTheSelection(t *testing.T) {
+	copyCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if got := selectedNumbers(m); len(got) != 0 {
+		t.Fatalf("selection = %v, want cleared after a successful copy", got)
+	}
+}
+
+// Failure is the one case where the user has to retry, so what they picked has
+// to still be there.
+func TestCopyFailureKeepsTheSelection(t *testing.T) {
+	copyCapture(t, errors.New("pbcopy exploded"))
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	if !strings.Contains(m.status, "copy failed") {
+		t.Fatalf("status = %q, want the failure reported", m.status)
+	}
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2}) {
+		t.Fatalf("selection = %v, want [1 2] kept so the user can retry", got)
+	}
+}
+
+// End-to-end on a full board: the thing the feature was asked for.
+func TestSelectAllRowsThenCopy(t *testing.T) {
+	got := copyCapture(t, nil)
+	m := selectBoard(t)
+	m.cursor = 0
+	m = pressKey(m, "v")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	m = next.(Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = drain(t, next.(Model), cmd)
+	want := "https://x/1\nhttps://x/2\nhttps://x/3\nhttps://x/4\nhttps://x/5"
+	if *got != want {
+		t.Fatalf("copied:\n%q\nwant:\n%q", *got, want)
+	}
+}
+
+// openCapture swaps the browser shell-out and returns the urls it was asked to
+// open, in order.
+func openCapture(t *testing.T, fail error) *[]string {
+	t.Helper()
+	var got []string
+	prev := openURL
+	openURL = func(u string) error {
+		got = append(got, u)
+		return fail
+	}
+	t.Cleanup(func() { openURL = prev })
+	return &got
+}
+
+func pressEnter(t *testing.T, m Model) Model {
+	t.Helper()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return drain(t, next.(Model), cmd)
+}
+
+func TestOpenOneSelectedDoesNotAsk(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressEnter(t, pressKey(selectBoard(t), " "))
+	if len(m.confirmOpen) != 0 {
+		t.Fatal("one PR should open without a prompt")
+	}
+	if len(*got) != 1 {
+		t.Fatalf("opened %v, want exactly one url", *got)
+	}
+}
+
+// Two tabs is a normal thing to want.
+func TestOpenTwoSelectedDoesNotAsk(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	m = pressEnter(t, m)
+	if len(m.confirmOpen) != 0 {
+		t.Fatal("two PRs should open without a prompt")
+	}
+	if len(*got) != 2 {
+		t.Fatalf("opened %v, want two urls", *got)
+	}
+}
+
+// The prompt is the safeguard, so nothing may open behind it.
+func TestOpenThreeSelectedAsks(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+	if len(m.confirmOpen) != 3 {
+		t.Fatalf("confirmOpen = %d, want 3", len(m.confirmOpen))
+	}
+	if len(*got) != 0 {
+		t.Fatalf("opened %v before the prompt was answered -- the prompt must gate the action", *got)
+	}
+	if !strings.Contains(stripANSI(m.View()), "open 3 PRs") {
+		t.Fatal("the prompt should be on screen:\n" + stripANSI(m.View()))
+	}
+}
+
+func TestOpenConfirmAcceptOpensAll(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+	m = pressEnter(t, m) // answer it
+	if len(*got) != 3 {
+		t.Fatalf("opened %v, want all three", *got)
+	}
+	if len(m.confirmOpen) != 0 {
+		t.Fatal("the prompt should be gone once answered")
+	}
+}
+
+func TestOpenConfirmRejectOpensNothing(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if len(*got) != 0 {
+		t.Fatalf("opened %v after cancelling", *got)
+	}
+	if len(m.confirmOpen) != 0 {
+		t.Fatal("cancel should dismiss the prompt")
+	}
+	// The selection survives, so the user can adjust rather than rebuild.
+	if n := selectedNumbers(m); !equalInts(n, []int{1, 2, 3}) {
+		t.Fatalf("selection = %v, want it kept after a cancel", n)
+	}
+}
+
+// A stray key must not be read as consent.
+func TestOpenConfirmUnrelatedKeyCancels(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+	m = pressKey(m, "j") // aimed at the board, not the prompt
+	if len(*got) != 0 {
+		t.Fatalf("opened %v -- only y/enter may confirm", *got)
+	}
+}
+
+func TestOpenWithNothingSelectedNeverAsks(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressEnter(t, selectBoard(t))
+	if len(m.confirmOpen) != 0 {
+		t.Fatal("the plain single-PR path must be untouched")
+	}
+	if len(*got) != 1 || (*got)[0] != "https://x/1" {
+		t.Fatalf("opened %v, want the cursor row only", *got)
+	}
+}
+
+func TestOpenClearsTheSelectionAfterOpening(t *testing.T) {
+	openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	m = pressEnter(t, m)
+	if n := selectedNumbers(m); len(n) != 0 {
+		t.Fatalf("selection = %v, want cleared after opening", n)
+	}
+}
+
+func TestOpenReportsTheCount(t *testing.T) {
+	openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	m = pressEnter(t, m)
+	if m.status != "opened 2 PRs" {
+		t.Fatalf("status = %q, want \"opened 2 PRs\"", m.status)
+	}
+}
+
+// The overlays own their keys; a selection sitting behind them must not change.
+func TestSelectionIsIgnoredInsideOverlays(t *testing.T) {
+	for _, overlay := range []string{"?", "d"} {
+		t.Run(overlay, func(t *testing.T) {
+			m := pressKey(selectBoard(t), " ")
+			before := selectedNumbers(m)
+			m = pressKey(m, overlay)
+			m = pressKey(m, " ")
+			m = pressKey(m, "v")
+			if got := selectedNumbers(m); !equalInts(got, before) {
+				t.Fatalf("selection = %v inside %s, want %v unchanged", got, overlay, before)
+			}
+		})
+	}
+}
+
+// From the plan's "not doing": a board that reloads into a selection made two
+// minutes ago is the stale-selection failure. Pinned so it is not added back.
+func TestSelectionClearedOnRefresh(t *testing.T) {
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(m, "j")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if got := selectedNumbers(next.(Model)); len(got) != 0 {
+		t.Fatalf("selection = %v, want cleared by a refresh", got)
+	}
+}
+
+func TestSearchAndSelectionCoexist(t *testing.T) {
+	m := selectBoard(t)
+	m.query = "second"
+	m = pressKey(m, " ")
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "•") {
+		t.Fatal("the selection mark should survive a live query:\n" + out)
+	}
+	if len(m.matchIndexes()) == 0 {
+		t.Fatal("the query should still be matching rows")
+	}
+	if got := selectedNumbers(m); !equalInts(got, []int{1}) {
+		t.Fatalf("selection = %v, want [1] -- a query must not disturb it", got)
+	}
+}
+
+// The prompt answers with the set it asked about, not with whatever the
+// selection happens to hold when the key arrives. Losing the selection
+// underneath the prompt is the case that used to open the cursor row while the
+// footer still said "open 3 PRs?".
+func TestConfirmOpensTheSetItAskedAbout(t *testing.T) {
+	got := openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+
+	m.clearSelection()
+	m.cursor = m.rowSlot(4)
+	m = pressEnter(t, m) // answer it
+
+	if want := []string{"https://x/1", "https://x/2", "https://x/3"}; !equalStrings(*got, want) {
+		t.Fatalf("opened %v, want %v -- the prompt and the action must agree", *got, want)
+	}
+}
+
+// A prompt must never outlive the selection it counted. The tick route is the
+// one that matters: the board refetches on a timer, so a refresh lands here
+// with no user action at all and no confirm gate in its way.
+func TestRefreshDismissesTheConfirmPrompt(t *testing.T) {
+	openCapture(t, nil)
+	m := pressKey(selectBoard(t), "v")
+	m = pressKey(pressKey(m, "j"), "j")
+	m = pressEnter(t, m)
+
+	next, _ := m.Update(tickMsg{seq: m.refreshSeq})
+	m = next.(Model)
+	if len(m.selection) != 0 {
+		t.Fatalf("selection = %v, want the refresh to have cleared it", selectedNumbers(m))
+	}
+	if len(m.confirmOpen) != 0 {
+		t.Fatalf("confirmOpen = %d, want the prompt gone with the selection", len(m.confirmOpen))
+	}
+	if strings.Contains(stripANSI(m.View()), "in the browser?") {
+		t.Fatal("the prompt should be off screen:\n" + stripANSI(m.View()))
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// Every movement key has to extend an open range. `g` was the one that set the
+// cursor without clamping, so applyRange never ran and the range stayed at the
+// row `v` was pressed on.
+func TestRangeExtendsToTheTopWithG(t *testing.T) {
+	m := selectBoard(t)
+	m.cursor = m.rowSlot(4) // last PR
+	m = pressKey(m, "v")
+	m = pressKey(m, "g")
+	if got := selectedNumbers(m); !equalInts(got, []int{1, 2, 3, 4, 5}) {
+		t.Fatalf("selection = %v, want every PR -- g must extend the range", got)
+	}
+}
+
+// The footer promises what `y` will actually copy. A PR still in the map but no
+// longer on the board is not copied, so it must not be counted.
+func TestFooterCountsOnlyPRsStillOnTheBoard(t *testing.T) {
+	m := pressKey(selectBoard(t), " ") // PR 1
+	m.cursor = m.rowSlot(1)
+	m = pressKey(m, " ") // PR 2
+
+	m.board.Refetch()
+	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo, Number: 2, Title: "second", URL: "https://x/2"}}})
+	m.board.Apply(board.Result{Index: 1})
+
+	if n := len(m.selection); n != 2 {
+		t.Fatalf("precondition: map holds %d, want the dropped PR still in it", n)
+	}
+	if got := stripANSI(m.footer("")); !strings.Contains(got, "y copy 1") {
+		t.Fatalf("footer = %q, want it to count only what y would copy", got)
+	}
+}

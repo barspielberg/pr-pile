@@ -51,8 +51,10 @@ stacked PRs, which this board has — what it is actually targeting. Everything
 stays in tier (a) or (b) except two fields worth one on-demand request measured
 at **1.2–1.9 s**, fetched on `c` press, which I recommend accepting because it
 is paid once for the one PR you asked about rather than 100 times for the board.
-The overlay stays a glance: no scrolling, no sections you navigate, any key
-still closes it.
+The overlay stays a glance: no sections you navigate. (Later change: it now
+navigates like the `?` page -- j/k scroll, any other key closes, `?` opens
+help. It used to clip on a short pane, and j closed it and moved the board,
+so scrolling down to read the clipped lines threw the reader out.)
 
 ---
 
@@ -465,6 +467,10 @@ live. Same neighbourhood, one is signal.
 queue**; the repo does not appear to use one. Adding a field that is constant
 `false` on every row, and which contributed to the 504 in §2.3, is pure cost.
 
+(Later change: the premise no longer holds. The repo now has a merge queue and
+PRs have been seen in it, and with auto-merge on. Still not fetched, but worth
+revisiting rather than citing as settled.)
+
 ### 5.12 `mergeStateStatus` — rejected as a display field
 
 Tempting because it is granular (`DIRTY`, `BLOCKED`, `BEHIND`, `UNSTABLE`,
@@ -473,6 +479,16 @@ for a required review" — a fact `reviewDecision` already states. And its
 vocabulary is GitHub-internal jargon the overlay would have to translate. The
 two states it adds over what we have (`BEHIND`, and `DIRTY` disambiguated) are
 better expressed by `behindBy` as an actual number. Rejected.
+
+(Later change: fetched after all, for `BEHIND` alone. `behindBy` turned out not
+to cover it: it counts commits but cannot say whether the repo *requires* the
+branch to be up to date. In a repo without that rule, `CLEAN` PRs sat 28–35
+commits behind and merged fine; in one with it, a PR showing `✓ ✓` was refused
+at merge for being behind. `BEHIND` is the only per-PR field that says so. The
+row draws it as `↓` in the blocker cell, the overlay as "update from <base>
+before merging". `BLOCKED` is still not drawn, for the reason above. Cost on
+this board, 4 rounds of all 7 rules: full load 4.4–5.6s without it, 6.2–7.3s
+with it, no errors and no 504.)
 
 ### 5.13 Linked issues — rejected
 

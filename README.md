@@ -27,12 +27,14 @@ Run `pile` inside a checkout of a GitHub repo.
 
 1. First run infers the repo with `gh` and writes a commented starter config to
    `~/.config/pile/config.yml`.
-2. Set `repo:` (or point at another repo with `PILE_REPO=owner/name pile`) and
+2. Edit the `repos:` list to cover your repositories and
    keep the four default rules.
 3. `j`/`k` move · `enter` opens · `d` detail · `/` search · `?` help · `q` quit.
 
 ```yaml
-repo: owner/name
+repos:
+  - name: owner/name
+    path: ~/Repos/owner/name
 refresh: 3m
 
 rules:
@@ -60,11 +62,13 @@ rules:
 - **Fetched in parallel, revealed in order.** Rules load together, but a
   section draws only once everything above it has resolved, so a slow rule
   cannot reorder the board.
-- **Checks and review state on the row.** Passing checks are counted, failing
-  ones are named, and `d` opens a per-PR overlay with conflicts, unresolved
+- **Checks and review state on the row.** Passing and failing checks are counted, and `d` names
+  failures in a per-PR overlay with conflicts, unresolved
   conversations, reviewers and size.
 - **Search without moving the board.** `/` highlights matches in place — the PR
   number, the title as drawn, and the author initials.
+- **Select and watch.** `space` selects a PR, `v` selects a range, `Y` opens
+  the copy menu, `m` watches for changes, and `S` opens a native GitHub stack.
 - **Your own keys.** Bind shell commands to keys; run them in the background or
   hand over the terminal. No actions are bound by default.
 
@@ -79,4 +83,5 @@ The site is the manual: <https://barspielberg.github.io/pr-pile/>.
 ## Status
 
 A personal tool at 0.x with no tagged releases; the docs track `main`. Tested
-on macOS. Not built: write actions, multi-repo, a preview pane.
+on macOS. Supports multiple repos, selection, watches and native GitHub stacks.
+Not built: write actions and a preview pane.

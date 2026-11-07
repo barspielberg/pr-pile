@@ -1,6 +1,6 @@
 ---
 title: Visual spec
-description: "The visual specification of the board: row anatomy, the status cluster, colour tokens, selection, and the vertical budget."
+description: Row geometry, status slots, color tokens, selection, stack glyphs and responsive tiers.
 ---
 
 ## 3.1 Row anatomy (FULL tier, 0-based cell offsets)
@@ -13,7 +13,7 @@ cursor can occupy (§3.5).
 | # | field | offset | width | align | content |
 |---|---|---|---|---|---|
 | 1 | mark | 0 | 1 | — | `▌` when selected, else space |
-| 2 | gutter | 1 | 1 | — | space |
+| 2 | sign | 1 | 1 | — | `•` when picked, else the watch flag (below), else space |
 | 3 | tree | 2 | 2 | left | `╭╴` `│ ` `╰╴` or two spaces |
 | 4 | number | 4 | 6 | left | `#3248`, padded right |
 | 5 | gutter | 10 | 1 | — | space |
@@ -37,10 +37,24 @@ cursor can occupy (§3.5).
 mechanical fix for "columns spread across the terminal" — slack has only one
 place to go, so the status cluster is pinned at columns 11–17 at every width.
 
+**The sign column** (column 1) carries the user's own marks, like vim's: `•`
+for a pick, else `⚐` U+2690 watched (`muted`) or `⚑` U+2691 something changed
+you have not looked at (`attention`, cleared by `enter`/`o` or `d`). A pick
+wins the cell: it is short-lived and acted on next, and the flag is back once
+the selection clears. The flag is kept out of the status cluster and away from
+the number because both were tried. After the number, one space short of CI, it
+read as a seventh status glyph, its column shifted with the number's length,
+and it pushed the cluster right on every row. A Nerd Font eye before the number
+overhung its cell and left an uneven gap. Here the column is fixed, it scans as
+one vertical strip, and an unwatched row is exactly what it was before
+watching existed. While a watch's poll is newer than the board's last fetch,
+the row's CI, review and blocker cells draw from the poll, so a row does not
+say `◐` for minutes after the footer said CI passed.
+
 **Every line is exactly one line, and every line is a slot.** Row height does
 not depend on the data, and there is no line in the list the cursor cannot
 occupy. Together those give the invariant the whole viewport rests on: one
-keypress scrolls the board at most one line. See [uniform rows](../research/uniform-rows/) §4.1.
+keypress scrolls the board at most one line. See `uniform-rows.md` §4.1.
 
 ```
 body  = mark(1)+gut(1)+tree(2)+number(6)+gut(1)+status(7)+gut(1)+gut(1)+age(3) = 23
@@ -63,7 +77,7 @@ the following gutter — never push the status cluster right.
 | +2 | 1 | gutter |
 | +3 | 1 | review state glyph |
 | +4 | 1 | gutter |
-| +5 | 1 | blocker (conflict or draft) |
+| +5 | 1 | blocker (conflict, draft or behind) |
 | +6 | 1 | gutter / reserved |
 
 Every sub-slot is always emitted, blank when absent, so nothing ever shifts as
@@ -79,10 +93,17 @@ review required (`attention`) · `·` none (`muted`). Reusing `✓`/`✗` is
 deliberate: same meaning, different column, and position disambiguates. `○` is
 the one hollow glyph — "not yet done" without a convention to learn.
 
-**Blocker** — one cell, precedence **conflicts > draft**: `!` when
-`Mergeable == "CONFLICTING"` (`error`), `~` when `IsDraft` (`muted`), else
-space. A conflicted draft is primarily conflicted — the conflict is what will
-bite. Both are ASCII so no font can break this slot. Draft *additionally* mutes
+**Blocker** — one cell, precedence **conflicts > draft > behind**: `!` when
+`Mergeable == "CONFLICTING"` (`error`), `~` when `IsDraft` (`muted`), `↓`
+U+2193 when `MergeState == "BEHIND"`, else space. A conflicted draft is
+primarily conflicted — the conflict is what will bite — and a draft cannot
+merge whether or not it is behind. `BEHIND` only happens where the repo
+requires an up-to-date branch, so `↓` means "update before you can merge", not
+"some commits landed on base". It is `attention` when being behind is the last
+thing left (review not pending or refused, CI not failing) and `muted`
+otherwise, so a busy board does not light up with arrows on PRs that will be
+updated again anyway. `!` and `~` are ASCII; `↓` is the one exception, no
+riskier than the `◐` and `○` already in the cluster. Draft *additionally* mutes
 the whole title: a draft is by definition not actionable, so it recedes. The only
 case where a boolean modifies the row.
 
@@ -93,6 +114,7 @@ Monochrome read-out, with all colour stripped:
 ✓  ✓      passing, approved, clean
 ◐  ○      running, review required, clean
 ·  · ~    no CI, no review decision, draft
+✓  ✓ ↓    passing, approved, must update from base to merge
 ```
 
 ## 3.3 Colour tokens
@@ -157,9 +179,8 @@ It also cannot clash. There is no hue to collide with the commit type's ANSI 4
 (§3.3.1), so hue and hit remain the independent channels §3.3 requires: hue
 says what kind of change, the fill says where the query landed.
 
-**Why the [decisions](../decisions/) objection to reverse does not reach a hit
-run.** The decision table rejects reverse for the *selected row*, because
-swapping a whole row's foreground into its
+**Why §2's objection to reverse does not reach a hit run.** §2 rejects reverse
+for the *selected row*, because swapping a whole row's foreground into its
 background destroys the status colour on exactly the failing rows that need it.
 That is sound, and it does not apply here — for a structural reason rather than
 a judgement call. `hitRuns` is applied to **three cells only**: the number, the
@@ -194,7 +215,7 @@ theme. Three cube values existed and all three are gone:
 > the next commit added `headerBg` without anyone noticing. This table is the
 > maintained record; commit messages are not.
 
-A fixed value is not banned in principle. [design principles](../) §3 allows one where
+A fixed value is not banned in principle. [Design principles](../) §3 allows one where
 a *measured* contrast requirement has no themed answer. There is currently no
 such case, and `TestNoFixedCubeColoursAnywhereOnTheBoard` fails if one
 reappears without this table changing first.
@@ -236,7 +257,7 @@ title are one quiet tier, not two competing ones.
 It used to hash the login into a fifteen-entry cube palette so the same person
 was the same colour on every row. The initials were always the identity; the
 hue was a grouping hint layered on a fact the three characters already carried,
-which is the case §2 of [design principles](../) names as the clean example of never
+which is the case §2 of [Design principles](../) names as the clean example of never
 encoding anything in colour alone. Two commits went into tuning the palette
 size — eight entries, then fifteen — and thirty-odd logins collide by
 pigeonhole against any palette that fits a terminal, so no count ended it.
@@ -267,7 +288,7 @@ A **selected section header** takes the same fill, so the cursor is never
 invisible; it is the only fill on the board, since the header has no band of its
 own (§3.5).
 
-## `selBg` is ANSI 8, and that is a deliberate trade
+### `selBg` is ANSI 8, and that is a deliberate trade
 
 The fill resolves through the user's theme rather than being a fixed grey. In
 Catppuccin Mocha — a `#1e1e2e` background with ANSI 8 at `#585b70` — every
@@ -367,7 +388,7 @@ occupy costs exactly one line of scroll delta, as does a blank separator; two
 independent implementations measured `3` for blank-plus-unselectable-header and
 `2` for unselectable-header-alone, against `1` here. The general rule —
 **every unselectable line in the list costs one to the worst-case delta** — and
-the three passes it took to find it are recorded in [uniform rows](../research/uniform-rows/) §4.1.
+the three passes it took to find it are recorded in `uniform-rows.md` §4.1.
 The gutter this replaced is §4 of that document.
 
 A section with no rows to show occupies its header plus exactly one **note**
@@ -375,7 +396,7 @@ line — the spinner while loading, `—` once resolved and empty, the error tex
 failure — and that line is a slot like any other. It has to be: a note the
 cursor could not reach was an unselectable line in the middle of the list, and
 by the rule above it cost a line of delta. That was a real defect, shipped and
-caught in review; [uniform rows](../research/uniform-rows/) §4.1 records it.
+caught in review; `uniform-rows.md` §4.1 records it.
 
 **There is no placeholder block.** A pending section used to reserve roughly its
 final height in blank lines so that sections below it were not pushed down as it
@@ -410,7 +431,7 @@ shaped like a cursor position, was never one.
 Neither cursor-binding nor showing the line conditionally rescues it.
 Cursor-binding is redundant when the board fits, because every boundary is then
 visible. A conditional line changes the list height as you scroll, which is the
-bug class [uniform rows](../research/uniform-rows/) exists to kill. See [section layout](../research/section-layout/) §13.
+bug class `uniform-rows.md` exists to kill. See `section-layout.md` §13.
 
 **An inline header avoids all of it by scrolling.** It cannot go stale, because
 it is always directly above the rows it describes; it cannot be a constant,
@@ -449,7 +470,7 @@ The overlay **names what you can act on and counts what you cannot**:
   ◐ web_client_e2e
   ✓ 9 passing, 12 skipped
 
-  any key closes
+  esc q d close · j/k scroll · / search
 ```
 
 Glyphs are the same `ciCell` vocabulary the rows use (§3.2), so nothing new has
@@ -474,7 +495,7 @@ which is what the page became; the checks are still the top of it.
   branch   PROJ-1951-unit-number-integrity
   opened    6d ago · idle 1d
 
-  any key closes
+  esc q d close · j/k scroll · / search
 ```
 
 **A line with nothing to say is not drawn.** An all-green PR opened this morning
@@ -496,21 +517,21 @@ per-file conflict data in either API, and the only computable proxy (files both
 branches touched) over-reports by 3× in the median case and 8× at worst against
 a real `git merge-tree`. `N commits behind` is the honest answer to the question
 underneath "which files conflict" — *how much work is this to fix?*
-[PR detail](../research/pr-detail/) §4 has the ground-truth measurements.
+`pr-detail.md` §4 has the ground-truth measurements.
 
 **Two of these lines arrive late.** `behindBy`, unresolved threads, the reviewer
 names and the default branch come from a second request made on `d` press,
 measured at 1.2–1.9 s. The overlay is drawn immediately from data the board
-already holds, so `d` is instant and `d`-then-any-key works even if the request
+already holds, so `d` is instant and opening and scrolling works even if the request
 never returns. A **skeleton line stands where those lines will land** — `⠹
 checking for conflicts and open conversations` — so the common case resolves in
 place instead of inserting a row and pushing the rest of the block down. It is
 one line and not one per field: both fields are conditional (unresolved threads
 exist on 6 of 50 PRs), so a placeholder each would draw rows that vanish on most
-PRs. [PR detail](../research/pr-detail/) §7.1 records the reversal of the original "absent, not a
+PRs. `pr-detail.md` §7.1 records the reversal of the original "absent, not a
 placeholder" rule and why the user's report is the evidence against it. Fetching them upfront
 would mean ~100 requests on a cold start, roughly doubling the 2–4 s the tool
-commits to in the [decisions](../decisions/) table.
+commits to in §2.
 
 Most late lines are simply **absent** until they arrive — a line that appears
 disturbs less than one that changes under the eye. The **reviewer line is the
@@ -526,6 +547,24 @@ with `d` at each row leaves requests answering questions nobody is asking, which
 is harmless and cheaper than threading cancellation through the command model.
 A PR already answered is never re-asked within a session.
 
+**A PR in a GitHub native stack ends the page with a stack block**, last so
+that its late half only grows the bottom of the page. Its header is from the
+search, so it draws at once: `stack  #4215 · 8 PRs · on master`. The entries
+come with the same second request, behind a `⠹ listing the stack` loader,
+bottom first (position 1 to the top), merged and closed PRs included:
+
+```
+  stack     #2904 · 5 PRs · on master
+    1  #2899  merged  [1/5] feat(ordering-ms): accept a one-time XLR8 code
+    4  #2902  open    [4/5] test(ordering-e2e): stub the XLR8 code exchange
+  ▌ 5  #2906  open    [5/5] refactor(ordering-e2e): rewrite the upstream stub
+```
+
+`▌` marks the PR the page is about. States are words, not glyphs: `✓` and `✗`
+already mean CI and review everywhere else. An open PR that is not on the board
+says `(not on board)`; merged and closed ones never are, so they do not. The
+size counts merged PRs, as GitHub's own stack page does.
+
 The state block is clipped **before** the checks block and never interleaved
 with it. Drop order, first dropped first: head branch, age, base (when it was
 going to say the default anyway), size, author, review, unresolved comments,
@@ -538,7 +577,7 @@ check contexts are skipped and 45% pass, against 4% failing** — a full list pu
 7 signal lines under 24 on the worst PR and overflows the 20-row design target.
 Pending checks *are* named because they are few (1–3 per PR, never more) and
 specific: knowing it is `webapp_e2e` rather than `lint` is the difference
-between ten minutes and thirty seconds. [checks page](../research/checks-page/) has the measurements
+between ten minutes and thirty seconds. `checks-page.md` has the measurements
 and the industry comparison.
 
 The tally reconciles: named lines plus counted ones account for every check
@@ -548,11 +587,9 @@ skipped count the numbers would not add up against GitHub's UI.
 When nothing is failing and nothing is running, the count **is** the answer and
 the overlay is one line — `✓ all 20 checks passing`.
 
-**Overflow clips from the bottom** with an honest `… N more lines not shown`,
-rather than scrolling. Scrolling would need keys meaning "move within the
-overlay", which contradicts the one property that makes this a look rather than
-a mode: any key closes it, and a movement key **closes it and moves in the same
-keypress**. The `any key closes` footer always survives the clip.
+**Overflow scrolls.** Detail uses the same scrolling and search keys as help.
+Its bottom hint row remains visible, including when every line fits, so the
+reader always knows how to move and leave the page.
 
 Names are deduped per bucket and stripped of shard suffixes
 (`apps_ci / webapp_e2e / Run E2E Tests (1, 5)`), ported from
@@ -570,14 +607,22 @@ losing them would silently change the meaning of adjacent rows.
 | first (base of stack) | `╭╴` U+256D U+2574 |
 | middle | `│ ` U+2502 + space |
 | last (top of stack) | `╰╴` U+2570 U+2574 |
+| an end where a native stack goes on outside this section | `╎╴` U+254E U+2574 |
+| a middle row with a PR of the stack missing just below it | `╎ ` U+254E + space |
 | not stacked | two spaces |
+
+The dashed `╎` is the one glyph a native stack adds (§4.1): the stroke is
+broken where the chain leads to a PR this section does not show. It is `muted`
+like the rest. There is no separate glyph family for a native stack against a
+branch chain; the `d` page says which it is.
 
 They cannot be confused with status or selection on three independent grounds:
 glyph family (box-drawing vs dingbats), position (2–3 vs 11–17 vs 0), and
 treatment (always faint; selection is a filled block, no tree glyph is filled).
 
-A chain is one PR targeting another's head branch, emitted contiguously
-root-first. An unset base ref must not match an unset head ref, or every PR looks
+A chain is a GitHub native stack, ordered by each PR's position in it; a PR in
+no native stack falls back to one PR targeting another's head branch. Either
+way a chain is emitted contiguously, root-first, where its root would sort. An unset base ref must not match an unset head ref, or every PR looks
 stacked on every other and none is emitted as a root. A base/head cycle is
 guarded with a seen set. Tree glyphs are now never disturbed: the search does not
 reorder or hide rows, so a chain stays contiguous and no `╰╴` can dangle.
@@ -623,7 +668,7 @@ they are cheap in the way the blank separator was not: a header carries the
 section's name and its count, and the cursor can rest on it, so it costs a line
 and gives back both a label and a scroll delta of 1. A blank separator carried
 nothing and cost a line *and* a line of delta — which is why there is none.
-[uniform rows](../research/uniform-rows/) §4.1 has the measurement.
+`uniform-rows.md` §4.1 has the measurement.
 
 A second chrome line was tried above the list (§3.5.1) and reverted, so the row
 it cost is back. Verified in a real 120×40 pane: the whole 29-row board plus the
@@ -638,7 +683,7 @@ have. The repo yielded that slot, being a constant the user chose while the
 section changes under every keypress. It is bound to the **cursor**, never to
 the top visible row: at 40 rows the board does not scroll, so a top-row binding is
 frozen at the first section forever, which is exactly how the reverted sticky
-line failed. [section layout](../research/section-layout/) §14 has the walk that verifies it changes on
+line failed. `section-layout.md` §14 has the walk that verifies it changes on
 every keypress. When the two fields do not both fit the keys clip and the name
 survives whole. A status message *replaces* the keybinding text rather than
 adding a row — the keybindings are the least urgent thing on the board. While the
@@ -656,7 +701,7 @@ it. A two-column fold was tried and reverted: it was more layout code and it
 still clipped on a short pane, so it bought nothing. The page is now one column
 that scrolls with `j`/`k`, the arrows, `ctrl+d`/`ctrl+u`, page keys, and `g`/`G`.
 
-Scrolling costs the old **"any key closes"** contract, because `j` and `k` now
+Scrolling costs the old **"esc q d close · j/k scroll · / search"** contract, because `j` and `k` now
 mean something else. The rule is the inverse of a mode: the scroll keys scroll
 and **everything else closes**, so a key the reader guesses at still leaves the
 page. The bottom row says which keys close it and where in the legend you are —
@@ -669,10 +714,8 @@ at all and `j` was a silent no-op that still swallowed the key, which is
 indistinguishable from "scrolling is broken" — at exactly the heights a
 full-screen terminal reports. One shape at every height is worth the row, and
 the closing keys need saying everywhere regardless, since scrolling took the
-`any key closes` contract away at all heights, not just short ones.
+`esc q d close · j/k scroll · / search` contract away at all heights, not just short ones.
 
-**The detail overlay does not scroll and should not.** `fitChecks` clips it from
-the bottom of a list already ranked by what you pressed `d` for, and its any-key
-contract is load-bearing: `d` then `j` inspects a PR and carries on down the
-board in one motion. Adding a scroll mode there would spend that motion to solve
-a problem the ranking already handles.
+The detail page now scrolls and searches like help; see [PR detail](../../guide/detail/) for its current key contract.
+
+---

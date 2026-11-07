@@ -9,7 +9,7 @@ checkout build; Homebrew follows the first release.
 
 ## Requirements
 
-- **macOS** — the board uses `open`, `pbcopy` and `osascript`, so it is tested
+- **macOS** — the board uses `open` and `pbcopy`, so it is tested
   on macOS only; Linux is not tested.
 - **`gh`** — installed and logged in. pile reads your token from `gh auth token`
   and infers the repo with `gh repo view`, so it never asks you to provision a

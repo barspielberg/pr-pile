@@ -8,7 +8,7 @@ the terminal over, and repaints the board when the tool exits.
 
 ```yaml
 actions:
-  - key: v
+  - key: W
     name: review
     run: tuicr pr {{.Number}}
     mode: suspend

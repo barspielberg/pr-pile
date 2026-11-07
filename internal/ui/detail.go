@@ -2,10 +2,12 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/barspielberg/pr-pile/internal/github"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // stateLines is the state block: what is true about the PR rather than about
@@ -15,7 +17,7 @@ import (
 // A line with nothing to say is not drawn. On an all-green, freshly-opened PR
 // this is three lines; docs/pr-detail.md §8.3 is the case it is tuned for.
 func (m Model) stateLines(pr github.PR) []string {
-	d, loaded := m.detail[pr.Number]
+	d, loaded := m.detail[pr.Key()]
 	body := max(0, m.width-4)
 	var out []string
 
@@ -34,6 +36,10 @@ func (m Model) stateLines(pr github.PR) []string {
 	}
 	if s := m.pendingLine(pr); s != "" {
 		out = append(out, s)
+	}
+	// Only with several repos: with one it would be a constant.
+	if m.multiRepo() {
+		out = append(out, label("repo", terminalText(pr.Repo)))
 	}
 	if pr.Author != "" {
 		out = append(out, label("author", person(pr.AuthorName, pr.Author)))
@@ -61,6 +67,75 @@ func (m Model) stateLines(pr github.PR) []string {
 	return out
 }
 
+// stackLines is the PR's native stack, bottom first. It is the last block
+// because its entries arrive with the detail request, and a block that grows
+// at the bottom of the page moves nothing above it. The header line is from
+// the search, so it draws at once.
+//
+// States are words: a check mark here would read as CI or review, which is
+// what the glyph means everywhere else on the board.
+func (m Model) stackLines(pr github.PR) []string {
+	s := pr.Stack
+	if s.Number == 0 {
+		return nil
+	}
+	head := fmt.Sprintf("#%d · %s", s.Number, plural(s.Size, "PR"))
+	if s.Base != "" {
+		head += " · on " + terminalText(s.Base)
+	}
+	out := []string{"  " + mutedStyle.Render(pad("stack", 10)) + clip(head, max(0, m.width-16))}
+
+	d, loaded := m.detail[pr.Key()]
+	if !loaded {
+		if _, failed := m.detailFailed[pr.Key()]; failed || m.client == nil {
+			return out
+		}
+		frame := string(spinFrames[m.spinner%len(spinFrames)])
+		return append(out, "  "+mutedStyle.Render(frame+" listing the stack"))
+	}
+
+	shown := map[github.Key]bool{}
+	for _, sec := range m.board.Sections() {
+		for _, r := range sec.Rows {
+			shown[r.PR.Key()] = true
+		}
+	}
+	posW, numW := 0, 0
+	for _, e := range d.Stack {
+		posW = max(posW, len(strconv.Itoa(e.Position)))
+		numW = max(numW, len(strconv.Itoa(e.Number))+1)
+	}
+	for _, e := range d.Stack {
+		mark := " "
+		if e.Number == pr.Number {
+			mark = accentStyle.Render("▌")
+		}
+		word, style := stackState(e)
+		lead := fmt.Sprintf("%*d  %-*s  %-6s  ", posW, e.Position, numW, "#"+strconv.Itoa(e.Number), word)
+		// Merged and closed PRs are never on the board, so only an open one
+		// missing from it is worth saying.
+		note := ""
+		if e.State == "OPEN" && !shown[github.Key{Repo: pr.Repo, Number: e.Number}] {
+			note = "  (not on board)"
+		}
+		room := max(0, m.width-4-lipgloss.Width(lead)-len(note))
+		out = append(out, "  "+mark+" "+style.Render(lead+clip(terminalText(e.Title), room))+mutedStyle.Render(note))
+	}
+	return out
+}
+
+func stackState(e github.StackEntry) (string, lipgloss.Style) {
+	switch {
+	case e.State == "MERGED":
+		return "merged", mutedStyle
+	case e.State == "CLOSED":
+		return "closed", mutedStyle
+	case e.IsDraft:
+		return "draft", fgStyle
+	}
+	return "open", fgStyle
+}
+
 // pendingLine is the page's loading state: one skeleton line standing where the
 // on-demand lines will land, so the common case resolves in place instead of
 // pushing the rest of the block down. docs/pr-detail.md §7 chose to draw
@@ -75,7 +150,10 @@ func (m Model) stateLines(pr github.PR) []string {
 // trading the reflow on arrival for a worse one on resolution. One line is what
 // the group usually resolves to, so usually nothing moves at all.
 func (m Model) pendingLine(pr github.PR) string {
-	if _, loaded := m.detail[pr.Number]; loaded {
+	if _, loaded := m.detail[pr.Key()]; loaded {
+		return ""
+	}
+	if _, failed := m.detailFailed[pr.Key()]; failed {
 		return ""
 	}
 	// Nothing is coming when there is no client to ask, so a board rendered
@@ -93,18 +171,31 @@ func (m Model) pendingLine(pr github.PR) string {
 // case and 8x at worst against a real merge, so it fabricates rather than
 // merely omits. See docs/pr-detail.md §4.
 func (m Model) mergeLine(pr github.PR, d github.Detail, loaded bool) string {
+	// Named against the PR's own base, not the repo default: a stacked PR
+	// is behind the branch it targets, and saying "behind master" there
+	// would be a different and wrong number.
+	base := pr.BaseRefName
+	if base == "" {
+		base = d.DefaultBranch
+	}
+	base = terminalText(base)
 	behind := ""
 	if loaded && d.BehindBy > 0 {
-		// Named against the PR's own base, not the repo default: a stacked PR
-		// is behind the branch it targets, and saying "behind master" there
-		// would be a different and wrong number.
-		base := pr.BaseRefName
-		if base == "" {
-			base = d.DefaultBranch
-		}
 		behind = fmt.Sprintf("%s behind %s", plural(d.BehindBy, "commit"), base)
 	}
 	switch {
+	case pr.Mergeable != "CONFLICTING" && pr.MergeState == "BEHIND":
+		// From the row's data, so it draws before behindBy lands and the
+		// count joins it without moving it.
+		if base == "" {
+			base = "its base"
+		}
+		text := "update from " + base + " before merging"
+		if behind != "" {
+			text += " · " + plural(d.BehindBy, "commit") + " behind"
+		}
+		_, style := blockerCell(pr)
+		return "  " + style.Render("↓") + " " + mutedStyle.Render(text)
 	case pr.Mergeable == "CONFLICTING" && behind != "":
 		return "  " + errorStyle.Render("!") + " " + mutedStyle.Render("conflicted · "+behind)
 	case pr.Mergeable == "CONFLICTING":
@@ -131,6 +222,9 @@ func (m Model) reviewerLine(pr github.PR, d github.Detail, loaded bool) string {
 		if pr.Review == "" || pr.Review == "REVIEW_REQUIRED" {
 			return ""
 		}
+		if _, failed := m.detailFailed[pr.Key()]; failed {
+			return ""
+		}
 		return head + mutedStyle.Render("…")
 	}
 	if len(d.Reviewers) == 0 {
@@ -151,6 +245,7 @@ func (m Model) reviewerLine(pr github.PR, d github.Detail, loaded bool) string {
 // 36% of this board's authors and for some reviewers too, so the login is
 // always carried -- it is also the string you would @-mention or search for.
 func person(name, login string) string {
+	name, login = terminalText(name), terminalText(login)
 	if name == "" {
 		return login
 	}

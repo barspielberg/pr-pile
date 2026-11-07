@@ -19,17 +19,11 @@ tooling.
 ## Repo inference
 
 Run `pile` inside a checkout of a GitHub repo. It asks `gh repo view` for the
-`owner/name` and writes the starter config with that `repo:` already filled in.
+`owner/name` and writes a starter `repos` list containing that repository.
 
-Run it outside a checkout, or point at a different repo for one invocation, by
-setting `$PILE_REPO`:
-
-```sh
-PILE_REPO=owner/name pile
-```
-
-`$PILE_REPO` overrides the configured repo for that run only; it does not edit
-the file.
+Outside a checkout, write a config with a `repos` list yourself. Add more
+repositories to that list to show them together. Use `PILE_CONFIG` to choose
+a different board configuration; `PILE_REPO` is no longer an override.
 
 ## The starter config
 
@@ -37,7 +31,8 @@ First run writes a commented starter file. The four rules it writes, with the
 comments elided:
 
 ```yaml
-repo: owner/name
+repos:
+  - name: owner/name
 refresh: 3m
 
 rules:
@@ -72,6 +67,7 @@ write only the part that distinguishes the rule.
 - The file is decoded **over the defaults**, so an absent key keeps its default
   rather than zeroing.
 - An explicit `rules:` list replaces the defaults wholesale.
-- A valid config needs a `repo:` of the form `owner/name` and at least one rule
+- Unknown fields are rejected. A valid config needs a `repos` list with at
+  least one `name` in the form `owner/name`, and at least one rule
   with a `name:` and a `query:`. Anything else exits with an error that names
   the problem.

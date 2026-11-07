@@ -20,7 +20,6 @@ Run it inside a checkout of a GitHub repo. On first run it infers the repo with
 | variable | effect |
 | --- | --- |
 | `PILE_CONFIG` | Full path to the config file. |
-| `PILE_REPO` | Overrides `repo:` for one run. |
 | `XDG_CONFIG_HOME` | Replaces `~/.config` when locating the config file. |
 
 See [Config](../config/) for precedence.

@@ -10,7 +10,9 @@ honest example rather than a recommendation. Substitute whatever your own
 worktree flow is; the shape of the recipe is what matters.
 
 ```yaml
-repoPath: ~/Repos/owner/name    # {{.RepoPath}} is empty without this
+repos:
+  - name: owner/name
+    path: ~/Repos/owner/name    # the action requires a checkout path
 
 actions:
   - key: w

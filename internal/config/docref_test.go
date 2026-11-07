@@ -21,6 +21,8 @@ func TestReferencePagesDocumentEveryKey(t *testing.T) {
 		page string
 	}{
 		{"Config", reflect.TypeOf(Config{}), "reference/config.md"},
+		{"Repo", reflect.TypeOf(Repo{}), "reference/config.md"},
+		{"Watch", reflect.TypeOf(Watch{}), "reference/config.md"},
 		{"Rule", reflect.TypeOf(Rule{}), "reference/rules.md"},
 		{"Action", reflect.TypeOf(Action{}), "reference/actions.md"},
 	}

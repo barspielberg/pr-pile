@@ -1,7 +1,8 @@
 # The repo the demo recording shows. A public repo with real open PRs, so the
 # board is the real tool on real data, not a fixture. cli/cli is GitHub's own
 # CLI repo — the same audience that runs `gh` to use pile.
-repo: cli/cli
+repos:
+  - name: cli/cli
 refresh: 3m
 
 rules:

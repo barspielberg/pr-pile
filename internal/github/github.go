@@ -14,7 +14,10 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"slices"
+	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,6 +30,13 @@ type Client struct {
 	// endpoint is a field only so tests can point it at a stub; production
 	// always uses the const above.
 	endpoint string
+
+	// noStacks is set once GitHub rejects the stack fields, so the rest of the
+	// session asks without them instead of failing and retrying every time.
+	// The detail page's stack entries are a separate set of fields, so losing
+	// them does not cost the board its stacks.
+	noStacks       atomic.Bool
+	noStackEntries atomic.Bool
 }
 
 func (c *Client) url() string {
@@ -50,59 +60,171 @@ func New() (*Client, error) {
 	return &Client{token: token, http: &http.Client{Timeout: 30 * time.Second}}, nil
 }
 
+// Key identifies a PR on a board that can span repos, where numbers repeat.
+type Key struct {
+	Repo   string
+	Number int
+}
+
 type PR struct {
-	Number       int
-	Title        string
-	URL          string
-	Author       string // login; the identifier you actually @-mention
-	AuthorName   string // display name, null for 36% of this board: see docs/pr-detail.md §5.2
-	IsDraft      bool
-	Review       string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
-	Mergeable    string // MERGEABLE | CONFLICTING | UNKNOWN
-	UpdatedAt    time.Time
-	CreatedAt    time.Time
-	HeadRefName  string
-	BaseRefName  string
-	Additions    int
-	Deletions    int
-	ChangedFiles int
-	CIState      string   // SUCCESS | FAILURE | PENDING | ERROR | "" (none)
-	FailedGates  []string // names of failing checks, deduped
-	PendingGates []string // names of still-running checks, deduped
-	PassedCount  int      // passing checks are counted, not named: see docs/checks-page.md
+	Repo        string // owner/name
+	Number      int
+	Title       string
+	URL         string
+	Author      string // login; the identifier you actually @-mention
+	AuthorName  string // display name, null for 36% of this board: see docs/pr-detail.md §5.2
+	IsDraft     bool
+	Review      string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
+	Mergeable   string // MERGEABLE | CONFLICTING | UNKNOWN
+	UpdatedAt   time.Time
+	CreatedAt   time.Time
+	HeadRefName string
+	// HeadOwner is the fork's owner for a PR from a fork, and empty otherwise.
+	HeadOwner      string
+	BaseRefName    string
+	Additions      int
+	Deletions      int
+	ChangedFiles   int
+	CIState        string   // SUCCESS | FAILURE | PENDING | CANCELLED | "" (none)
+	FailedGates    []string // names of failing checks, deduped
+	PendingGates   []string // names of still-running checks, deduped
+	CancelledGates []string // names of checks whose latest run was cancelled, deduped
+	PassedCount    int      // passing checks are counted, not named: see docs/checks-page.md
 
 	// Skipped is the largest bucket on this board (47% of contexts) and means
 	// a job's path filter did not match, which is a fact about the workflow
 	// rather than about the PR. Counted so the overlay can reconcile its
 	// total against GitHub's, never listed.
 	SkippedCount int
+
+	// MergeState is mergeStateStatus, and only BEHIND is drawn: it is the one
+	// state that says the repo requires the branch to be up to date, which
+	// BehindBy cannot. The rest repeat what review and CI already show. See
+	// docs/pr-detail.md §5.12.
+	MergeState string // BEHIND | BLOCKED | CLEAN | DIRTY | HAS_HOOKS | UNSTABLE | UNKNOWN
+
+	Stack Stack // zero when the PR is not in a native stack
 }
 
-const searchQuery = `
-query($q: String!, $n: Int!) {
-  search(query: $q, type: ISSUE, first: $n) {
-    nodes {
-      ... on PullRequest {
-        number title url isDraft reviewDecision mergeable updatedAt createdAt
+// Stack is the PR's place in a GitHub native stack. Merged PRs keep their
+// positions, so the lowest open PR can sit above 1; it is the one whose base
+// is Base.
+type Stack struct {
+	Number   int
+	Size     int
+	Base     string
+	Position int // 1 is the bottom, on Base; Size is the top
+}
+
+func (p PR) Key() Key { return Key{Repo: p.Repo, Number: p.Number} }
+
+// StackURL is built by hand: the API has no url field for a stack.
+func (p PR) StackURL() string {
+	if p.Stack.Number == 0 || p.Repo == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/stack/%d", p.Repo, p.Stack.Number)
+}
+
+// CompareRef names the PR's head for a compare against its base. A fork's
+// branch is not in the base repo, so it needs the owner:branch form.
+func (p PR) CompareRef() string {
+	if p.HeadOwner != "" {
+		return p.HeadOwner + ":" + p.HeadRefName
+	}
+	return p.HeadRefName
+}
+
+// prFields is everything a row draws. The watch poll asks for the same fields
+// so a watched PR parses into the same PR the board holds.
+const prFields = `
+        number title url isDraft reviewDecision mergeable mergeStateStatus updatedAt createdAt
         headRefName baseRefName
+        isCrossRepository headRepositoryOwner { login }
+        repository { nameWithOwner }
         additions deletions changedFiles
-        author { login ... on User { name } }
+        author { login ... on User { name } }` + stackMarker + `
         commits(last: 1) {
           nodes {
             commit {
+              rollupState: statusCheckRollup { state }
               statusCheckRollup {
-                state
                 contexts(first: 100) {
+                  pageInfo { hasNextPage }
                   nodes {
                     __typename
-                    ... on CheckRun { name status conclusion }
+                    ... on CheckRun {
+                      name status conclusion startedAt
+                      checkSuite { workflowRun { runNumber event workflow { databaseId } } }
+                    }
                     ... on StatusContext { context state }
                   }
                 }
               }
             }
           }
-        }
+        }`
+
+// stackFields are undocumented, and an unknown field fails the whole query,
+// so they replace stackMarker only until GitHub rejects them.
+const (
+	stackMarker = "\n        #stack"
+	stackFields = "\n        stack { number size baseRefName } stackEntry { position }"
+)
+
+func fields(stacks bool) string {
+	if !stacks {
+		return strings.Replace(prFields, stackMarker, "", 1)
+	}
+	return strings.Replace(prFields, stackMarker, stackFields, 1)
+}
+
+// stacksRejected is GitHub refusing the stack fields themselves, which is a
+// schema change to ride out. Only a query that failed validation carries an
+// extensions code; an error fetching one PR's stack carries a type instead
+// (FORBIDDEN, NOT_FOUND) and must not cost the session its stacks.
+func stacksRejected(errs []gqlError) bool {
+	for _, e := range errs {
+		if e.Extensions.Code == "" || e.Type != "" {
+			continue
+		}
+		if slices.Contains(e.Path, any("stack")) || slices.Contains(e.Path, any("stackEntry")) {
+			return true
+		}
+	}
+	return false
+}
+
+type gqlError struct {
+	Message    string `json:"message"`
+	Type       string `json:"type"`
+	Path       []any  `json:"path"`
+	Extensions struct {
+		Code string `json:"code"`
+	} `json:"extensions"`
+}
+
+// postStacks sends query(true) unless off says GitHub has rejected those
+// stack fields before. If it rejects them now, off is set and query(false)
+// is sent instead, so a schema change costs the stacks and nothing else.
+func postStacks[T any](ctx context.Context, c *Client, off *atomic.Bool, stacks bool,
+	query func(stacks bool) string, vars map[string]any, errs func(T) []gqlError) (T, error) {
+	stacks = stacks && !off.Load()
+	var out T
+	if err := c.post(ctx, query(stacks), vars, &out); err != nil || !stacks || !stacksRejected(errs(out)) {
+		return out, err
+	}
+	off.Store(true)
+	var retry T
+	err := c.post(ctx, query(false), vars, &retry)
+	return retry, err
+}
+
+const searchQuery = `
+query($q: String!, $n: Int!) {
+  search(query: $q, type: ISSUE, first: $n) {
+    nodes {
+      ... on PullRequest {%s
       }
     }
   }
@@ -114,9 +236,7 @@ type graphQLResponse struct {
 			Nodes []prNode `json:"nodes"`
 		} `json:"search"`
 	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
+	Errors []gqlError `json:"errors"`
 }
 
 type prNode struct {
@@ -126,36 +246,88 @@ type prNode struct {
 	IsDraft        bool      `json:"isDraft"`
 	ReviewDecision string    `json:"reviewDecision"`
 	Mergeable      string    `json:"mergeable"`
+	MergeState     string    `json:"mergeStateStatus"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 	CreatedAt      time.Time `json:"createdAt"`
 	HeadRefName    string    `json:"headRefName"`
 	BaseRefName    string    `json:"baseRefName"`
-	Additions      int       `json:"additions"`
-	Deletions      int       `json:"deletions"`
-	ChangedFiles   int       `json:"changedFiles"`
-	Author         struct {
+	IsCross        bool      `json:"isCrossRepository"`
+	HeadOwner      *struct {
+		Login string `json:"login"`
+	} `json:"headRepositoryOwner"`
+	Additions    int `json:"additions"`
+	Deletions    int `json:"deletions"`
+	ChangedFiles int `json:"changedFiles"`
+	Repository   struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+	Author struct {
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	} `json:"author"`
+	Stack *struct {
+		Number      int    `json:"number"`
+		Size        int    `json:"size"`
+		BaseRefName string `json:"baseRefName"`
+	} `json:"stack"`
+	StackEntry *struct {
+		Position int `json:"position"`
+	} `json:"stackEntry"`
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
+				RollupState *struct {
+					State string `json:"state"`
+				} `json:"rollupState"`
 				StatusCheckRollup *struct {
-					State    string `json:"state"`
 					Contexts struct {
-						Nodes []struct {
-							TypeName   string `json:"__typename"`
-							Name       string `json:"name"`
-							Status     string `json:"status"`
-							Conclusion string `json:"conclusion"`
-							Context    string `json:"context"`
-							State      string `json:"state"`
-						} `json:"nodes"`
+						PageInfo struct {
+							HasNextPage bool `json:"hasNextPage"`
+						} `json:"pageInfo"`
+						Nodes []contextNode `json:"nodes"`
 					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+type contextNode struct {
+	TypeName   string    `json:"__typename"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	Conclusion string    `json:"conclusion"`
+	StartedAt  time.Time `json:"startedAt"`
+	CheckSuite *struct {
+		WorkflowRun *struct {
+			RunNumber int    `json:"runNumber"`
+			Event     string `json:"event"`
+			Workflow  struct {
+				DatabaseID int64 `json:"databaseId"`
+			} `json:"workflow"`
+		} `json:"workflowRun"`
+	} `json:"checkSuite"`
+	Context string `json:"context"`
+	State   string `json:"state"`
+}
+
+// workflowKey identifies a workflow file and the event that started it, as gh
+// pr checks does (cli/cli#7618): a push run and a pull_request run of the same
+// workflow are separate checks. The ID rather than the name, because two files
+// can share a name while numbering their runs apart.
+type workflowKey struct {
+	id    int64
+	event string
+}
+
+// workflow is the zero key and run 0 for a CheckRun posted by an app rather
+// than by Actions.
+func (n contextNode) workflow() (workflowKey, int) {
+	if n.CheckSuite == nil || n.CheckSuite.WorkflowRun == nil {
+		return workflowKey{}, 0
+	}
+	r := n.CheckSuite.WorkflowRun
+	return workflowKey{r.Workflow.DatabaseID, r.Event}, r.RunNumber
 }
 
 // CheckRepo verifies the repo is actually reachable. The search index reports
@@ -210,35 +382,15 @@ func (c *Client) CheckRepo(ctx context.Context, repo string) error {
 // Search runs one rule's query. The search index is noisy (the same query has
 // ranged 1.4s-4.1s), so callers should run rules concurrently.
 func (c *Client) Search(ctx context.Context, query string, limit int) ([]PR, error) {
-	body, err := json.Marshal(map[string]any{
-		"query":     searchQuery,
-		"variables": map[string]any{"q": query, "n": limit},
-	})
+	out, err := postStacks(ctx, c, &c.noStacks, true,
+		func(stacks bool) string { return fmt.Sprintf(searchQuery, fields(stacks)) },
+		map[string]any{"q": query, "n": limit},
+		func(r graphQLResponse) []gqlError { return r.Errors })
 	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github returned %s", resp.Status)
-	}
-	var out graphQLResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
 	// GraphQL reports query errors in a 200 body, so this is not redundant
-	// with the status check above.
+	// with the status check in post.
 	if len(out.Errors) > 0 {
 		return nil, fmt.Errorf("github: %s", out.Errors[0].Message)
 	}
@@ -250,8 +402,97 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]PR, err
 	return prs, nil
 }
 
+// post sends one GraphQL request and decodes the body into out. Errors in a
+// 200 body are left in out for the caller, which knows which ones are fatal.
+func (c *Client) post(ctx context.Context, query string, vars map[string]any, out any) error {
+	body, err := json.Marshal(map[string]any{"query": query, "variables": vars})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github returned %s", resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// Watched is a PR as the watch poll saw it. State is OPEN, MERGED or CLOSED:
+// the board only searches open PRs, so once one merges this is the only
+// request that still sees it.
+type Watched struct {
+	PR
+	State string
+}
+
+// Watch fetches every watched PR in one request, one alias per PR. A PR that
+// no longer resolves is left out of the result rather than failing the rest.
+func (c *Client) Watch(ctx context.Context, repo string, numbers []int) (map[int]Watched, error) {
+	if len(numbers) == 0 {
+		return nil, nil
+	}
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return nil, fmt.Errorf("repo %q must be owner/name", repo)
+	}
+	query := func(stacks bool) string {
+		var q strings.Builder
+		q.WriteString("query($o: String!, $r: String!) {\n  repository(owner: $o, name: $r) {\n")
+		for _, n := range numbers {
+			fmt.Fprintf(&q, "    p%d: pullRequest(number: %d) { state %s\n    }\n", n, n, fields(stacks))
+		}
+		q.WriteString("  }\n}")
+		return q.String()
+	}
+	vars := map[string]any{"o": owner, "r": name}
+	type response struct {
+		Data struct {
+			Repository map[string]*struct {
+				prNode
+				State string `json:"state"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []gqlError `json:"errors"`
+	}
+	out, err := postStacks(ctx, c, &c.noStacks, true, query, vars,
+		func(r response) []gqlError { return r.Errors })
+	if err != nil {
+		return nil, err
+	}
+
+	got := make(map[int]Watched, len(numbers))
+	for _, n := range out.Data.Repository {
+		if n != nil && n.Number != 0 {
+			got[n.Number] = Watched{PR: n.toPR(), State: n.State}
+		}
+	}
+	// A missing PR is a NOT_FOUND on its own alias, so a poll where every PR
+	// is missing still succeeds and the caller can drop them. Anything else
+	// fails the poll when nothing came back.
+	if len(got) == 0 {
+		for _, e := range out.Errors {
+			if e.Type != "NOT_FOUND" || len(e.Path) != 2 {
+				return nil, fmt.Errorf("github: %s", e.Message)
+			}
+		}
+	}
+	return got, nil
+}
+
 func (n prNode) toPR() PR {
 	pr := PR{
+		Repo:        n.Repository.NameWithOwner,
 		Number:      n.Number,
 		Title:       n.Title,
 		URL:         n.URL,
@@ -260,6 +501,7 @@ func (n prNode) toPR() PR {
 		IsDraft:     n.IsDraft,
 		Review:      n.ReviewDecision,
 		Mergeable:   n.Mergeable,
+		MergeState:  n.MergeState,
 		UpdatedAt:   n.UpdatedAt,
 		CreatedAt:   n.CreatedAt,
 		HeadRefName: n.HeadRefName,
@@ -269,61 +511,146 @@ func (n prNode) toPR() PR {
 		Deletions:    n.Deletions,
 		ChangedFiles: n.ChangedFiles,
 	}
+	if n.IsCross && n.HeadOwner != nil {
+		pr.HeadOwner = n.HeadOwner.Login
+	}
+	if n.Stack != nil && n.StackEntry != nil {
+		pr.Stack = Stack{
+			Number:   n.Stack.Number,
+			Size:     n.Stack.Size,
+			Base:     n.Stack.BaseRefName,
+			Position: n.StackEntry.Position,
+		}
+	}
 	if len(n.Commits.Nodes) == 0 {
 		return pr
 	}
-	rollup := n.Commits.Nodes[0].Commit.StatusCheckRollup
+	commit := n.Commits.Nodes[0].Commit
+	// GitHub answers rollup.state two ways, and which one depends on the
+	// selection: asked alone it counts only each workflow's newest run, as the
+	// PR page and branch protection do; asked next to contexts it counts every
+	// run on the commit, so a run cancelled by a newer one turns it FAILURE.
+	// Undocumented; seen in dlvhdr/gh-dash#114 and pvcnt/mergeable#189, and
+	// reproduced on biomejs/biome@745bf42. Hence the separate alias.
+	if commit.RollupState != nil {
+		pr.CIState = commit.RollupState.State
+	}
+	rollup := commit.StatusCheckRollup
 	if rollup == nil {
 		return pr
 	}
-	pr.CIState = rollup.State
 	// Deduped per bucket rather than globally: the same leaf name legitimately
 	// appears once as a skipped reusable-workflow stub and once as the real
 	// run, and dropping the second would lose the one that matters.
 	failed := map[string]bool{}
 	pending := map[string]bool{}
+	cancelled := map[string]bool{}
 	passed := map[string]bool{}
-	for _, ctxNode := range rollup.Contexts.Nodes {
-		name, state := ctxNode.Name, ctxNode.Conclusion
-		if ctxNode.TypeName == "StatusContext" {
-			name, state = ctxNode.Context, ctxNode.State
-		} else if state == "" {
-			// A CheckRun that has not finished carries a null conclusion, so
-			// its status is the only thing that says it is still running.
-			state = ctxNode.Status
-		}
-		if state == "SKIPPED" {
+	var anyFailed, anyCancelled bool
+	for _, c := range latestChecks(rollup.Contexts.Nodes) {
+		if c.state == "SKIPPED" {
 			pr.SkippedCount++
 			continue
 		}
-		leaf := gateName(name)
-		if leaf == "" {
-			continue
-		}
+		// Umbrella gates still count toward anyFailed, since they can be the
+		// only thing that failed; they are just never named.
+		leaf := gateName(c.name)
 		switch {
-		case isFailure(state):
-			if !failed[leaf] {
+		case isFailure(c.state):
+			anyFailed = true
+			if leaf != "" && !failed[leaf] {
 				failed[leaf] = true
 				pr.FailedGates = append(pr.FailedGates, leaf)
 			}
-		case isPending(state):
-			if !pending[leaf] {
+		case isPending(c.state):
+			if leaf != "" && !pending[leaf] {
 				pending[leaf] = true
 				pr.PendingGates = append(pr.PendingGates, leaf)
 			}
-		case isSuccess(state):
-			if !passed[leaf] {
+		case c.state == "CANCELLED":
+			anyCancelled = true
+			if leaf != "" && !cancelled[leaf] {
+				cancelled[leaf] = true
+				pr.CancelledGates = append(pr.CancelledGates, leaf)
+			}
+		case isSuccess(c.state):
+			if leaf != "" && !passed[leaf] {
 				passed[leaf] = true
 				pr.PassedCount++
 			}
 		}
 	}
+	// StatusState has no cancelled value, so a cancel reads as FAILURE. When a
+	// cancel is all that is wrong, say so rather than paint it red; past the
+	// first page of contexts the failure may just be one not fetched.
+	if (pr.CIState == "FAILURE" || pr.CIState == "ERROR") && !anyFailed && anyCancelled &&
+		!rollup.Contexts.PageInfo.HasNextPage {
+		pr.CIState = "CANCELLED"
+	}
 	return pr
+}
+
+type check struct{ name, state string }
+
+// latestChecks keeps what GitHub's PR page shows: only the newest run of each
+// workflow, and within it the newest attempt of each job. A superseded run
+// leaves its checks on the commit, so without this a cancelled or since-fixed
+// run stays listed, including jobs the newer run has not reached yet.
+// StatusContexts need nothing: GitHub already keeps only the latest per context.
+func latestChecks(nodes []contextNode) []check {
+	type run struct {
+		at     int
+		start  time.Time
+		queued bool
+	}
+	latestRun := map[workflowKey]int{}
+	for _, n := range nodes {
+		if wf, num := n.workflow(); num > latestRun[wf] {
+			latestRun[wf] = num
+		}
+	}
+	var out []check
+	type jobKey struct {
+		wf   workflowKey
+		name string
+	}
+	newest := map[jobKey]run{}
+	for _, n := range nodes {
+		if n.TypeName == "StatusContext" {
+			out = append(out, check{n.Context, n.State})
+			continue
+		}
+		wf, num := n.workflow()
+		if num < latestRun[wf] {
+			continue
+		}
+		state := n.Conclusion
+		if state == "" {
+			// A CheckRun that has not finished carries a null conclusion, so
+			// its status is the only thing that says it is still running.
+			state = n.Status
+		}
+		// A queued run has no startedAt yet, and is the newest by definition.
+		// A finished run can also lack one, if it was cancelled while queued.
+		queued := n.StartedAt.IsZero() && n.Status != "COMPLETED"
+		key := jobKey{wf, n.Name}
+		cur, seen := newest[key]
+		if !seen {
+			newest[key] = run{len(out), n.StartedAt, queued}
+			out = append(out, check{n.Name, state})
+			continue
+		}
+		if queued || (!cur.queued && n.StartedAt.After(cur.start)) {
+			newest[key] = run{cur.at, n.StartedAt, queued}
+			out[cur.at].state = state
+		}
+	}
+	return out
 }
 
 func isFailure(state string) bool {
 	switch state {
-	case "FAILURE", "TIMED_OUT", "CANCELLED", "ERROR", "ACTION_REQUIRED":
+	case "FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ERROR", "ACTION_REQUIRED":
 		return true
 	}
 	return false
@@ -373,13 +700,29 @@ func gateName(raw string) string {
 // cost +6,565 bytes and a rate-limit point on the board, and nothing here.
 // Measured at 912-1,400 bytes, 1.2-1.9s, 1 point. See docs/pr-detail.md §2.4.
 type Detail struct {
-	Number int // tags the response so a stale one can be dropped
+	// Repo and Number tag the response so a stale one can be dropped.
+	Repo   string
+	Number int
 
 	BehindBy      int
 	Unresolved    int
 	Reviewers     []Reviewer
 	DefaultBranch string
+
+	// Stack is every PR in the PR's native stack, bottom first, merged and
+	// closed ones included. Empty when it is in none.
+	Stack []StackEntry
 }
+
+type StackEntry struct {
+	Position int
+	Number   int
+	Title    string
+	State    string // OPEN | MERGED | CLOSED
+	IsDraft  bool
+}
+
+func (d Detail) Key() Key { return Key{Repo: d.Repo, Number: d.Number} }
 
 // Reviewer is someone who has actually formed an opinion. Requested reviewers
 // are not carried: 17 of 50 are teams, which the board already expresses as a
@@ -399,45 +742,35 @@ query($o: String!, $r: String!, $n: Int!, $head: String!) {
       reviewThreads(first: 100) { nodes { isResolved isOutdated } }
       latestOpinionatedReviews(first: 10) {
         nodes { state author { login ... on User { name } } }
-      }
+      }%s
     }
   }
 }`
 
+const stackEntries = `
+      stack {
+        entries(first: 100) {
+          nodes { position pullRequest { number title state isDraft } }
+        }
+      }`
+
 // Detail fetches the on-demand half of the overlay. The caller renders without
 // it first and lets these lines arrive late, so a failure here costs the two
-// lines and nothing else.
-func (c *Client) Detail(ctx context.Context, repo string, number int, head string) (Detail, error) {
+// lines and nothing else. The stack's entries are asked for only when the
+// search said the PR is in one.
+func (c *Client) Detail(ctx context.Context, repo string, number int, head string, stacked bool) (Detail, error) {
 	owner, name, ok := strings.Cut(repo, "/")
 	if !ok {
 		return Detail{}, fmt.Errorf("repo %q must be owner/name", repo)
 	}
-	body, err := json.Marshal(map[string]any{
-		"query": detailQuery,
-		"variables": map[string]any{
-			"o": owner, "r": name, "n": number, "head": head,
-		},
-	})
-	if err != nil {
-		return Detail{}, err
+	vars := map[string]any{"o": owner, "r": name, "n": number, "head": head}
+	query := func(stacks bool) string {
+		if !stacks {
+			return fmt.Sprintf(detailQuery, "")
+		}
+		return fmt.Sprintf(detailQuery, stackEntries)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(), bytes.NewReader(body))
-	if err != nil {
-		return Detail{}, err
-	}
-	req.Header.Set("Authorization", "bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return Detail{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return Detail{}, fmt.Errorf("github returned %s", resp.Status)
-	}
-
-	var out struct {
+	type response struct {
 		Data struct {
 			Repository struct {
 				DefaultBranchRef *struct {
@@ -464,14 +797,27 @@ func (c *Client) Detail(ctx context.Context, repo string, number int, head strin
 							} `json:"author"`
 						} `json:"nodes"`
 					} `json:"latestOpinionatedReviews"`
+					Stack *struct {
+						Entries struct {
+							Nodes []struct {
+								Position    int `json:"position"`
+								PullRequest struct {
+									Number  int    `json:"number"`
+									Title   string `json:"title"`
+									State   string `json:"state"`
+									IsDraft bool   `json:"isDraft"`
+								} `json:"pullRequest"`
+							} `json:"nodes"`
+						} `json:"entries"`
+					} `json:"stack"`
 				} `json:"pullRequest"`
 			} `json:"repository"`
 		} `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
+		Errors []gqlError `json:"errors"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	out, err := postStacks(ctx, c, &c.noStackEntries, stacked, query, vars,
+		func(r response) []gqlError { return r.Errors })
+	if err != nil {
 		return Detail{}, err
 	}
 	if len(out.Errors) > 0 {
@@ -500,6 +846,15 @@ func (c *Client) Detail(ctx context.Context, repo string, number int, head strin
 		d.Reviewers = append(d.Reviewers, Reviewer{
 			Login: r.Author.Login, Name: r.Author.Name, State: r.State,
 		})
+	}
+	if pr.Stack != nil {
+		for _, e := range pr.Stack.Entries.Nodes {
+			p := e.PullRequest
+			d.Stack = append(d.Stack, StackEntry{
+				Position: e.Position, Number: p.Number, Title: p.Title, State: p.State, IsDraft: p.IsDraft,
+			})
+		}
+		sort.Slice(d.Stack, func(i, j int) bool { return d.Stack[i].Position < d.Stack[j].Position })
 	}
 	return d, nil
 }

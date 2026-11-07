@@ -15,6 +15,9 @@ five-rule board through end to end.
 A rule's `query` is GitHub search syntax, scoped for you: pile prepends
 `repo:<repo> is:pr is:open`, so you write only the part that distinguishes the
 rule. `author:@me` becomes `repo:owner/name is:pr is:open author:@me`.
+With multiple repos, pile includes each configured repo unless the rule names
+a subset by label, for example `repos: [api]`. Do not put `repo:` in the query;
+config validation rejects it. The rule's limit is shared across its repos.
 
 Each rule is fetched as its own search, then the results are walked top down. A
 PR is shown under the **first** rule that matched it, and every later rule skips

@@ -4,6 +4,7 @@ package board
 
 import (
 	"sort"
+	"time"
 
 	"github.com/barspielberg/pr-pile/internal/config"
 	"github.com/barspielberg/pr-pile/internal/github"
@@ -47,10 +48,21 @@ type Board struct {
 	cfg      config.Config
 	results  []*Result
 	sections []Section
+	// hidden is PRs the watch saw merge or close, and when. The search index
+	// can lag a merge, so a fetch soon after must not bring one back; the
+	// hold expires so a PR closed by mistake and reopened does come back.
+	hidden map[github.Key]time.Time
 }
 
+// hideFor outlasts the search index's lag behind a merge, which is seconds to
+// a minute, by a wide margin.
+const hideFor = 10 * time.Minute
+
+// now is a var so a test can move the clock past hideFor.
+var now = time.Now
+
 func New(cfg config.Config) *Board {
-	b := &Board{cfg: cfg, results: make([]*Result, len(cfg.Rules))}
+	b := &Board{cfg: cfg, results: make([]*Result, len(cfg.Rules)), hidden: map[github.Key]time.Time{}}
 	b.sections = make([]Section, len(cfg.Rules))
 	for i, r := range cfg.Rules {
 		b.sections[i] = Section{Rule: r, State: Pending}
@@ -72,12 +84,66 @@ func (b *Board) Refetch() {
 	}
 }
 
+// Hide takes a PR off the board now, without waiting for the next fetch to
+// stop returning it.
+func (b *Board) Hide(key github.Key) {
+	b.hidden[key] = now()
+	b.rebuild()
+	// A section still waiting on its fetch keeps last time's rows, which
+	// rebuild leaves alone, so the PR comes out of those here.
+	for i := range b.sections {
+		s := &b.sections[i]
+		rows := s.Rows[:0:0]
+		for _, r := range s.Rows {
+			if r.PR.Key() != key {
+				rows = append(rows, r)
+			}
+		}
+		s.Rows = rows
+	}
+}
+
+func (b *Board) isHidden(key github.Key) bool {
+	at, ok := b.hidden[key]
+	if ok && now().Sub(at) >= hideFor {
+		delete(b.hidden, key)
+		return false
+	}
+	return ok
+}
+
 func (b *Board) Apply(res Result) {
 	if res.Index < 0 || res.Index >= len(b.results) {
 		return
 	}
+	res.PRs = b.keepKnownMergeState(res.PRs)
 	b.results[res.Index] = &res
 	b.rebuild()
+}
+
+// keepKnownMergeState carries the last real answer through UNKNOWN. GitHub
+// computes both fields lazily and a refresh often lands mid-recompute, which
+// would blank a row's ! or ↓ for one refresh and bring it back the next.
+func (b *Board) keepKnownMergeState(prs []github.PR) []github.PR {
+	shown := map[github.Key]github.PR{}
+	for _, s := range b.sections {
+		for _, r := range s.Rows {
+			shown[r.PR.Key()] = r.PR
+		}
+	}
+	out := make([]github.PR, len(prs))
+	for i, pr := range prs {
+		if was, ok := shown[pr.Key()]; ok {
+			if pr.Mergeable == "UNKNOWN" {
+				pr.Mergeable = was.Mergeable
+			}
+			if pr.MergeState == "UNKNOWN" {
+				pr.MergeState = was.MergeState
+			}
+		}
+		out[i] = pr
+	}
+	return out
 }
 
 // Frontier is how far down the board is drawable: the first rule that has not
@@ -101,7 +167,7 @@ func (b *Board) Loading() bool { return b.Frontier() < len(b.results) }
 // above it has resolved -- otherwise a row could be shown here and then
 // claimed by an earlier rule a moment later.
 func (b *Board) rebuild() {
-	claimed := map[int]bool{}
+	claimed := map[github.Key]bool{}
 	frontier := b.Frontier()
 
 	for i := range b.sections {
@@ -122,10 +188,10 @@ func (b *Board) rebuild() {
 		}
 		var own []github.PR
 		for _, pr := range res.PRs {
-			if claimed[pr.Number] {
+			if claimed[pr.Key()] || b.isHidden(pr.Key()) {
 				continue
 			}
-			claimed[pr.Number] = true
+			claimed[pr.Key()] = true
 			own = append(own, pr)
 		}
 		s.State, s.Err, s.Stale = Ready, nil, false
@@ -149,56 +215,123 @@ func layout(prs []github.PR, tree bool) []Row {
 	return stacks(prs)
 }
 
-// stacks finds chains where one PR targets another's head branch and emits
-// each chain contiguously, root first.
+// branch is a ref within its repo: two repos can both have a fix/login, and
+// one PR must not stack on the other's.
+type branch struct{ repo, name string }
+
+// stack is a GitHub native stack within one repo.
+type stack struct {
+	repo   string
+	number int
+}
+
+// stacks emits each chain contiguously, bottom first, where its bottom PR
+// would sort. A native stack is kept together and ordered by position; then
+// one PR, or one native stack, chains onto another whose head branch it
+// targets, so a plain PR on a native stack still draws with it.
 func stacks(prs []github.PR) []Row {
-	byBase := map[string][]github.PR{}
-	heads := map[string]bool{}
+	order := map[github.Key]int{}
+	for i, pr := range prs {
+		order[pr.Key()] = i
+	}
+	var units [][]github.PR
+	at := map[stack]int{}
 	for _, pr := range prs {
-		// An empty ref would make every PR look stacked on every other, since
-		// an unset base would "match" an unset head.
-		if pr.HeadRefName != "" {
-			heads[pr.HeadRefName] = true
+		if pr.Stack.Number == 0 {
+			units = append(units, []github.PR{pr})
+			continue
+		}
+		s := stack{pr.Repo, pr.Stack.Number}
+		if i, ok := at[s]; ok {
+			units[i] = append(units[i], pr)
+			continue
+		}
+		at[s] = len(units)
+		units = append(units, []github.PR{pr})
+	}
+	for _, u := range units {
+		sort.SliceStable(u, func(i, j int) bool { return u[i].Stack.Position < u[j].Stack.Position })
+	}
+	sort.SliceStable(units, func(i, j int) bool { return order[units[i][0].Key()] < order[units[j][0].Key()] })
+
+	owner := map[branch]int{}
+	for i, u := range units {
+		for _, pr := range u {
+			// An empty ref would make every PR look stacked on every other,
+			// since an unset base would "match" an unset head.
+			if pr.HeadRefName != "" {
+				owner[branch{pr.Repo, pr.HeadRefName}] = i
+			}
 		}
 	}
-	stacked := func(pr github.PR) bool {
-		return pr.BaseRefName != "" && heads[pr.BaseRefName]
+	parent := func(i int) bool {
+		bottom := units[i][0]
+		p, ok := owner[branch{bottom.Repo, bottom.BaseRefName}]
+		return bottom.BaseRefName != "" && ok && p != i
 	}
-	for _, pr := range prs {
-		if stacked(pr) {
-			byBase[pr.BaseRefName] = append(byBase[pr.BaseRefName], pr)
+	kids := map[int][]int{}
+	for i, u := range units {
+		if parent(i) {
+			p := owner[branch{u[0].Repo, u[0].BaseRefName}]
+			kids[p] = append(kids[p], i)
 		}
 	}
 
 	var rows []Row
-	for _, pr := range prs {
-		// Roots only: a PR stacked on another is emitted by its parent's chain.
-		if stacked(pr) {
+	for i := range units {
+		// Roots only: a unit stacked on another is emitted by its parent's chain.
+		if parent(i) {
 			continue
 		}
-		chain := walk(pr, byBase, map[int]bool{})
-		if len(chain) == 1 {
-			rows = append(rows, Row{PR: chain[0]})
-			continue
-		}
-		for i, p := range chain {
-			rows = append(rows, Row{PR: p, Prefix: glyph(i, len(chain)), Last: i == len(chain)-1})
-		}
+		rows = append(rows, chainRows(walk(i, units, kids, map[int]bool{}))...)
 	}
 	return rows
 }
 
 // seen guards against a base/head cycle, which would otherwise recurse forever.
-func walk(pr github.PR, byBase map[string][]github.PR, seen map[int]bool) []github.PR {
-	if seen[pr.Number] {
+func walk(i int, units [][]github.PR, kids map[int][]int, seen map[int]bool) []github.PR {
+	if seen[i] {
 		return nil
 	}
-	seen[pr.Number] = true
-	out := []github.PR{pr}
-	for _, child := range byBase[pr.HeadRefName] {
-		out = append(out, walk(child, byBase, seen)...)
+	seen[i] = true
+	out := append([]github.PR(nil), units[i]...)
+	for _, k := range kids[i] {
+		out = append(out, walk(k, units, kids, seen)...)
 	}
 	return out
+}
+
+// chainRows draws one chain. A native stack knows what is missing, unlike a
+// branch chain: a ╎ marks each end or gap where it goes on outside this
+// section, whether another section claimed that PR or the limit cut it.
+// Merged PRs keep their positions, so "below" is read off the base branch
+// rather than off position 1.
+func chainRows(chain []github.PR) []Row {
+	n := len(chain)
+	heads := map[string]bool{}
+	for _, pr := range chain {
+		heads[pr.HeadRefName] = true
+	}
+	cut := func(pr github.PR) bool {
+		return pr.Stack.Number != 0 && pr.BaseRefName != pr.Stack.Base && !heads[pr.BaseRefName]
+	}
+	end := chain[n-1]
+	top := end.Stack.Number != 0 && end.Stack.Position < end.Stack.Size
+	rows := make([]Row, n)
+	for i, pr := range chain {
+		first, last := i == 0, i == n-1
+		g := glyph(i, n)
+		switch {
+		case (first && cut(pr)) || (last && (cut(pr) || top)):
+			g = "╎╴"
+		case n == 1:
+			g = ""
+		case !first && !last && cut(pr):
+			g = "╎ "
+		}
+		rows[i] = Row{PR: pr, Prefix: g, Last: last}
+	}
+	return rows
 }
 
 func glyph(i, n int) string {

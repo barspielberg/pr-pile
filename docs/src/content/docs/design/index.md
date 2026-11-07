@@ -312,11 +312,9 @@ exception: **if a surface scrolls, it must say so at every height**, including
 when everything fits. A scrollable page with no affordance at exactly the
 heights a full-screen terminal reports is indistinguishable from broken.
 
-**Mode contracts matter more than key choice.** `d` closes on any key, because
-`d` then `j` inspects a PR and carries on down the board in one motion. `?`
-cannot, because `j` means scroll there — so its rule is the inverse: scroll keys
-scroll, *everything else closes*, and the page says which. Pick the contract
-first, then the keys.
+**Mode contracts matter more than key choice.** Both detail and help scroll
+and search. Their pinned hint rows name how to move and close them; opening a
+long page must not hide information or leave its exit keys implicit.
 
 Keys follow the terminal lingua franca: `j`/`k`, `/`, `?`, `g`/`G`, `esc`.
 User-configured actions can never shadow a builtin — a taken key is dead config,

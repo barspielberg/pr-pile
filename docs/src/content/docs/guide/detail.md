@@ -3,9 +3,10 @@ title: PR detail
 description: What the d overlay shows about one PR, and what arrives on a second request.
 ---
 
-`d` opens a one-PR overlay that answers "what do I do about this PR". It is a
-look, not a mode: it closes on the next key, and a movement key closes it *and*
-moves in one press. `ctrl+c` still quits.
+`d` opens a one-PR page that answers "what do I do about this PR". Scroll with
+`j`/`k`, arrows, page keys, `ctrl+d`/`ctrl+u`, or `g`/`G`; `/` searches within
+the page and `n`/`N` step matches. `esc`, `q` or `d` closes it after clearing
+any live search. `?` opens help and `ctrl+c` quits.
 
 The overlay is two blocks. The checks block is the top and names what is
 failing or running; the state block below it says what is true about the PR
@@ -39,10 +40,10 @@ The state block is labelled lines about the PR, not its CI:
 | `branch: grace/fix-sync` | the head branch |
 | `opened: 3w ago · idle 4d` | how long it has been open, and how long it has sat |
 
-Lines with nothing to say are not drawn; on an all-green, freshly-opened PR the
-block is three lines. When the block is too tall for the pane, it is clipped
-from its own bottom before the checks block gives up a single line — a PR with
-eight failing checks must not drop a failure to make room for its branch name.
+Lines with nothing to say are not drawn. Long pages scroll rather than dropping
+failures or state lines. A PR behind its base shows whether the repository
+requires an update before merging, rather than treating every behind count as
+a blocker. A native GitHub stack is identified in the state block.
 
 ## What arrives late
 

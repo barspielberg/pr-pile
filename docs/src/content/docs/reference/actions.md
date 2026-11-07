@@ -14,9 +14,10 @@ or editors; it renders the template and runs whatever it gets.
 | `name` | string | none | The label shown in the footer and the help page. |
 | `run` | string | none | The shell command, with template fields filled in. |
 | `mode` | string | `background` | `background` or `suspend`. |
+| `multi` | bool | `false` | Run once for the whole selection using plural fields. |
 
-`run` is executed as `sh -c "<run>"` for the selected PR. An action with an
-empty `run` is ignored.
+`run` executes through `sh -c`. Empty commands, duplicate keys and keys
+reserved by the board are configuration errors.
 
 ## Template fields
 
@@ -25,8 +26,8 @@ empty `run` is ignored.
 | field | value |
 | --- | --- |
 | `{{.Number}}` | the PR number |
-| `{{.Repo}}` | `owner/name` from `repo:` |
-| `{{.RepoPath}}` | the local checkout path from `repoPath:` |
+| `{{.Repo}}` | the PR's own repo name from `repos` |
+| `{{.RepoPath}}` | that repo's checkout `path` |
 | `{{.Branch}}` | the PR's head branch |
 | `{{.Base}}` | the PR's base branch |
 | `{{.URL}}` | the PR's URL |
@@ -55,8 +56,35 @@ actions:
     name: worktree
     run: wt switch -x nvim pr:{{.Number}}
 
-  - key: v
+  - key: W
     name: review
     run: tuicr pr {{.Number}}
     mode: suspend
 ```
+
+## Shell quoting and repository context
+
+GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, `Title`) are
+already POSIX-shell-quoted. Use each placeholder as a standalone, unquoted
+shell word. Embedded or quoted placeholders, command substitution, heredocs,
+and explicit shell evaluators such as `sh -c` or `eval` are rejected when the
+template uses remote fields. `Repo`, `RepoPath` and the command itself are
+trusted configuration text.
+
+Actions run in the PR's checkout when its repo has a `path`. An action using
+`RepoPath` refuses a repo without one. On a multi-repo board, an action using
+a PR number, branch or base without a checkout must explicitly name the repo
+with `Repo` or `RepoPath`.
+
+## Multiple selected PRs
+
+An action without `multi: true` refuses a selection containing several PRs.
+A multi action runs once using space-joined, individually quoted plural fields:
+`{{.Numbers}}`, `{{.URLs}}`, `{{.Branches}}`, `{{.Bases}}`, `{{.Authors}}`,
+`{{.Titles}}`. Mixing singular and plural fields is an error. With no selection,
+the row under the cursor is a list of one.
+
+Numbers, branches, bases and repository paths are ambiguous across repositories,
+so a multi action using those fields refuses a selection spanning repos.
+Actions using only URLs, authors or titles can span repos. Acting on three or
+more PRs asks for confirmation first.
