@@ -19,22 +19,12 @@ pile fetches every open PR for a repo and renders each as one line, ordered by
 rules you write. It opens PRs in the browser, shows the checks and review state
 that decide what to do next, and gets out of the way between uses.
 
-```text
-MINE (2)
-  ▌ #143 add --since flag to the sync command    ✓ ✓ ✓    imm
-    #141 stop double-fetching the rollup           ◐       jdo
-
-NEEDS MY REVIEW (1)
-    #138 drop the per-rule timeout                 ✗       amb
-
-ALL OPEN (3)
-    ...
-```
-
-<Aside type="note">
-  No screenshot yet — the board above is a text sketch. A real recording lands
-  in phase 4, generated from `assets/demo.tape` so it cannot drift.
-</Aside>
+<img
+  class="demo"
+  src="/pr-pile/demo.gif"
+  alt="Animated recording of pile showing a board of open PRs: the Mine section with two rows, a Needs my review section, and check and review state on each row"
+  width="720"
+/>
 
 <CardGrid stagger>
   <Card title="Rules are the board">

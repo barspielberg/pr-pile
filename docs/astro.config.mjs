@@ -14,6 +14,29 @@ export default defineConfig({
       description: 'A terminal PR board for GitHub.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/barspielberg/pr-pile' }],
       customCss: ['/src/styles/custom.css'],
+      head: [
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image',
+            content: 'https://barspielberg.github.io/pr-pile/og.png',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:alt',
+            content: 'pile — a terminal PR board for GitHub, shown as a dark board panel with the wordmark and tagline',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            name: 'twitter:image',
+            content: 'https://barspielberg.github.io/pr-pile/og.png',
+          },
+        },
+      ],
       editLink: { baseUrl: 'https://github.com/barspielberg/pr-pile/edit/main/docs/' },
       sidebar: [
         {
