@@ -21,7 +21,7 @@ export default defineConfig({
         },
         {
           label: 'Reference',
-          items: ['reference/config'],
+          items: ['reference/config', 'reference/rules'],
         },
       ],
     }),
