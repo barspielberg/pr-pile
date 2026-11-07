@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="180" viewBox="0 0 840 180" role="img" aria-labelledby="title desc">
+  <title id="title">pile</title>
+  <desc id="desc">Your pull requests, in order.</desc>
+  <!-- The selection bar and wordmark follow docs/assets/og.svg. -->
+  <rect width="840" height="180" rx="12" fill="#171717"/>
+  <g font-family="DejaVu Sans Mono, ui-monospace, monospace">
+    <rect x="48" y="42" width="8" height="66" rx="2" fill="#3b82f6"/>
+    <text x="74" y="106" font-size="84" font-weight="700" letter-spacing="-4" fill="#f8fafc">pile</text>
+    <text x="50" y="148" font-size="22" fill="#94a3b8">Your pull requests, in order.</text>
+  </g>
+  <!-- A schematic stack of rows; the real board appears in the demo below. -->
+  <g fill="#2b2b30">
+    <rect x="592" y="44" width="200" height="22" rx="4"/>
+    <rect x="564" y="80" width="228" height="22" rx="4"/>
+    <rect x="536" y="116" width="256" height="22" rx="4"/>
+  </g>
+  <rect x="564" y="80" width="4" height="22" rx="2" fill="#3b82f6"/>
+  <g fill="#4ade80">
+    <circle cx="776" cy="55" r="3"/>
+    <circle cx="776" cy="91" r="3"/>
+  </g>
+  <circle cx="776" cy="127" r="3" fill="#fbbf24"/>
+</svg>
