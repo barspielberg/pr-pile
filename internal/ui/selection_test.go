@@ -2,8 +2,11 @@ package ui
 
 import (
 	"errors"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/barspielberg/pr-pile/internal/board"
 	"github.com/barspielberg/pr-pile/internal/github"
@@ -492,17 +495,62 @@ func TestSelectAllRowsThenCopy(t *testing.T) {
 }
 
 // openCapture swaps the browser shell-out and returns the urls it was asked to
-// open, in order.
+// open, sorted for deterministic assertions across concurrent launchers.
 func openCapture(t *testing.T, fail error) *[]string {
 	t.Helper()
 	var got []string
+	var mu sync.Mutex
 	prev := openURL
 	openURL = func(u string) error {
+		mu.Lock()
+		defer mu.Unlock()
 		got = append(got, u)
+		sort.Strings(got)
 		return fail
 	}
 	t.Cleanup(func() { openURL = prev })
 	return &got
+}
+
+func TestOpenAllLaunchesWhileAnotherBrowserIsRunning(t *testing.T) {
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	finished := make(chan tea.Msg, 1)
+	prev := openURL
+	openURL = func(url string) error {
+		started <- url
+		if url == "https://x/1" {
+			<-release // Simulate xdg-open waiting for a browser to close.
+			return errors.New("browser failed")
+		}
+		return nil
+	}
+	t.Cleanup(func() { openURL = prev })
+
+	_, cmd := selectBoard(t).openAll([]string{"https://x/1", "https://x/2"}, "PRs")
+	go func() { finished <- cmd() }()
+	// Always release and join the command before restoring openURL, even
+	// when the assertion fails against a sequential implementation.
+	defer func() {
+		close(release)
+		select {
+		case msg := <-finished:
+			status, ok := msg.(asyncStatusMsg)
+			if !ok || status.text != "open failed: browser failed" {
+				t.Errorf("result = %#v, want browser failure", msg)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("open command did not finish after releasing the browser")
+		}
+	}()
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the second URL must launch before the first browser exits")
+		}
+	}
 }
 
 func pressEnter(t *testing.T, m Model) Model {

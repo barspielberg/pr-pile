@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"sync"
+
 	"github.com/barspielberg/pr-pile/internal/browser"
 	"github.com/barspielberg/pr-pile/internal/clipboard"
 	"github.com/barspielberg/pr-pile/internal/github"
@@ -118,8 +120,21 @@ func (m Model) openAll(urls []string, plural string) (Model, tea.Cmd) {
 	next.clearSelection()
 	next.clearConfirm()
 	return next, func() tea.Msg {
-		for _, url := range urls {
-			if err := openURL(url); err != nil {
+		// xdg-open can wait for the browser to close. Give every URL its
+		// own launch so one browser's lifetime cannot delay the other tabs.
+		// Wait for all launchers to reap their processes and retain errors.
+		errs := make([]error, len(urls))
+		var wg sync.WaitGroup
+		for i, url := range urls {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs[i] = openURL(url)
+			}()
+		}
+		wg.Wait()
+		for _, err := range errs {
+			if err != nil {
 				return asyncStatusMsg{seq: seq, text: "open failed: " + err.Error()}
 			}
 		}
