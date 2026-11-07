@@ -20,6 +20,20 @@ export default defineConfig({
           items: ['getting-started/install', 'getting-started/first-run'],
         },
         {
+          label: 'Guide',
+          items: [
+            'guide/rules',
+            'guide/reading-the-board',
+            'guide/search',
+            'guide/detail',
+            {
+              label: 'Actions',
+              items: ['guide/actions', 'guide/actions/worktree', 'guide/actions/review-tui'],
+            },
+            'guide/team-board',
+          ],
+        },
+        {
           label: 'Reference',
           items: ['reference/config', 'reference/rules', 'reference/actions', 'reference/keys', 'reference/cli'],
         },
