@@ -36,8 +36,38 @@
   gap: 1rem;
 }
 
+/* README wordmark: monospace type and the board's blue selection bar.
+ * Keep the text live so it inherits the theme and remains accessible. */
+.site-title span,
 [data-has-hero] .hero h1 {
-  font-size: clamp(2rem, 4vw, 3rem);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.22em;
+  font-family: 'DejaVu Sans Mono', var(--sl-font-mono);
+  font-weight: 700;
+  letter-spacing: -0.0476em;
+  line-height: 1.15;
+  color: var(--sl-color-white);
+}
+
+.site-title span::before,
+[data-has-hero] .hero h1::before {
+  content: '';
+  flex: 0 0 0.095em;
+  height: 0.786em;
+  border-radius: 0.024em;
+  background: #3b82f6;
+}
+
+.site-title span {
+  font-size: 1.75rem;
+  /* Starlight clips title spans; tight wordmark spacing can overhang the box. */
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+[data-has-hero] .hero h1 {
+  font-size: clamp(3.5rem, 7vw, 5.25rem);
 }
 
 [data-has-hero] .hero .tagline {
