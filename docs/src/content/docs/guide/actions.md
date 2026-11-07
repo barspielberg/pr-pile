@@ -5,7 +5,7 @@ description: Binding a shell command to a key, and what the footer reports while
 
 An action is a shell command bound to a key. pile knows nothing about worktrees,
 editors or multiplexers — it renders a template and runs whatever it gets. The
-fields are on the [Actions](../reference/actions/) reference page; this page is
+fields are on the [Actions](../../reference/actions/) reference page; this page is
 how they behave, with two worked recipes: a [worktree](worktree/) and a
 [review TUI](review-tui/).
 
@@ -62,7 +62,7 @@ names the mechanism rather than the problem.
 
 Actions are matched **last**, after every navigation and built-in key, so a
 configured action cannot shadow `j`, `d`, `/` or the rest. Binding an action to
-`d` or `j` means it never fires; pick a key the [Keys](../reference/keys/)
+`d` or `j` means it never fires; pick a key the [Keys](../../reference/keys/)
 table does not use.
 
 A second press of the same key while an action is still running is a no-op with

@@ -54,7 +54,7 @@ pile
 ```
 
 On first run pile infers the repo from the checkout and writes a starter config
-to `~/.config/pile/config.yml`. See [First run](first-run/).
+to `~/.config/pile/config.yml`. See [First run](../first-run/).
 
 If `pile` exits with `gh auth token: … (is gh installed and logged in?)`, run
 `gh auth login` first.

@@ -6,8 +6,8 @@ description: How rules become sections, and why their order is the configuration
 Rules are the whole abstraction. A rule is a GitHub search query plus a name;
 the board is that list of rules drawn top to bottom, one section each. This
 page is the mental model behind them. The fields are on the
-[Rules](../reference/rules/) page and the top-level list on
-[Config](../reference/config/); the [team board](team-board/) guide works a
+[Rules](../../reference/rules/) page and the top-level list on
+[Config](../../reference/config/); the [team board](../team-board/) guide works a
 five-rule board through end to end.
 
 ## A PR belongs to the first rule that matches
@@ -82,7 +82,7 @@ Sections then resolve progressively again, top down, exactly as at startup.
 A readable board arranges its rules so that each is a superset of the one above:
 *your PRs*, then *your team needing review*, then *your team*, then *everyone
 else*. Each section then reads as "the rest of" the previous one — whatever the
-more specific rule above it did not take. The [team board](team-board/) guide
+more specific rule above it did not take. The [team board](../team-board/) guide
 shows why this matters: swap two rules and a section goes permanently empty
 without a single error, because the more specific rule stopped taking its
 share.

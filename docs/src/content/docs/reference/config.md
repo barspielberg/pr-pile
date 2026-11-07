@@ -57,7 +57,7 @@ with `repo:` filled in from the checkout:
 | Involved | `involves:@me -author:@me` | 20 | — | true |
 | All open | `draft:false` | 20 | — | true |
 
-The meaning of each rule field is on the [rules](rules/) page.
+The meaning of each rule field is on the [rules](../rules/) page.
 
 ## Validation
 

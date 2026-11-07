@@ -42,7 +42,7 @@ Three glyphs, always in the same order, always at the same screen offset.
 | `·` | no checks |
 
 The failing count saturates at `✗+` for ten or more. Failing and running checks
-are named in the [detail](detail/) overlay; the row only counts them.
+are named in the [detail](../detail/) overlay; the row only counts them.
 
 ### Review
 
@@ -99,5 +99,5 @@ The author column appears only on rules with `author: true`, and only at full
 width. Below `40` columns the board refuses to draw and asks for a wider
 terminal.
 
-What drops is also what stops being searchable: the [search](search/) page
+What drops is also what stops being searchable: the [search](../search/) page
 explains the connection, because a match is always on something you can see.

@@ -3,12 +3,12 @@ title: Design principles
 description: "The principles above the visual spec: why the board looks the way it does, so the next design question has an answer."
 ---
 
-This page is the principles above the [visual spec](../visual-spec/). The spec
+This page is the principles above the [visual spec](visual-spec/). The spec
 records *what* the board looks like and why each decision went the way it did;
 these are the principles those decisions fall out of, so the next question has
 an answer before someone has to re-argue it.
 
-Where the two disagree, the [visual spec](../visual-spec/) wins on specifics (it
+Where the two disagree, the [visual spec](visual-spec/) wins on specifics (it
 is checked against the code) and this wins on direction.
 
 Read the prior-art notes in §11 before proposing anything that breaks a rule
@@ -76,7 +76,7 @@ Design in layers, and keep each tier independently correct:
 
 - **Monochrome** — strip every colour. Is the board still usable? Glyph shape,
   column position and text must carry the whole meaning. The
-  [visual spec](../visual-spec/) keeps a literal monochrome read-out of the
+  [visual spec](visual-spec/) keeps a literal monochrome read-out of the
   status cluster; that test is the standard.
 - **16 ANSI** — is the hierarchy readable? Status colours live here on purpose
   (see §3).
@@ -159,7 +159,7 @@ Each was a *classification* — who wrote this, what kind of change is this —
 and a classification does not need a fixed shade, because nothing breaks when
 the user's theme moves it. Between them they spent twenty fixed values
 overriding the user's palette to decorate two facts that the initials and the
-type word already carried in text. The [visual spec](../visual-spec/) records
+type word already carried in text. The [visual spec](visual-spec/) records
 both reversals.
 
 The test before reaching for the cube: **would this still be correct if the
@@ -243,7 +243,7 @@ land on: the terminal default (light *and* dark) and `selBg`.
   as a tinted dark rather than a mid-grey — Catppuccin Mocha gives `#585b70` on
   a `#1e1e2e` ground — and there the objection simply does not apply. `selBg` is
   ANSI 8 today for that reason. The cost is that the fill's quality now varies by
-  theme: the [visual spec](../visual-spec/) has the cross-theme table, and it
+  theme: the [visual spec](visual-spec/) has the cross-theme table, and it
   measures poorly in Gruvbox and Solarized. **Check 8 in the target theme before
   assuming either way.**
 - **A highlight must set BOTH ground and figure.** A background-only highlight
@@ -254,7 +254,7 @@ land on: the terminal default (light *and* dark) and `selBg`.
   the author's own theme, under a fill that was 10.74:1 against the board — a
   loud block with invisible contents, which is worse than no highlight because
   it draws the eye to the one place it cannot read. The
-  [visual spec](../visual-spec/) has the measurements and the fix.
+  [visual spec](visual-spec/) has the measurements and the fix.
 - **`Reverse` is the strongest highlight available, and it needs no palette.**
   It takes the theme's own foreground/background pairing, which is by
   definition the best contrast that theme guarantees, so it is correct on light
@@ -404,7 +404,7 @@ Honest about what this guide does not settle:
   `selBg` = ANSI 8 on a *light* theme is the untested case: 8 is "bright black"
   and may land close to the ground. Not checked with a meter on a light theme.
 - **Theme-dependent contrast is now a live risk rather than a fixed one.** The
-  [visual spec](../visual-spec/)'s cross-theme table shows the selection fill
+  [visual spec](visual-spec/)'s cross-theme table shows the selection fill
   measuring well in Mocha and Tokyo Night and poorly in Gruvbox and Solarized.
   The board is developed against Mocha, so this is unmeasured in daily use for
   anyone else.
@@ -412,7 +412,7 @@ Honest about what this guide does not settle:
   commit collapsing the type palette closed by naming the fixed values left;
   the very next commit added `headerBg` and nobody noticed until review. A count
   in a commit message is a claim about the whole tree at one moment, and nothing
-  re-checks it. The [visual spec](../visual-spec/)'s colour table is the place
+  re-checks it. The [visual spec](visual-spec/)'s colour table is the place
   that gets maintained.
 
 Three questions that were open here are now closed, and all three closed by

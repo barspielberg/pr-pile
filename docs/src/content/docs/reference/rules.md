@@ -4,7 +4,7 @@ description: The fields of a rule, and how rule ordering shapes the board.
 ---
 
 A rule is one section of the board. This page lists its fields; the top-level
-`rules:` list and the default rules are on the [config](config/) page.
+`rules:` list and the default rules are on the [config](../config/) page.
 
 ## Fields
 

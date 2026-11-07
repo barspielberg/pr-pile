@@ -20,7 +20,7 @@ pile: gh auth token returned nothing; run `gh auth login`
 
 Fix with `gh auth login`, then run `pile` again. pile never stores a credential
 of its own, so there is nothing to configure on pile's side — the token comes
-from `gh` every run. See [CLI](../reference/cli/) for the full list of what
+from `gh` every run. See [CLI](../../reference/cli/) for the full list of what
 `gh` is used for.
 
 ## The repo exists but pile says you cannot see it
@@ -63,7 +63,7 @@ behaviour. Other browsers are never scripted and always use `open`.
 
 `y` copies the selected PR's URL with `pbcopy`, a macOS binary. There is no
 error if it is missing — the copy just does nothing. This is one of the three
-reasons pile is [macOS-tested only](../getting-started/install/): `open`,
+reasons pile is [macOS-tested only](../../getting-started/install/): `open`,
 `pbcopy` and `osascript` are all macOS tools. On anything else, treat `y` and
 the Arc reuse above as unavailable.
 
@@ -78,5 +78,5 @@ then claimed by an earlier rule a moment later.
 A section that finishes with no rows collapses to a single `—` line. A section
 whose request failed shows its error in place rather than stalling the rest of
 the board. If a spinner sits for a long time, the request is slow or failed —
-`r` refreshes the board, and the [rules guide](../guide/rules/) explains why a
+`r` refreshes the board, and the [rules guide](../../guide/rules/) explains why a
 slow rule near the top stalls everything under it.
