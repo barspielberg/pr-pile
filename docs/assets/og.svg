@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <!-- Background: the board's dark terminal colour. -->
+  <rect width="1200" height="630" fill="#171717"/>
+  <!-- Accent bar across the top, the board's ANSI blue. -->
+  <rect width="1200" height="8" fill="#2563eb"/>
+
+  <!-- Logo mark: the selection bar glyph, as a filled block. -->
+  <rect x="88" y="186" width="16" height="140" rx="4" fill="#3b82f6"/>
+
+  <!-- Wordmark. -->
+  <text x="140" y="320" font-family="DejaVu Sans Mono, ui-monospace, monospace" font-size="150" font-weight="bold" fill="#f8fafc">pile</text>
+
+  <!-- Tagline. -->
+  <text x="140" y="384" font-family="DejaVu Sans Mono, ui-monospace, monospace" font-size="34" fill="#94a3b8">A terminal PR board for GitHub.</text>
+
+  <!-- Homepage. -->
+  <text x="140" y="566" font-family="DejaVu Sans Mono, ui-monospace, monospace" font-size="24" fill="#475569">barspielberg.github.io/pr-pile</text>
+
+  <!-- Board motif (right): a cropped panel of the board's own glyphs, with
+       titles left as mute rules so nothing here reads as a screenshot. -->
+  <g font-family="DejaVu Sans Mono, ui-monospace, monospace">
+    <rect x="728" y="120" width="384" height="390" rx="10" fill="#1f1f23"/>
+    <rect x="728" y="120" width="384" height="44" rx="10" fill="#2b2b30"/>
+    <text x="752" y="148" font-size="22" font-weight="bold" fill="#93c5fd">MINE · 2</text>
+
+    <rect x="748" y="192" width="6" height="22" fill="#3b82f6"/>
+    <text x="764" y="210" font-size="20" fill="#d1d5db">#143</text>
+    <text x="820" y="210" font-size="20" fill="#52525b">·············</text>
+    <text x="968" y="210" font-size="20" fill="#4ade80">✓ ✓ ✓</text>
+    <text x="1056" y="210" font-size="20" fill="#64748b">imm</text>
+
+    <text x="764" y="248" font-size="20" fill="#d1d5db">#141</text>
+    <text x="820" y="248" font-size="20" fill="#52525b">·············</text>
+    <text x="968" y="248" font-size="20" fill="#fbbf24">◐</text>
+    <text x="1056" y="248" font-size="20" fill="#64748b">jdo</text>
+
+    <rect x="748" y="286" width="6" height="22" fill="#3b82f6"/>
+    <text x="764" y="304" font-size="20" fill="#d1d5db">#138</text>
+    <text x="820" y="304" font-size="20" fill="#52525b">·············</text>
+    <text x="968" y="304" font-size="20" fill="#f87171">✗</text>
+    <text x="1056" y="304" font-size="20" fill="#64748b">amb</text>
+
+    <rect x="728" y="340" width="384" height="44" fill="#2b2b30"/>
+    <text x="752" y="368" font-size="22" font-weight="bold" fill="#93c5fd">ALL OPEN · 3</text>
+
+    <text x="764" y="412" font-size="20" fill="#52525b">╰╴ #127 ········</text>
+    <text x="764" y="446" font-size="20" fill="#52525b">   #126 ········</text>
+    <text x="764" y="480" font-size="20" fill="#52525b">   #125 ········</text>
+  </g>
+</svg>
