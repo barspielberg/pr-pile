@@ -26,8 +26,42 @@ jobs:
         with:
           path: docs
 
+  # Guard against moved pages and dead anchors. Internal links only: lychee is
+  # pointed at the built HTML with the /pr-pile base stripped via a symlink, and
+  # external (https://) links are excluded so a flaky network or a moved GitHub
+  # URL cannot fail the deploy. This rebuilds rather than reusing the build
+  # artifact so the guard stays self-contained and independent of the
+  # withastro/action upload format.
+  link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci
+        working-directory: docs
+      - run: npm run build
+        working-directory: docs
+      - name: Prepare base-path root for lychee
+        run: |
+          mkdir -p "$RUNNER_TEMP/lychee-root"
+          ln -s "$(pwd)/docs/dist" "$RUNNER_TEMP/lychee-root/pr-pile"
+      - name: Check internal links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          workingDirectory: docs
+          fail: true
+          args: >-
+            --no-progress
+            --exclude '^https?://'
+            --root-dir ${{ runner.temp }}/lychee-root
+            'dist/**/*.html'
+
   deploy:
-    needs: build
+    needs: [build, link-check]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
