@@ -1,4 +1,7 @@
-# A worked rule set
+---
+title: A five-section team board
+description: A worked rule set, and why it is ordered the way it is.
+---
 
 A five-section board for someone who writes code, reviews for a small team, and
 wants to keep an eye on two wider teams without drowning in them.
@@ -263,7 +266,7 @@ parent — the layout degrades to a shorter chain, never a broken one.
 Both cases apply only to a chain found by branch. A GitHub native stack knows
 its whole shape, so its rows keep their order across a gap, and a dashed `╎`
 marks each end or gap where the stack goes on in another section
-(`DESIGN.md` §4.1).
+(the [visual spec](../../design/visual-spec/)).
 
 ### `limit` can hide a stack's base
 

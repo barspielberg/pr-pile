@@ -1,4 +1,19 @@
-# pile — the uniform-row restructure
+---
+title: Uniform rows
+description: The study that proposed the uniform-row restructure and measured the one-keypress-one-line invariant.
+pagefind: false
+---
+
+:::note[Archived research]
+Historical design notes from 2026-09-17, preserved as history rather than a
+roadmap.
+:::
+
+This study recommended the uniform-row restructure and recorded the measurements
+behind the one-keypress-one-line invariant. The restructure shipped; §4.1
+records the later passes that refined it with inline, selectable headers. The
+shipping behaviour is in the [visual spec](../../visual-spec/).
+
 
 Research and implementation record, written in response to:
 
@@ -10,7 +25,7 @@ Research and implementation record, written in response to:
 Researched 2026-09-17, against the shipped code at `4b5e6f6` and against a live
 board captured from `acme/monorepo`.
 
-This document supersedes the recommendation in `view-restructure.md` §1. That
+This document supersedes the recommendation in [view restructure](../view-restructure/) §1. That
 study was right about the mechanism it measured and wrong about what to do,
 for two reasons it could not have known at the time. Both are recorded in §2.
 
@@ -41,7 +56,7 @@ reaching for. On the live board it also takes visible PRs from 16 to 26.
 
 ## 2. Why the previous recommendation is overturned
 
-`view-restructure.md` concluded: fix `window()`, raise the margin to 3, do not
+[view restructure](../view-restructure/) concluded: fix `window()`, raise the margin to 3, do not
 touch the layout. Two things have happened since.
 
 ### 2.1 The recommended fix was implemented, and the jump survived
@@ -77,7 +92,7 @@ one with uniform rows. That is the whole finding.
 
 ### 2.2 The study's cost model does not match this repo's real board
 
-`view-restructure.md` §5.3 argued the continuation line is close to free:
+[view restructure](../view-restructure/) §5.3 argued the continuation line is close to free:
 *"you pay only when there is something to say — a minority of rows on a healthy
 board, and zero lines on a board where nothing is wrong."*
 
@@ -125,7 +140,7 @@ cannot have a stable scroll rhythm**. The old study proved a legal viewport
 position always *exists* at margin 3; it did not prove the *sequence* of
 positions is smooth, which is what the eye judges.
 
-`view-restructure.md` §6.1 already collected the industry evidence for this and
+[view restructure](../view-restructure/) §6.1 already collected the industry evidence for this and
 labelled it "the strongest argument for restructuring, and it is a good one" —
 bubbles, tview, lazygit and k9s all make uniform height structural, and fzf's
 opt-in multi-line mode shipped scroll bugs of exactly this class. §6.2 set it
@@ -148,7 +163,7 @@ The failure count stays in the status cluster (`✗6`), so "is this broken" and
 
 > **The key is now `d`.** It was `c` for checks; the page grew a state block and
 > became the detail page, and the user renamed the key to match. Everything
-> below is unchanged apart from which key opens it. See `DESIGN.md` §3.6.
+> below is unchanged apart from which key opens it. See [visual spec §3.6](../../visual-spec/).
 
 Pressing `c` on a row with failing gates opens an overlay listing them in full,
 one per line, unclipped. This is strictly *more* information than the old
@@ -164,7 +179,7 @@ so this is an instance of an existing pattern, not a new concept.
 
 ### 3.3 Why an overlay and not a pane
 
-`view-restructure.md` §3.1 rejected a permanent detail pane, and that analysis
+[view restructure](../view-restructure/) §3.1 rejected a permanent detail pane, and that analysis
 holds — gh-dash spends 45% of width on one, its no-preview path was broken on
 release (#798) because nobody runs it, and for a cmd+\` glance-and-dismiss tool
 a permanently occupied region is the wrong trade.
@@ -356,7 +371,7 @@ footer named the wrong section. `slots()` is now the single source of truth and
 `sectionStarts()` and `cursorSection()` are derived from it rather than walking
 the sections again. **Two walks that must agree will eventually not.**
 
-**What is still true and worth not re-litigating.** `DESIGN.md` §3.5.1 covers
+**What is still true and worth not re-litigating.** [visual spec §3.5.1](../../visual-spec/) covers
 the *sticky* header — a header pinned above the list rather than scrolling with
 it. That one fails for an unrelated reason (on a pane tall enough to show the
 whole board it is a constant occupying the most prominent line) and the
@@ -373,7 +388,7 @@ measurements here say nothing about it. Inline and selectable is what works.
   shows the *complete* list, where the old line clipped it.
 - **One new key and one new transient mode.** Small, and it reuses the help
   overlay's mechanism.
-- **The fourth redundant failure channel is gone.** `view-restructure.md` §5.4
+- **The fourth redundant failure channel is gone.** [view restructure](../view-restructure/) §5.4
   argued a taller row signals "broken" in peripheral vision. True, and now lost.
   Glyph, colour and count remain, which is three channels for a binary fact.
 - **10 cells of title width**, spent on the gutter. Every width breakpoint moved
@@ -402,6 +417,6 @@ live board shows 26 PRs where it showed 16.
 - **Whether 8 cells is the right gutter width.** It fits this config's rule
   names to a recognisable stem and nothing longer. A config with several rules
   sharing a prefix would clip them to the same string; I did not test that.
-- **Whether losing the per-section count is felt.** `view-restructure.md` cites
+- **Whether losing the per-section count is felt.** [view restructure](../view-restructure/) cites
   research requirement R8 as wanting it. It is still one `l`/`h` jump away, but
   it is no longer on screen.

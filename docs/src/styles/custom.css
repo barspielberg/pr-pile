@@ -1,0 +1,62 @@
+/* pile theme tokens (§5.6): the board's own palette, accent from ANSI blue 4,
+ * muted text via opacity, monospace for keys/glyphs/paths/config. */
+
+:root {
+  --sl-color-accent-low: #dbeafe;
+  --sl-color-accent: #2563eb;
+  --sl-color-accent-high: #1e40af;
+  --sl-color-text-accent: #1d4ed8;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #1e3a8a;
+  --sl-color-accent: #3b82f6;
+  --sl-color-accent-high: #93c5fd;
+  --sl-color-text-accent: #93c5fd;
+}
+
+/* Secondary prose is muted via opacity rather than a fixed grey. */
+.muted {
+  opacity: 0.62;
+}
+
+/* Keys, glyphs, paths and config lines are monospace by convention. */
+:root {
+  --sl-font-mono: ui-monospace, 'SF Mono', 'Menlo', 'Monaco', 'Cascadia Mono',
+    'Liberation Mono', monospace;
+}
+
+/* Keep the product visible below a compact, single-column landing hero. */
+[data-has-hero] .hero {
+  grid-template-columns: 1fr;
+  padding-block: 1rem;
+}
+
+[data-has-hero] .hero .stack {
+  gap: 1rem;
+}
+
+[data-has-hero] .hero h1 {
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+[data-has-hero] .hero .tagline {
+  max-width: none;
+  font-size: var(--sl-text-lg);
+  line-height: 1.5;
+}
+
+.demo {
+  display: block;
+  width: 100%;
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.demo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+}

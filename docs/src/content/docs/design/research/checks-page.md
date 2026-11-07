@@ -1,4 +1,18 @@
-# pile — what belongs on the checks page
+---
+title: Checks page
+description: The study that decided what the detail overlay names versus counts.
+pagefind: false
+---
+
+:::note[Archived research]
+Historical design notes from 2026-09-17, preserved as history rather than a
+roadmap.
+:::
+
+This study decided what the detail overlay names versus counts. It shipped as
+written: the overlay names failing and pending checks and counts passing and
+skipped ones. The shipping behaviour is in the [visual spec](../../visual-spec/).
+
 
 Research and implementation record, written in response to:
 
@@ -176,7 +190,7 @@ were considered:
 
 - **Scroll** — rejected. The overlay's defining property is that *any key
   dismisses it*. Scrolling needs keys that mean "move within the overlay", which
-  is exactly the mode the design spent `docs/uniform-rows.md` §3.2 avoiding. It
+  is exactly the mode the design spent [uniform rows](../uniform-rows/) §3.2 avoiding. It
   would make `j` ambiguous: move the list, or close and move the board?
 - **Collapse the failures too** — rejected. That deletes the only thing the page
   is for.

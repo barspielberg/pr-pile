@@ -1,4 +1,18 @@
-# pile — making sections read clearly without spending a line
+---
+title: Section layout
+description: A design-only study of section headers, and why the header that shipped is inline rather than pinned.
+pagefind: false
+---
+
+:::note[Archived research]
+Historical design notes from 2026-09-17, preserved as history rather than a
+roadmap.
+:::
+
+This is a design-only study — no Go was changed. It argues for the inline,
+selectable header that shipped, and §13 has the reproduction of the rejected
+pinned version. The shipping behaviour is in the [visual spec](../../visual-spec/).
+
 
 Design study, written in response to:
 
@@ -14,8 +28,8 @@ and 80×20.
 
 This document is **design only**. No Go was changed.
 
-It sits under `uniform-rows.md`, which is the binding constraint, and reuses the
-industry survey in `view-restructure.md` §4 and §6 — whose *conclusion* was
+It sits under [uniform rows](../uniform-rows/), which is the binding constraint, and reuses the
+industry survey in [view restructure](../view-restructure/) §4 and §6 — whose *conclusion* was
 overturned, but whose evidence still holds.
 
 ---
@@ -78,9 +92,9 @@ not have to carry the weight.
 ## 3. The crux: does an expansion that depends on scroll position break the invariant?
 
 The brief asks for this explicitly, and it deserves a direct answer rather than
-a reflex. `view-restructure.md` §4.1 rejected sticky headers partly because
+a reflex. [view restructure](../view-restructure/) §4.1 rejected sticky headers partly because
 *"the rendered chrome becomes a function of the cursor position, so the line map
-changes as you navigate"*, and `uniform-rows.md` §2 makes the same coupling the
+changes as you navigate"*, and [uniform rows](../uniform-rows/) §2 makes the same coupling the
 root of the whole bug class.
 
 **That objection does not apply to a label whose width varies within an existing
@@ -100,12 +114,12 @@ A label that changes the **cell content** of `lines[start]`:
 - therefore does not change `start` by even one line, at any cursor position
 
 Scroll-jump cost: **0 lines, at every cursor position, on every board shape.**
-The invariant `uniform-rows.md` §2 defends is about *line count* being a
+The invariant [uniform rows](../uniform-rows/) §2 defends is about *line count* being a
 function of data or position. This is not that.
 
 Contrast a sticky header, which is genuinely rejected: it occupies a line, so
 `height` for the list drops by one, and worse, the line it occupies is not a
-row — the exact thing §4 of `uniform-rows.md` measured at scroll deltas of
+row — the exact thing §4 of [uniform rows](../uniform-rows/) measured at scroll deltas of
 0, 1, **2**, **3**. A sticky header costs one permanent row out of 19 (5.3% of
 the board) and reintroduces a non-row line. An expanding in-row label costs
 neither.
@@ -116,7 +130,7 @@ lines — is correct. **It is safe.**
 
 **But it fails for a different reason, and this is why I am not recommending
 in-row expansion.** There is no blank space in the row to expand into. Working
-outward from offset 0 (§3.1 of `DESIGN.md`):
+outward from offset 0 (§3.1 of [visual spec](../../visual-spec/)):
 
 | offsets | field | can the label take it? |
 |---|---|---|
@@ -124,7 +138,7 @@ outward from offset 0 (§3.1 of `DESIGN.md`):
 | 8–9 | ` │` rule | no — it is the separator being reinforced |
 | 10 | mark `▌` | no — selection |
 | 11 | gutter | 1 cell, useless alone |
-| 12–13 | tree | no — `DESIGN.md` §3.7: "never dropped, since losing them would silently change the meaning of adjacent rows" |
+| 12–13 | tree | no — [visual spec §3.7](../../visual-spec/): "never dropped, since losing them would silently change the meaning of adjacent rows" |
 | 14–19 | number | no — the scanning key |
 | 21–27 | status | no — the whole point of the board |
 | 29+ | title | **the payload** |
@@ -143,7 +157,7 @@ NEEDS MY REVIEW  #3129  ✓  ○   refactor(frontend): share makeAutoObservable�
 ```
 
 Variant A moves the number, status and title columns right on one row. That
-breaks `DESIGN.md` §3.8's stability guarantee — *"columns 0–20 never move at
+breaks [visual spec §3.8](../../visual-spec/)'s stability guarantee — *"columns 0–20 never move at
 all"* — and it breaks it **as a function of scroll position**, which is the one
 version of column instability that is worse than the static kind. Rejected.
 
@@ -286,7 +300,7 @@ reuses one that exists. The name is shorter than the repo string in four of the
 five configured rules, so at most widths this footer is *less* crowded than
 today's.
 
-This is `view-restructure.md` §4.2, which that study called *"the good version
+This is [view restructure](../view-restructure/) §4.2, which that study called *"the good version
 of option 1 [sticky headers] … cheap, safe, and worth doing independently of
 everything else in this document"* — and then never got implemented. It is
 still right, and it is now the thing that answers the user's point 2 without
@@ -300,7 +314,7 @@ cells.
 ## 5. Mockups, real board content
 
 Content is the live `acme/monorepo` board captured from the running binary,
-so these are comparable with `uniform-rows.md` §4 and `DESIGN.md` §3.5.
+so these are comparable with [uniform rows](../uniform-rows/) §4 and [visual spec §3.5](../../visual-spec/).
 
 ### 5.1 120 columns, FULL tier, board at the top
 
@@ -445,7 +459,7 @@ with this without a special case: it operates on whatever `body()` produced.
 The footer name follows the cursor, which `clampCursor` keeps in range.
 
 Superseded: this section previously described `sections()` dropping a section
-whose rows all failed the query. `DESIGN.md` records why filtering became a
+whose rows all failed the query. [visual spec](../../visual-spec/) records why filtering became a
 search.
 
 ---
@@ -490,7 +504,7 @@ What is **not** spent: no line, no title cell, no breakpoint, no change to
 | `footer()` | right field = repo + spinner | right field = section name + spinner |
 
 **No responsive breakpoint moves.** This is worth stating explicitly given
-`uniform-rows.md` §5 had to move every breakpoint by 10 for the gutter — nothing
+[uniform rows](../uniform-rows/) §5 had to move every breakpoint by 10 for the gutter — nothing
 here widens anything.
 
 The one non-trivial piece is §4.2's ordering problem: the label depends on
@@ -506,7 +520,7 @@ know which is less invasive in practice; see §10.
 
 **Sticky header pinned at the top.** The brief's third floated idea. Costs one
 permanent line out of 19 (5.3% of the board), and that line is not a row, which
-is the precise thing `uniform-rows.md` §4 measured at scroll deltas of 0, 1, 2
+is the precise thing [uniform rows](../uniform-rows/) §4 measured at scroll deltas of 0, 1, 2
 and 3. §4.2 of this document delivers the same benefit — "which section am I
 in" when the boundary has scrolled away — for zero lines. Rejected on the
 constraint, and made redundant by the recommendation.
@@ -528,7 +542,7 @@ deliberate mark. `╷` says the same thing and looks intentional. Rejected on
 legibility, and it is the closest runner-up.
 
 **In-row name expansion, columns shifting right (variant A, §3).** Breaks
-`DESIGN.md` §3.8's "columns 0–20 never move" guarantee, as a function of scroll
+[visual spec §3.8](../../visual-spec/)'s "columns 0–20 never move" guarantee, as a function of scroll
 position. Rejected.
 
 **In-row name expansion over the title (variant E, §3).** Invariant-safe and
@@ -537,16 +551,16 @@ scanning, bought with a name already 90% legible as `NEEDS M…`.
 
 **Widening `sectionWidth` to 15** to fit `NEEDS MY REVIEW` uncropped. Costs 7
 cells of title on every row at every width, and moves every breakpoint up by 7 —
-`uniform-rows.md` §5 already spent 10 cells on this gutter and called it out as
+[uniform rows](../uniform-rows/) §5 already spent 10 cells on this gutter and called it out as
 a real cost. Paying 7 more so the longest of five names stops being cropped is
 not proportionate.
 
 **Per-section counts back in the gutter.** Out of scope, and there is nowhere to
-put them without the above. Still one `l`/`h` away, as `uniform-rows.md` §6
+put them without the above. Still one `l`/`h` away, as [uniform rows](../uniform-rows/) §6
 notes.
 
 **Colour-coding the rule per section.** Considered and dropped without much
-work: `DESIGN.md` §3.3 spends seven tokens carefully and reserves loud colour
+work: [visual spec §3.3](../../visual-spec/) spends seven tokens carefully and reserves loud colour
 for failing states. Giving the rule a hue would be a fourth colour channel
 competing with the three that mean "something is wrong".
 
@@ -596,7 +610,7 @@ That objection is **about prominence**, which is not what §4.3 was answering.
 §4.3 solved *availability* — the full name existed nowhere on the board — and it
 solved it in the cheapest slot rather than the most visible one. Cheapest was
 the wrong objective. Muted text in the bottom-right corner is where this board
-puts the things you are allowed to ignore (`DESIGN.md` §3.3: "Silent (`muted`)
+puts the things you are allowed to ignore ([visual spec §3.3](../../visual-spec/): "Silent (`muted`)
 is everything else"), so the footer actively signalled *"this is not important"*
 about the one field the user wanted to notice. The user is right and §4.3 was
 wrong on its own design language's terms.
@@ -614,7 +628,7 @@ captured cells for `MINE` on the live board begin `ESC[1m ESC[36m`.
 
 So there is no muted-to-bright change available: the section name is *already*
 the most emphasised text on a board whose entire palette is built to be quiet
-(`DESIGN.md` §3.3 — "A board where everything is fine has almost no colour in
+([visual spec §3.3](../../visual-spec/) — "A board where everything is fine has almost no colour in
 it"). (b) as stated changes nothing.
 
 The only way to make (b) real is to escalate *beyond* `headerStyle` — inverse
@@ -673,7 +687,7 @@ sharpest — the row is not converting a complete view into an incomplete one. I
 is trading the 13th row of an already-truncated list for a permanent answer to
 "where am I". At h=14 that is 12 rows instead of 13.
 
-`uniform-rows.md` §4 bought 10 rows (16 → 26) by removing gate lines and header
+[uniform rows](../uniform-rows/) §4 bought 10 rows (16 → 26) by removing gate lines and header
 bands. Spending **one** of those ten on the single piece of chrome the user has
 explicitly asked for, and which is the only one that was ever load-bearing for
 orientation, is proportionate. The restructure was not an argument that chrome
@@ -683,7 +697,7 @@ list is outside `window()` entirely.
 
 ### 11.3 The invariant is untouched, and this is mechanically different from the old rejection
 
-This matters, because `view-restructure.md` §4.1 rejected sticky headers partly
+This matters, because [view restructure](../view-restructure/) §4.1 rejected sticky headers partly
 on the invariant and §9 of this document repeated it. That was imprecise, and I
 should correct it.
 
@@ -699,7 +713,7 @@ Concretely, inside `window()`:
 - `height` — smaller by one, as it already is while filtering
 - lines scrolled per keypress — **still exactly one**
 
-The thing `uniform-rows.md` §4 measured at deltas of 0/1/**2**/**3** was a
+The thing [uniform rows](../uniform-rows/) §4 measured at deltas of 0/1/**2**/**3** was a
 header line *interleaved between rows inside the scrolled region*, which made
 the row→line map non-identity and made `start` jump. A line that never enters
 `lines` cannot do that. The filter prompt has been doing this since day one and
@@ -717,7 +731,7 @@ The cursor binding is the tempting one — it changes rarely, only on a delibera
 boundary crossing. It is also the one that lies: with the cursor in `MY TEAM'S`
 and the top five visible rows still in `NEEDS MY REVIEW`, a cursor-bound header
 names a section that is not the section of the rows underneath it. That is
-precisely `view-restructure.md` §4.1's *"the line under it shifts meaning"*, and
+precisely [view restructure](../view-restructure/) §4.1's *"the line under it shifts meaning"*, and
 it is a real defect rather than a theoretical one. The top-row binding is never
 wrong about the row immediately beneath it, and it is the same binding §4.2
 already uses, so the two agree by construction.
@@ -738,7 +752,7 @@ MY TEAM… ╷    #3211  ✗1 ✓   feat(api-service,schemas): PROJ-1880 build t
 ```
 
 **The count is what makes the row pay for itself, and it is the reason I moved
-from "sticky is affordable" to "sticky is right".** `uniform-rows.md` §5 listed
+from "sticky is affordable" to "sticky is right".** [uniform rows](../uniform-rows/) §5 listed
 the per-section count as a real loss of the restructure and §6 listed "whether
 losing the per-section count is felt" as unverified. A sticky line is the only
 place it can go — it does not fit in 8 gutter cells, and §9 correctly rejected
@@ -814,12 +828,12 @@ nothing about. Both remain worth having.
   that distinction being clean, this is where it breaks, and it breaks on the
   exact bug class the restructure existed to kill.
 - **The header's content changes as you scroll**, which is the property
-  `view-restructure.md` §4.1 disliked. I have bound it so it can never
+  [view restructure](../view-restructure/) §4.1 disliked. I have bound it so it can never
   contradict the row beneath it (§11.4), which I believe defuses the objection,
   but "the top line's text changes while you scroll" remains true and some
   people find it restless. This is the single thing most worth looking at in a
   real session before keeping it.
-- **I could not find a TUI in the earlier survey that does this** — `view-restructure.md`
+- **I could not find a TUI in the earlier survey that does this** — [view restructure](../view-restructure/)
   §4.1 says so explicitly. That is a weak negative (the survey did not claim to be
   exhaustive) but it is not nothing; we would be doing something the ecosystem
   does not.
@@ -866,7 +880,7 @@ filtering) — a path that already exists for the filter prompt.
 1. **What the count means.** `6 of 10` is drawn as "top visible row is the 6th
    of 10". "Rows visible of total" or "cursor index within section" are equally
    defensible; I have no evidence favouring one and they look identical at a
-   glance. Pick one and put it in `DESIGN.md`.
+   glance. Pick one and put it in [visual spec](../../visual-spec/).
 2. **Whether to build §4.2 at all**, given §11.6 — it is now redundant as
    information and survives on consistency. Both need `start` from `window()`,
    so the marginal cost is small, but if the two-pass render is ugly this is
@@ -894,7 +908,7 @@ filtering) — a path that already exists for the filter prompt.
   if they live at h=14 it is 7.7%. I did not ask, and it would change how hard I
   argued.
 - **The count's value.** I claim it is what makes the row pay for itself, but
-  `uniform-rows.md` §6 already listed "whether losing the per-section count is
+  [uniform rows](../uniform-rows/) §6 already listed "whether losing the per-section count is
   felt" as unverified, and I have not verified it either — I have only argued
   that if it is felt, this is the only place it can go.
 - **(b) with a background fill.** I rendered it and rejected it on reasoning
@@ -945,7 +959,7 @@ list says exactly what the gutter beneath it says. §11.6 argued the two
 
 **Consequence 2 — `N of M` reads as a cursor position.** `1 of 5` is shaped like
 one. §11.7 flagged the definition as an open question and §12 told the
-implementer to "pick one and put it in `DESIGN.md`". That was the wrong framing:
+implementer to "pick one and put it in [visual spec](../../visual-spec/)". That was the wrong framing:
 the problem is not which definition to pick, it is that *any* top-row-indexed
 count is written in the visual language of a cursor position while meaning
 something else. On a non-scrolling board it is pinned at `1 of N` forever, so the
@@ -1011,7 +1025,7 @@ does not already answer? At 40 rows, no.
 considered and rejected. It fixes the duplication and would blank the line
 entirely at 40 rows, which is the correct amount of ink — but chrome that
 appears and disappears changes the list height by one as you scroll, and that is
-the bug class `uniform-rows.md` exists to kill. A conditional header is worse
+the bug class [uniform rows](../uniform-rows/) exists to kill. A conditional header is worse
 than no header and worse than an unconditional one.
 
 ### 13.4 What the board says now
@@ -1041,7 +1055,7 @@ threshold is gone.
   make the 8-cell crop ambiguous; this config does not have that problem
   (`MINE`, `NEEDS M…`, `MY TEAM…`, `INVOLVED`, `ALL OPEN` are all distinct at 8
   cells), but another config could.
-- **Whether the per-section count is missed.** `uniform-rows.md` §6 listed this
+- **Whether the per-section count is missed.** [uniform rows](../uniform-rows/) §6 listed this
   as unverified before the sticky line and it is unverified after it. Two
   attempts to place it have now been rejected; I would want evidence that it is
   wanted before proposing a third.
