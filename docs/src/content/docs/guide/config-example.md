@@ -1,4 +1,7 @@
-# A worked rule set
+---
+title: A worked rule set
+---
+
 
 A five-section board for someone who writes code, reviews for a small team, and
 wants to keep an eye on two wider teams without drowning in them.

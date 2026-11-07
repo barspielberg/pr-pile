@@ -1,4 +1,7 @@
-# pile — should the view be restructured?
+---
+title: View restructure
+---
+
 
 Research and recommendation, written in response to:
 

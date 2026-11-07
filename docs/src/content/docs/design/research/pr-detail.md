@@ -1,4 +1,7 @@
-# pile — what belongs on the PR detail overlay
+---
+title: PR detail
+---
+
 
 Research and specification, written in response to:
 

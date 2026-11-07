@@ -1,4 +1,7 @@
-# pile — the uniform-row restructure
+---
+title: Uniform rows
+---
+
 
 Research and implementation record, written in response to:
 

@@ -1,4 +1,7 @@
-# pile — making sections read clearly without spending a line
+---
+title: Section layout
+---
+
 
 Design study, written in response to:
 

@@ -1,4 +1,7 @@
-# pile — what belongs on the checks page
+---
+title: Checks page
+---
+
 
 Research and implementation record, written in response to:
 

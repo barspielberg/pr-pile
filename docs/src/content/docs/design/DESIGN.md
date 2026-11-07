@@ -1,4 +1,7 @@
-# pile — design
+---
+title: Design
+---
+
 
 A terminal PR board. One keybind away in a Ghostty quick terminal, shows every
 PR worth looking at with enough state to decide what to do, opens them, gets out

@@ -1,4 +1,7 @@
-# pile — design guide
+---
+title: Design guide
+---
+
 
 `DESIGN.md` records *what* the board looks like and why each decision went the
 way it did. This is the layer above: the principles those decisions fall out of,
