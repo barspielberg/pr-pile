@@ -1,6 +1,7 @@
 ---
 title: Checks page
 description: The study that decided what the detail overlay names versus counts.
+pagefind: false
 ---
 
 :::note[Archived research]

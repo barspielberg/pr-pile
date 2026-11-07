@@ -3,6 +3,7 @@ title: Research archive
 description: The original design studies that shaped the board, preserved as history with their conclusions and reversals intact.
 sidebar:
   label: Overview
+pagefind: false
 ---
 
 :::note[Archived research]

@@ -1,6 +1,7 @@
 ---
 title: Section layout
 description: A design-only study of section headers, and why the header that shipped is inline rather than pinned.
+pagefind: false
 ---
 
 :::note[Archived research]

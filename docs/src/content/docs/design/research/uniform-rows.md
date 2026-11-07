@@ -1,6 +1,7 @@
 ---
 title: Uniform rows
 description: The study that proposed the uniform-row restructure and measured the one-keypress-one-line invariant.
+pagefind: false
 ---
 
 :::note[Archived research]

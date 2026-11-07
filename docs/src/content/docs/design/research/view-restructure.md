@@ -1,6 +1,7 @@
 ---
 title: View restructure
 description: The earlier study that argued against restructuring; its recommendation was implemented and did not hold.
+pagefind: false
 ---
 
 :::note[Archived research]

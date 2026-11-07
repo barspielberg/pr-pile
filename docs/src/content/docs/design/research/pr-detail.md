@@ -1,6 +1,7 @@
 ---
 title: PR detail
 description: The study that extended the checks page into the full PR detail overlay.
+pagefind: false
 ---
 
 :::note[Archived research]
