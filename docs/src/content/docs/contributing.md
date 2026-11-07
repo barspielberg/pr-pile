@@ -20,9 +20,21 @@ make check      # build + test + go vet ./...
 ```
 
 `make check` is the gate; it is what `make install` runs before putting the
-binary on your `PATH`. The docs build (`cd docs && npm run build`) is
+binary on your `PATH`. The docs build (`cd docs && pnpm build`) is
 deliberately kept out of the Go path so a contributor never needs Node to work
 on the tool.
+
+To work on the docs, install Node.js 24+ and the pnpm version pinned in
+`docs/package.json`, then run:
+
+```sh
+cd docs
+pnpm install --frozen-lockfile
+pnpm dev       # local preview at http://localhost:4321/pr-pile/
+pnpm build     # production site in dist/, including the search index
+```
+
+Commit `pnpm-lock.yaml` when changing dependencies.
 
 ## Package map
 

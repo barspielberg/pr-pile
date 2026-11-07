@@ -26,13 +26,37 @@
     'Liberation Mono', monospace;
 }
 
-/* Landing demo: centre the recording and keep it inside the content column. */
+/* Keep the product visible below a compact, single-column landing hero. */
+[data-has-hero] .hero {
+  grid-template-columns: 1fr;
+  padding-block: 1rem;
+}
+
+[data-has-hero] .hero .stack {
+  gap: 1rem;
+}
+
+[data-has-hero] .hero h1 {
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+[data-has-hero] .hero .tagline {
+  max-width: none;
+  font-size: var(--sl-text-lg);
+  line-height: 1.5;
+}
+
 .demo {
   display: block;
   width: 100%;
   max-width: 720px;
-  height: auto;
   margin-inline: auto;
+}
+
+.demo img {
+  display: block;
+  width: 100%;
+  height: auto;
   border: 1px solid var(--sl-color-gray-5);
   border-radius: 0.5rem;
 }

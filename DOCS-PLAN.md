@@ -626,14 +626,14 @@ Resolved 2026-11-07 (Phase 0). Each recommendation adopted as stated.
 - **Astro churn.** Astro 7 is current; gh-dash's docs are on 5. Pin versions,
   commit the lockfile, budget an hour per major upgrade.
 - **Two toolchains.** Contributors now need Node for docs. Keep the docs build
-  out of the Go path; `make check` must not require npm.
+  out of the Go path; `make check` must not require pnpm.
 - **Content drift.** The docs restate behaviour that lives in code. Without the
   config/key tests, they will be wrong within a month.
 - **Scope creep into a redesign.** The site should describe the tool as it is;
   the research archive is history, not a roadmap.
 - **Publishing candour.** The memos are written for one reader; a light edit is
   needed so a stranger is not lost, without sanding off the specificity.
-- **No PR previews** on Pages — typos go live. Mitigate with a local `npm run
+- **No PR previews** on Pages — typos go live. Mitigate with a local `pnpm
   dev` habit and the link checker.
 
 **Non-goals**

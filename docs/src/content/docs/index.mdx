@@ -13,20 +13,22 @@ hero:
       variant: secondary
 ---
 
-import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<picture class="demo">
+  <source media="(prefers-reduced-motion: reduce)" srcset="/pr-pile/demo-poster.png" />
+  <img
+    src="/pr-pile/demo.gif"
+    alt="pile in Catppuccin Mocha: navigating open cli/cli pull requests and searching the board, with check and review state on each row"
+    width="1146"
+    height="724"
+    fetchpriority="high"
+  />
+</picture>
 
 pile fetches every open PR for a repo and renders each as one line, ordered by
 rules you write. It opens PRs in the browser, shows the checks and review state
 that decide what to do next, and gets out of the way between uses.
-
-<img
-  class="demo"
-  src="/pr-pile/demo.gif"
-  alt="Animated recording of pile showing a board of open PRs: the Mine section with two rows, a Needs my review section, and check and review state on each row"
-  width="1088"
-  height="600"
-  fetchpriority="high"
-/>
 
 <CardGrid stagger>
   <Card title="Rules are the board">

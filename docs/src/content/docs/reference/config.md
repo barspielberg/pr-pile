@@ -17,8 +17,9 @@ rule and an action have their own pages.
 | `rules` | list | the four default rules | Ordered sections. A PR is shown under the first rule that matches it. |
 | `actions` | list | empty | Shell commands bound to keys, run for the selected PR. |
 
-`repo` is the one value pile cannot guess, so it is required: it comes from the
-file, or from `$PILE_REPO` when the file does not set it.
+`repo` is required. On first run, pile infers it from the current GitHub
+checkout and writes it to the starter config. Set `$PILE_REPO` to override
+`repo:` for one run, even when the file already sets it.
 
 ## Location and precedence
 
