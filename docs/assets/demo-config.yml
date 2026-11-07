@@ -1,0 +1,22 @@
+# The repo the demo recording shows. A public repo with real open PRs, so the
+# board is the real tool on real data, not a fixture. cli/cli is GitHub's own
+# CLI repo — the same audience that runs `gh` to use pile.
+repos:
+  - name: cli/cli
+refresh: 3m
+
+rules:
+  - name: Needs review
+    query: review:required
+    author: true
+    limit: 20
+
+  - name: Draft
+    query: draft:true
+    author: true
+    limit: 20
+
+  - name: All open
+    query: draft:false
+    author: true
+    limit: 20

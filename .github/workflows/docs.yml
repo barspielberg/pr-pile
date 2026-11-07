@@ -1,0 +1,77 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', '.github/workflows/docs.yml']
+  pull_request:
+    paths: ['docs/**', '.github/workflows/docs.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # required for lastUpdated, so every page doesn't claim the same date
+      - uses: withastro/action@v6
+        with:
+          path: docs
+
+  # Guard against moved pages and dead anchors. Internal links only: lychee is
+  # pointed at the built HTML with the /pr-pile base stripped via a symlink, and
+  # external (https://) links are excluded so a flaky network or a moved GitHub
+  # URL cannot fail the deploy. This rebuilds rather than reusing the build
+  # artifact so the guard stays self-contained and independent of the
+  # withastro/action upload format.
+  link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: docs/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: docs
+      - run: pnpm build
+        working-directory: docs
+      - name: Prepare base-path root for lychee
+        run: |
+          mkdir -p "$RUNNER_TEMP/lychee-root"
+          ln -s "$(pwd)/docs/dist" "$RUNNER_TEMP/lychee-root/pr-pile"
+      - name: Check internal links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          workingDirectory: docs
+          fail: true
+          args: >-
+            --no-progress
+            --exclude '^https?://'
+            --root-dir ${{ runner.temp }}/lychee-root
+            'dist/**/*.html'
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: [build, link-check]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

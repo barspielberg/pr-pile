@@ -18,4 +18,15 @@ run: build
 install: check
 	go install ./cmd/pile
 
-.PHONY: build test check run install
+# docs-assets regenerates the demo recording (GIF + MP4) and the OG image from
+# their sources, so neither can drift from the UI or the wordmark. It builds
+# ./pile first because docs/assets/demo.tape runs the real tool.
+#
+# Requires vhs (github.com/charmbracelet/vhs), ttyd and ffmpeg on PATH, and
+# ImageMagick for the OG image. On Linux, headless Chrome may need
+# VHS_NO_SANDBOX=1. Run from the repo root.
+docs-assets: build
+	vhs docs/assets/demo.tape
+	convert -background none docs/assets/og.svg docs/public/og.png
+
+.PHONY: build test check run install docs-assets
