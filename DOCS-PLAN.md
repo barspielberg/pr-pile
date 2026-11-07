@@ -1,7 +1,10 @@
 # pr-pile — documentation plan
 
-**Status:** research + proposal. Nothing here is built yet.
-**Date:** 2026-11-06. Version numbers and measurements are from this date.
+**Status:** Phases 0–5 implemented locally with acceptance gaps below; Phase 6
+polish implemented and locally checked, but its performance target is not met.
+Not launched; hosted CI and Pages acceptance remain unverified.
+**Date:** research dated 2026-11-06; implementation status updated 2026-11-07.
+Research measurements below remain historical, not current repo state.
 **Scope:** a new README and a documentation site on GitHub Pages.
 
 ---
@@ -30,9 +33,11 @@ Actions to `https://barspielberg.github.io/pr-pile/`.
 **Work:** ~30 pages at launch, of which ~10 are edited migrations and ~12 are
 new writing; two to three focused days in six shippable phases.
 
-**Prerequisites outside the docs themselves** (see §8, decisions 3–4 for two of
-them): a LICENSE, a CI workflow, and a release story (`goreleaser` + Homebrew
-tap) — the install page cannot honestly promise a one-liner until one exists.
+**Outside this phase:** licensing and the GoReleaser/Homebrew release story are
+documentation-only decisions, deferred to separately authorized work. No license
+files or release workflow are added here. The docs workflow exists locally;
+hosted execution is unverified. `go install …@latest` is the current source
+install path; Homebrew must not be advertised as available before a release.
 
 ---
 
@@ -520,6 +525,61 @@ version selector is a lie.
 
 Each phase ends somewhere shippable; none requires the next.
 
+### Current delivery status (2026-11-07)
+
+The table below this status records the original targets, not completed checks.
+
+| phase | implemented locally | acceptance still open |
+|---|---|---|
+| 0 | framework, archive, platform and project-URL decisions recorded | licensing and release implementation explicitly deferred |
+| 1 | Starlight scaffold, base path, sidebar, landing/install/first-run, docs workflow | Pages URL and clean-machine install not verified; no settings changed |
+| 2 | five reference pages and config/key drift tests | local short tests pass; hosted CI not verified |
+| 3 | guides and action recipes linked from sidebar | independent newcomer walkthrough not verified; proposed board-tour page absent |
+| 4 | README rewrite, demo tape, GIF/MP4 and OG source/image | separate dark/light screenshots absent; GitHub rendering in both themes not verified |
+| 5 | design, historical archive banners, help and contributing pages | full editorial acceptance not re-audited in this phase |
+| 6 | internal-link CI job, research search exclusion, theme CSS, landing demo/OG metadata, real mobile Lighthouse and navigation checks | landing performance below 95; hosted CI and broader manual accessibility checks not verified |
+
+### Phase 6 verification
+
+- Existing polish commits: `3314a0e` (relative links), `38a8396` (internal-link
+  CI guard), `a2287b9` (theme CSS), `645bfe2` (research search exclusion),
+  `9c4767b` (landing demo and OG metadata).
+- `npm --prefix docs run build`: passed, 30 static pages and Pagefind index.
+  Warnings remain for the empty i18n collection/directory and absent custom 404
+  content; the generated `404.html` is present. Warnings are not test failures.
+- `make check` could not run because `make` is absent. Its commands ran directly:
+  `/usr/local/go/bin/go build -o pile ./cmd/pile`,
+  `/usr/local/go/bin/go test ./... -short`, and
+  `/usr/local/go/bin/go vet ./...` all passed (four tested packages, two with
+  no test files).
+- Lighthouse 13.6.0, real headless Chrome, default mobile simulation against
+  the local production preview: landing **91/100/100**, install **100/100/100**
+  (performance/accessibility/best practices). Landing dimensions and high fetch
+  priority were fixed in `38f3867`; rerun confirmed the dimension audit passes
+  and priority is applied, but performance remains **91**, LCP **3.5 s**.
+  The animated GIF remains an image-delivery opportunity. The ≥95 performance
+  criterion is **not complete**; these are local samples, not site-wide scores.
+- Real browser at 390×844: mobile menu opens/closes, Install → First run
+  navigation succeeds, light/dark theme switching works, and sampled pages have
+  no horizontal overflow. Automated accessibility passed on the two audited
+  pages; keyboard/screen-reader and full-site visual checks remain unverified.
+- Internal-link guard is configured and blocks deploy on failure, but no hosted
+  run or local lychee run was performed. Do not infer green CI or verified
+  anchors from a successful Astro build. No heading investigation was repeated.
+
+### Remaining before launch
+
+1. Bring landing mobile performance to ≥95 (optimize/replace the GIF delivery),
+   then rerun representative Lighthouse checks and manual keyboard/screen-reader
+   and light/dark visual checks.
+2. Run the link guard and hosted CI; verify search results and the deployed
+   base-path assets/404 after an explicitly authorized deployment. Pages setup,
+   pushes and GitHub settings changes are outside this phase.
+3. Verify clean-machine installation, newcomer walkthrough and README rendering;
+   resolve or explicitly waive the missing board tour and dark/light screenshots.
+4. Separately finalize licensing and the release/Homebrew story. These remain
+   deferred documentation decisions, not completed launch prerequisites.
+
 | phase | work | output | acceptance | estimate |
 |---|---|---|---|---|
 | **0. Decisions** | answer §8 (framework, license, archive, install story, domain) | decisions recorded at the top of this file | no open "must" questions | 30 min |
@@ -544,11 +604,12 @@ Resolved 2026-11-07 (Phase 0). Each recommendation adopted as stated.
    the peer precedent.
 2. **Publish the research archive — yes.** Adopted, curated and prefaced as
    historical. The studies are the project's most distinctive writing.
-3. **License — MIT for code, CC BY 4.0 for docs.** Adopted. Two files, two
-   scopes.
-4. **Install story — goreleaser + Homebrew tap.** Adopted, added before launch
-   so the install page can honestly promise `brew install`; `go install @latest`
-   already works today and only `brew` is gated on the release.
+3. **License — MIT for code, CC BY 4.0 for docs.** Proposed scopes recorded;
+   implementation explicitly deferred. No LICENSE files in this phase.
+4. **Install story — GoReleaser + Homebrew tap.** Future release direction only;
+   implementation explicitly deferred, with no release workflow in this phase.
+   `go install @latest` is the current source-install story; Homebrew requires
+   a separately authorized release.
 5. **Domain — project URL now.** Adopted: `https://barspielberg.github.io/pr-pile/`,
    zero DNS. A custom domain later needs a DNS record and Bar's sign-off.
 6. **Platform claim — "macOS, tested".** Adopted, honest today. Port
