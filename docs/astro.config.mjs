@@ -37,6 +37,24 @@ export default defineConfig({
           label: 'Reference',
           items: ['reference/config', 'reference/rules', 'reference/actions', 'reference/keys', 'reference/cli'],
         },
+        {
+          label: 'Design',
+          items: [
+            'design',
+            'design/decisions',
+            'design/visual-spec',
+            'design/measurements',
+            {
+              label: 'Research archive',
+              items: [{ autogenerate: { directory: 'design/research' } }],
+            },
+          ],
+        },
+        {
+          label: 'Help',
+          items: ['help/troubleshooting', 'help/limitations'],
+        },
+        { slug: 'contributing' },
       ],
     }),
   ],
