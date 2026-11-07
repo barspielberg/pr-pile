@@ -1,6 +1,17 @@
 ---
 title: PR detail
+description: The study that extended the checks page into the full PR detail overlay.
 ---
+
+:::note[Archived research]
+Historical design notes from 2026-09-17, preserved as history rather than a
+roadmap.
+:::
+
+This study extends the checks page into the full PR detail overlay, adding the
+state block and the second, on-demand request. It shipped. The shipping
+behaviour is in the [visual spec](../visual-spec/) and the
+[detail guide](../../guide/detail/).
 
 
 Research and specification, written in response to:
@@ -12,7 +23,7 @@ Researched 2026-09-17 against the shipped code at `39ad152` and against 50 live
 open PRs from `acme/monorepo`, plus a local clone of that repo used to
 ground-truth the conflict measurements in §4.
 
-This document extends `checks-page.md` rather than replacing it. Its principle —
+This document extends [checks page](./checks-page/) rather than replacing it. Its principle —
 **name what you can act on, count what you cannot** — survives intact and is in
 fact what decides most of the questions below.
 
@@ -139,7 +150,7 @@ For reference, fetching the PR's changed-file list is similar — 969 bytes /
 | upfront, whole board | ~100 (deduped across rules) | ~100 | on every cold start, for PRs you never open |
 | on `c` press | 1 | 1 | only for the PR you asked about |
 
-`DESIGN.md` §2 records that this tool **refuses caching** and that cold start is
+[decisions](../decisions/) records that this tool **refuses caching** and that cold start is
 ~2–4 s with a load-bearing spinner. Upfront fetching would add ~100 requests to
 that cold start and roughly double it — it would break the one number the design
 document commits to. On-demand adds **1.4 s to a keypress you made
@@ -252,7 +263,7 @@ usually merge cleanly — that is what three-way merge is *for* — so "both
 touched" is simply a different fact from "conflicts".
 
 This fails the standard the rest of this codebase holds itself to.
-`checks-page.md` §3 went out of its way to make the tally *reconcile* against
+[checks page](./checks-page/) §3 went out of its way to make the tally *reconcile* against
 GitHub's own numbers, on the grounds that "a reader who notices is left
 wondering what was hidden". A list that names 16 files when 2 conflict is worse
 than that: it does not merely hide, it **fabricates**. You would open the PR,
@@ -274,7 +285,7 @@ It also costs 2 extra requests (~1.7 s each, and the base-side `compare` needs
 2. It needs `repoPath`, which **is not set in the user's config** (it exists in
    `config.go:40` and is currently only interpolated into action templates).
    The feature would silently do nothing for the default configuration.
-3. `DESIGN.md` §2 is explicit that the tool "knows nothing about worktrees,
+3. [decisions](../decisions/) is explicit that the tool "knows nothing about worktrees,
    editors or multiplexers; it renders a template and runs what it gets."
    Shelling into a clone to compute merge state is exactly the coupling the
    tool has avoided, and the package doc opens by explaining that shelling out
@@ -389,7 +400,7 @@ Both are **already in the `PR` struct and unused in the UI** — tier (a), free.
 
 The base branch is the interesting one. #3109 targets
 `fix-PROJ-1839-reject-legacy-option`, not `master`. This board has a stacked-PR
-tree (`DESIGN.md` §3.7) built from exactly this field, so "what is this stacked
+tree ([visual spec §3.7](../visual-spec/)) built from exactly this field, so "what is this stacked
 on" is a question the tool already models and never states in words. Shown
 **only when the base is not the repo default**, so it costs zero lines on the
 ~90% of PRs that target `master`.
@@ -435,7 +446,7 @@ The single strongest thing the overlay must not become. The body is unbounded
 multi-line Markdown: it needs wrapping, it needs truncation policy, it would
 dominate the page, and on this repo it is frequently a PR template with unchecked
 boxes. Rendering it is the first step toward a page you scroll, which is the one
-property `checks-page.md` §4 and `uniform-rows.md` §3.2 both spent real effort
+property [checks page](./checks-page/) §4 and [uniform rows](./uniform-rows/) §3.2 both spent real effort
 refusing. `enter` opens the browser; that is where prose belongs.
 
 ### 5.10 Total comment count — rejected in favour of §5.4
@@ -470,7 +481,7 @@ on the board. A GitHub-Issues field would be empty on essentially every row.
 
 ### 5.14 Listing passing checks — still rejected
 
-`checks-page.md` §1 settled this and nothing measured here disturbs it. 45% of
+[checks page](./checks-page/) §1 settled this and nothing measured here disturbs it. 45% of
 contexts pass and 47% are skipped; naming them buries the signal. The expansion
 is a reason to re-affirm the principle, not to relax it.
 
@@ -503,12 +514,12 @@ The page is **two blocks separated by one blank line**, in strict priority order
 ```
 
 The checks block stays on top and stays exactly as specified in
-`checks-page.md` §4 — it is what `c` was built for and what the user just called
+[checks page](./checks-page/) §4 — it is what `c` was built for and what the user just called
 "good". The state block is strictly below it. **No scrolling, no sections you
 move between, no second key.** Any key still closes; a movement key still closes
 and moves.
 
-Glyphs are the existing vocabulary from `DESIGN.md` §3.2 — `✗` `◐` `✓` `!` `·`
+Glyphs are the existing vocabulary from [visual spec §3.2](../visual-spec/) — `✗` `◐` `✓` `!` `·`
 in `error` / `attention` / `ok` / `muted`. **One glyph is added**: `●` (U+25CF,
 `attention`) for unresolved comments. It is justified against the existing set —
 it is filled where `○` "review required" is hollow, which reads as "there is
@@ -705,7 +716,7 @@ currently invisible.
 CI is green and the PR is still completely stuck: 26 commits behind, conflicted,
 with 9 live conversations. **The old overlay showed one line here** — `✓ all 18
 checks passing` — which is true and useless. This is the dead-end problem
-`checks-page.md` §2.2 identified, one level up.
+[checks page](./checks-page/) §2.2 identified, one level up.
 
 ### 8.3 All green — #3253, at 120 columns
 
@@ -825,7 +836,7 @@ order from §6.2 removed head branch, age, and size — in that order.
    the top of the page, so the key still means what it did. A second key was
    considered and rejected: two keys for one PR means choosing which page you
    want before you know what is wrong with it, which is exactly the dead-end
-   `checks-page.md` §2.2 removed. The `?` legend entry should change from
+   [checks page](./checks-page/) §2.2 removed. The `?` legend entry should change from
    `checks for this PR` to `detail for this PR`.
 3. **`●` as a new glyph** for unresolved comments (§6.1). It is the only addition
    to the visual vocabulary in this spec. `·` in `attention` is the
@@ -849,13 +860,13 @@ order from §6.2 removed head branch, age, and size — in that order.
   PR number and drop stale ones. Either works; the Bubble Tea `tea.Cmd` idiom
   makes the tag-and-drop version simpler.
 - **`reviewThreads(first: 100)` is unpaged**, the same pre-existing ceiling
-  `checks-page.md` §6 flagged for `contexts(first: 100)`. Max observed is 9
+  [checks page](./checks-page/) §6 flagged for `contexts(first: 100)`. Max observed is 9
   unresolved (and the connection returns all threads, not just unresolved, so the
   real ceiling is total threads). Not worth paging; worth knowing.
 - **Where the search interacts.** Settled since: search matches only what the
   row draws, which is the three-character initials cell. `author.name` is
   deliberately not matched — a hidden term no column shows cannot be
-  highlighted, and an unhighlightable match reads as a bug. `DESIGN.md` records
+  highlighted, and an unhighlightable match reads as a bug. [visual spec](../visual-spec/) records
   the rule.
 - **Whether `aheadBy` is worth rendering.** The `compare` call returns it for
   free. I left it out: "3 commits ahead" is not a question anyone asks. Available

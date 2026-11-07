@@ -1,6 +1,16 @@
 ---
 title: View restructure
+description: The earlier study that argued against restructuring; its recommendation was implemented and did not hold.
 ---
+
+:::note[Archived research]
+Historical design notes from 2026-09-17, preserved as history rather than a
+roadmap.
+:::
+
+This study is superseded — the note below explains how. Its diagnosis of the
+scroll bug and its industry survey still hold; see
+[uniform rows](./uniform-rows/) for the restructure that followed.
 
 
 Research and recommendation, written in response to:
@@ -9,21 +19,23 @@ Research and recommendation, written in response to:
 > take the same space and header and errors would be somewhere else"*
 
 Researched: 2026-09-17. Builds on the three rounds of design research and the
-design spec since consolidated into `DESIGN.md`. Claims about `pile`'s own behaviour are from a
+design spec since consolidated into [visual spec](../visual-spec/). Claims about `pile`'s own behaviour are from a
 transcription of the shipped `window()` into a simulator and exhaustive search
 over its state space; claims about other tools are cited. Where I could not
 verify something I say so in §6.
 
 ---
 
-> Note: this study was written against an earlier `design-research.md` and
-> `design-spec.md`, which have since been consolidated into `DESIGN.md`. The
-> surviving conclusions live there.
+> Note: this study was written against two earlier working files — a design
+> research note and a design spec — that were later consolidated into the
+> [visual spec](../visual-spec/) and [decisions](../decisions/) pages. The
+> surviving conclusions live there; the earlier files exist only in git
+> history.
 
 > **Superseded (2026-09-17).** §1's recommendation — "fix the scroll code, not
 > the layout" — was implemented and the jump survived. The board was then
 > restructured to uniform rows, which is what this study argued against. See
-> `uniform-rows.md` for the measurements that overturned it. The diagnosis in §2
+> [uniform rows](./uniform-rows/) for the measurements that overturned it. The diagnosis in §2
 > and the industry survey in §6 remain accurate and are still worth reading;
 > it is the §1 conclusion that did not hold.
 
@@ -198,7 +210,7 @@ At K=2 it does not — which is why the current code, with `scrollOff = 2`,
 This is the actionable finding. The fix is:
 
 - `scrollOff = 3` (also the modal value across fzf, nnn and micro — see
-  the earlier design research (§9.1, now in `DESIGN.md`), and it is what guarantees a full 2-line row of
+  the earlier design research (§9.1, now in [visual spec](../visual-spec/)), and it is what guarantees a full 2-line row of
   lookahead rather than half of one).
 - Replace the greedy first-anchor-that-fits loop with: among anchors that keep
   the whole selected row visible, pick the one whose resulting `gapBelow` is
@@ -273,7 +285,7 @@ That is exactly the architecture we would be adopting: move the "why is CI red"
 answer out of the row, and the pane becomes load-bearing. For a tool the user
 opens with cmd+\` to *glance* and dismiss, a permanently-occupied 45% of width or
 40% of height is the wrong trade. It also directly contradicts
-the earlier design spec (§7.1, now in `DESIGN.md`), which cut the global header to buy back a single row.
+the earlier design spec (§7.1, now in [visual spec](../visual-spec/)), which cut the global header to buy back a single row.
 
 Worth noting for honesty: I found **no gh-dash issue complaining the preview is
 on by default or wastes space**. The space complaints are aimed at the logo
