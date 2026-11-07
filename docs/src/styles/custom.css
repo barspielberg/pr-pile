@@ -1,0 +1,27 @@
+/* pile theme tokens (§5.6): the board's own palette, accent from ANSI blue 4,
+ * muted text via opacity, monospace for keys/glyphs/paths/config. */
+
+:root {
+  --sl-color-accent-low: #dbeafe;
+  --sl-color-accent: #2563eb;
+  --sl-color-accent-high: #1e40af;
+  --sl-color-text-accent: #1d4ed8;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #1e3a8a;
+  --sl-color-accent: #3b82f6;
+  --sl-color-accent-high: #93c5fd;
+  --sl-color-text-accent: #93c5fd;
+}
+
+/* Secondary prose is muted via opacity rather than a fixed grey. */
+.muted {
+  opacity: 0.62;
+}
+
+/* Keys, glyphs, paths and config lines are monospace by convention. */
+:root {
+  --sl-font-mono: ui-monospace, 'SF Mono', 'Menlo', 'Monaco', 'Cascadia Mono',
+    'Liberation Mono', monospace;
+}
