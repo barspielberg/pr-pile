@@ -12,7 +12,9 @@ next, opens PRs in the browser, and gets out of the way between uses.
 
 ## Install
 
-macOS today; `gh` installed and logged in; Go 1.24+ to build.
+macOS and Linux; `gh` installed and logged in; Go 1.24+ to build.
+On Linux, browser opening needs `xdg-open` (xdg-utils); copying needs
+`wl-copy` (wl-clipboard) on Wayland or `xclip` / `xsel` on X11.
 
 ```sh
 go install github.com/barspielberg/pr-pile/cmd/pile@latest
@@ -83,7 +85,9 @@ The site is the manual: <https://barspielberg.github.io/pr-pile/>.
 ## Status
 
 A personal tool at 0.x with no tagged releases; the docs track `main`. Tested
-on macOS. Supports multiple repos, selection, watches and native GitHub stacks.
+on macOS and Linux (Wayland and XWayland), with build and automated tests on
+Linux. Linux desktop integrations require the tools listed above. Supports
+multiple repos, selection, watches and native GitHub stacks.
 Not built: write actions and a preview pane.
 
 ## License

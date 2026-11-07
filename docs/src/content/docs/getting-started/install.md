@@ -3,14 +3,17 @@ title: Install
 description: Requirements and install options for pile.
 ---
 
-pile runs on macOS today, needs `gh` for its token, and builds from source with
+pile runs on macOS and Linux, needs `gh` for its token, and builds from source with
 Go 1.24+. There are no tagged releases yet, so install is `go install` or a
 checkout build; Homebrew follows the first release.
 
 ## Requirements
 
-- **macOS** — the board uses `open` and `pbcopy`, so it is tested
-  on macOS only; Linux is not tested.
+- **macOS or Linux** — macOS uses the built-in `open` and `pbcopy`. On Linux,
+  install `xdg-open` (usually packaged as `xdg-utils`) to open PRs, and
+  `wl-copy` (from `wl-clipboard`) on Wayland or `xclip` / `xsel` on X11 to copy.
+  Linux builds and automated tests run in CI; desktop integration still needs
+  a graphical session.
 - **`gh`** — installed and logged in. pile reads your token from `gh auth token`
   and infers the repo with `gh repo view`, so it never asks you to provision a
   credential of its own.
