@@ -29,6 +29,9 @@
 /* Landing demo: centre the recording and keep it inside the content column. */
 .demo {
   display: block;
+  width: 100%;
+  max-width: 720px;
+  height: auto;
   margin-inline: auto;
   border: 1px solid var(--sl-color-gray-5);
   border-radius: 0.5rem;
