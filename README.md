@@ -85,3 +85,16 @@ The site is the manual: <https://barspielberg.github.io/pr-pile/>.
 A personal tool at 0.x with no tagged releases; the docs track `main`. Tested
 on macOS. Supports multiple repos, selection, watches and native GitHub stacks.
 Not built: write actions and a preview pane.
+
+## License
+
+Copyright (c) 2026 Bar Spielberg.
+
+Code, including the documentation site's source code and code examples, is
+licensed under the [MIT License](LICENSE).
+
+Documentation prose and media in `README.md`, `docs/src/content/docs/`,
+and `docs/public/` are licensed under
+[Creative Commons Attribution 4.0 International (CC BY 4.0)](LICENSE-docs).
+Attribution: Bar Spielberg, [pile](https://github.com/barspielberg/pr-pile).
+Third-party material retains its original license.
