@@ -11,9 +11,9 @@
 `pr-pile` is a working tool with unusual depth in its notes and almost no
 on-ramp for anyone who did not write it. The docs tree is 47.7k words, most of
 it design research written for one reader; the README is 1,655 words that open
-with build commands and spend 70 lines on one personal worktree recipe. There is
-no screenshot, no install path that works outside a checkout, no license, and no
-CI.
+with build commands and spend ~57 lines on one personal worktree recipe. There is
+no screenshot, no documented install path (though `go install …@latest` works
+today; only `brew` is gated on a release), no license, and no CI.
 
 The plan is to split the material by audience instead of rewriting it wholesale:
 
@@ -27,12 +27,12 @@ The plan is to split the material by audience instead of rewriting it wholesale:
 **Recommended stack:** Astro Starlight, source in `docs/`, deployed by GitHub
 Actions to `https://barspielberg.github.io/pr-pile/`.
 
-**Work:** ~28 pages at launch, of which ~10 are edited migrations and ~12 are
+**Work:** ~30 pages at launch, of which ~10 are edited migrations and ~12 are
 new writing; two to three focused days in six shippable phases.
 
-**Prerequisites outside the docs themselves** (see §8, decisions 3–5): a
-LICENSE, a CI workflow, and a release story (`goreleaser` + Homebrew tap) — the
-install page cannot honestly promise a one-liner until one exists.
+**Prerequisites outside the docs themselves** (see §8, decisions 3–4 for two of
+them): a LICENSE, a CI workflow, and a release story (`goreleaser` + Homebrew
+tap) — the install page cannot honestly promise a one-liner until one exists.
 
 ---
 
@@ -77,18 +77,18 @@ walk past a decision table to find `make build`.
 1. **No image.** A terminal board is a visual product; the README never shows
    the board. Every comparable tool leads with a screenshot or a recording.
 2. **The lede is buried.** Line 3 is a one-liner, then Status, then Build;
-   install is line 14, and the first thing a visitor learns is the author's
+   `make install` is line 21, and the first thing a visitor learns is the author's
    assessment of their own feature completeness.
 3. **A false requirement.** Line 24 says a Nerd Font is needed for the glyphs.
    The code uses only BMP characters (`✓ ✗ ◐ ○ ╭╴ │ ╰╴ ▌ …`); there is not one
    Private Use Area codepoint in non-test code, and `DESIGN.md` §2 explicitly
    rejects Nerd Font glyphs. The README contradicts both the code and the spec.
 4. **One recipe eats the page.** §"Example: open a PR as a worktree workspace"
-   is 60 lines — nearly a third of the file — about Worktrunk and `herdr`, tools the
+   is ~57 lines — about a quarter of the file — about Worktrunk and `herdr`, tools the
    project does not ship. It is excellent content in the wrong place.
 5. **Undocumented config.** `author: true` exists in `config.go` and in the
    starter config, but never appears in the README's rule example. `limit`
-   truncating *before* first-match dedup is documented only in `DESIGN.md` §7.
+   truncating *before* first-match dedup is documented in `DESIGN.md` §4 and §7 and the starter config.
 6. **Platform silence.** `open`/`pbcopy`/`osascript` mean macOS today. The
    README reads as cross-platform.
 7. **The search essay belongs on a docs page.** §Searching is 38 lines of
@@ -118,7 +118,7 @@ walk past a decision table to find `make build`.
 | concepts page | "rules are the whole abstraction" is the mental model, taught nowhere |
 | reference with types/defaults | config lives in prose examples |
 | keys by context | the README table mixes board/search/detail/help |
-| troubleshooting | `gh auth token`, org IP allow-lists, Arc, empty boards |
+| troubleshooting | `gh auth token`, org IP allow-lists, unreadable repo at startup, Arc |
 | limitations | the honest "not built" list is buried in `DESIGN.md` §7 |
 | contributing | package map, test conventions, why tests outnumber code 1.5:1 |
 
@@ -371,11 +371,11 @@ Plausible) is a one-line script; anything heavier is not worth the weight.
 | `/design/visual-spec/` | Visual spec | row anatomy, status cluster, colour tokens, tiers | M (DESIGN §3) | 2,000 |
 | `/design/measurements/` | Measured facts | latency, limits, scroll margins across tools | M (DESIGN §6) | 600 |
 | `/design/research/` | Research archive (index + 5 pages) | the long studies, prefaced as historical | M (5 memos) | 30,000 |
-| `/help/troubleshooting/` | Troubleshooting | `gh auth`, IP allow-lists, empty board, Arc, clipboard, wide glyphs | N | 900 |
+| `/help/troubleshooting/` | Troubleshooting | `gh auth`, IP allow-lists, unreadable repo at startup, Arc, clipboard, wide glyphs | N | 900 |
 | `/help/limitations/` | Limitations | not built, known problems, divergences | M (DESIGN §7) | 700 |
 | `/contributing/` | Contributing | build/test, package map, test conventions, commit style | N | 900 |
 
-~28 pages; ~15k words of user-facing prose plus the archive. Roughly 40% of the
+~30 pages; ~15k words of user-facing prose plus the archive. Roughly 40% of the
 user-facing text exists already and needs editing, not writing.
 
 ### 5.3 README blueprint
@@ -486,7 +486,7 @@ published from a second location.
 
 | guard | mechanism | catches |
 |---|---|---|
-| config reference | a Go test parses `yaml:` tags in `internal/config/config.go` and asserts every key appears in `/reference/config/` | an undocumented or renamed key |
+| config reference | a Go test parses `yaml:` tags in `internal/config/config.go` and asserts every key appears on its page — `Config` → `/reference/config/`, `Rule` → `/reference/rules/`, `Action` → `/reference/actions/` | an undocumented or renamed key |
 | keys reference | a table in `internal/ui` (or a test that reads `model.go`'s key cases) asserts every binding appears on `/reference/keys/` | a key shipped but undocumented |
 | glyph legend | the legend page is generated from the same helper `help.go` uses, or a test asserts the glyph set matches | a glyph changed in code, stale docs |
 | links | `lychee` or `astro-broken-links-checker` in CI, internal links only | moved pages, dead anchors |
@@ -683,5 +683,5 @@ jobs:
 | actions | `sh -c`, template vars, background vs suspend, status line, keys matched last | `model.go`, `config.go` |
 | config | every key, type, default, precedence, env | `config.go` |
 | keys | four contexts, chords while typing, `d` closes on any key | `model.go`, `help.go` |
-| troubleshooting | `gh auth token`, org IP allow-list → `issueCount 0`, Arc, pbcopy, empty section while loading | `github.go` (CheckRepo), `browser.go` |
+| troubleshooting | `gh auth token`, org IP allow-list → startup error (`repo not found, or you cannot see it`), Arc, pbcopy, empty section while loading | `main.go` (`CheckRepo`), `github.go`, `browser.go` |
 | limitations | deferred review progress, no write actions, single repo, hardcoded margin, spec divergences | `DESIGN.md` §7 |
