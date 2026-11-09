@@ -64,7 +64,37 @@ func (m Model) stateLines(pr github.PR) []string {
 	if s := ageLine(pr); s != "" {
 		out = append(out, label("opened", s))
 	}
+	// Last because it arrives with the detail request, so landing moves only
+	// the stack block below it.
+	if loaded && len(d.Labels) > 0 {
+		out = append(out, "  "+mutedStyle.Render(pad("labels", 10))+labelsText(d.Labels, max(0, body-12)))
+	}
 	return out
+}
+
+// labelsText fits whole names and counts the rest, since a label clipped
+// mid-word reads as a different label. Plain text, not chips: reverse and a
+// fill already mean a search hit and the selection, and GitHub's label colours
+// are hex. See docs/pr-detail.md §5.8.
+func labelsText(labels []string, w int) string {
+	names := make([]string, len(labels))
+	for i, l := range labels {
+		names[i] = terminalText(l)
+	}
+	more := func(k int) string {
+		if k == len(names) {
+			return ""
+		}
+		return fmt.Sprintf(" · +%d", len(names)-k)
+	}
+	k := len(names)
+	for k > 0 && lipgloss.Width(strings.Join(names[:k], " · ")+more(k)) > w {
+		k--
+	}
+	if k == 0 {
+		return clip(names[0], w)
+	}
+	return strings.Join(names[:k], mutedStyle.Render(" · ")) + mutedStyle.Render(more(k))
 }
 
 // stackLines is the PR's native stack, bottom first. It is the last block

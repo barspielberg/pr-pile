@@ -293,6 +293,50 @@ func TestReviewerLineIsSilentWhenNoOneHasReviewed(t *testing.T) {
 	}
 }
 
+// Labels come with the detail request, so the line is absent until it lands
+// and absent for a PR with none.
+func TestLabelsLineArrivesWithTheDetail(t *testing.T) {
+	pr := github.PR{Repo: testRepo,
+		Number: 3240, Title: "retry the sync", CIState: "SUCCESS", PassedCount: 3,
+		Author: "someone", HeadRefName: "PROJ-1900", UpdatedAt: time.Now(),
+	}
+	m := detailModel(t, pr, 24)
+	if out := stripANSI(m.detailOverlay()); strings.Contains(out, "labels") {
+		t.Errorf("labels drawn before the request landed:\n%s", out)
+	}
+
+	next, _ := m.Update(detailResponse(m, github.Detail{Repo: testRepo,
+		Number: 3240, DefaultBranch: "master", Labels: []string{"bug", "needs-qa"},
+	}))
+	if out := stripANSI(next.(Model).detailOverlay()); !strings.Contains(out, "labels    bug · needs-qa") {
+		t.Errorf("overlay missing the labels:\n%s", out)
+	}
+
+	next, _ = m.Update(detailResponse(m, github.Detail{Repo: testRepo, Number: 3240, DefaultBranch: "master"}))
+	if out := stripANSI(next.(Model).detailOverlay()); strings.Contains(out, "labels") {
+		t.Errorf("labels line drawn for a PR with none:\n%s", out)
+	}
+}
+
+// A label clipped mid-word reads as a different label, so only whole names are
+// drawn and the rest are counted. Emoji are two cells wide.
+func TestLabelsTextKeepsNamesWhole(t *testing.T) {
+	labels := []string{"Webapp 🏎️", "ready-for-e2e", "needs-qa"}
+	for _, tc := range []struct {
+		w    int
+		want string
+	}{
+		{80, "Webapp 🏎️ · ready-for-e2e · needs-qa"},
+		{30, "Webapp 🏎️ · ready-for-e2e · +1"},
+		{20, "Webapp 🏎️ · +2"},
+		{8, "Webapp …"},
+	} {
+		if got := stripANSI(labelsText(labels, tc.w)); got != tc.want {
+			t.Errorf("w=%d: got %q, want %q", tc.w, got, tc.want)
+		}
+	}
+}
+
 // A display name is null for 36% of this board's authors, so the login is
 // always carried and stands alone when there is no name. §5.2.
 func TestPersonFallsBackToTheLogin(t *testing.T) {
