@@ -47,18 +47,22 @@ that decide what to do next, and gets out of the way between uses.
 
 ## Install
 
+On macOS, use Homebrew:
+
 ```sh
-go install github.com/barspielberg/pr-pile/cmd/pile@latest
+brew install barspielberg/tap/pile
 ```
 
 macOS and Linux, `gh` logged in, Go 1.24.2+ to build from source. See
-[Install](getting-started/install/) for source options, planned Homebrew
-availability, and the macOS binary limitation.
+[Install](getting-started/install/) for source installs, Linux downloads, and
+the macOS browser-download limitation.
 
 ## Status
 
-A personal tool at 0.x with draft `v0.1.0-rc.1` artifacts and no public stable
-release yet; these docs track `main`.
-Tested on macOS and Linux (Wayland and XWayland), with build and automated tests
-on Linux. See the installation requirements for Linux desktop tools.
+A personal tool at 0.x with stable
+[v0.1.0](https://github.com/barspielberg/pr-pile/releases/tag/v0.1.0) released;
+these docs track `main`. Public Homebrew installation and interactive checks
+passed on macOS Apple Silicon. CI builds and automated tests run on Linux and
+macOS. Public upgrades, Linux release installation/desktop integrations, and
+other native architectures remain unvalidated.
 Not built: write actions and a preview pane.
