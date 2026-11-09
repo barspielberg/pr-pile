@@ -62,8 +62,10 @@ it locally, add `--external --report "$TMPDIR/external-links.md"` to the checker
 
 ## Create a draft/RC and test it on a Mac before publication
 
-After merging validated changes, a maintainer may tag `v0.1.0-rc.1` and push
-that tag. The release workflow runs tests, then creates a **draft prerelease**.
+`v0.1.0-rc.1` already has draft artifacts; see its [acceptance record](#v010-rc1-acceptance).
+For subsequent candidates, after merging validated changes, a maintainer may
+create and push a new RC tag. The release workflow runs tests, then creates a
+**draft prerelease**.
 It explicitly binds GoReleaser to the triggering tag, even when RC and stable
 tags share a commit. Review release notes and inspect artifacts before deciding
 to publish. Ordinary pushes and PRs create snapshots only.
@@ -112,8 +114,55 @@ its SHA-256 with the draft manifest, extract it and execute `pile --version` on
 a clean Mac. Record any Gatekeeper prompt/failure; do not strip quarantine or
 approve trust dialogs to silently turn that test into a pass. Check signing
 status separately with `codesign --verify --verbose PATH_TO_PILE` and
-`spctl --assess --type execute --verbose PATH_TO_PILE`. Repeat direct-download
-testing with the public stable URLs before advertising that installation path.
+`spctl --assess --type execute --verbose PATH_TO_PILE`. A valid checksum or
+ad-hoc `codesign` verification does not establish Gatekeeper acceptance. Do not document quarantine removal or Gatekeeper bypasses as install
+steps. Developer ID signing, notarization, and a passing first-run test using
+public stable URLs are required before advertising macOS browser downloads.
+
+## v0.1.0-rc.1 acceptance
+
+Reported macOS acceptance on **Apple Silicon (arm64)** for the real draft
+`v0.1.0-rc.1` at `7e9f8d1`, using GoReleaser 2.20.0 and Homebrew:
+
+| Check | Actual result |
+| --- | --- |
+| All four draft archives against `checksums.txt` | PASS |
+| Local candidate formula from those downloaded archives | PASS |
+| `brew reinstall` and `brew test` of `pile-candidate` | PASS |
+| `pile-candidate --version` | `pile 0.1.0-rc.1 (commit 7e9f8d1, built 2026-11-09T20:58:57Z)` |
+| Board loads live PRs | PASS |
+| `y` copies the selected URL | PASS; clipboard cleared first and checked with `pbpaste` |
+| `enter` opens the selected PR | PASS; correct browser tab confirmed visually |
+| `q` exits cleanly | PASS |
+| Firefox download of the darwin arm64 archive | SHA-256 PASS; quarantine retained after both `tar` and Finder extraction |
+| Signing checks on that extracted binary | Ad-hoc linker signature, no Team ID; `codesign --verify` valid on disk |
+| Gatekeeper / first execution | `spctl` rejected; `pile --version` killed with exit 137 and “Apple could not verify” dialog |
+
+The browser test preserved quarantine and did not approve trust dialogs. It
+records a blocked first run. The working local candidate uses verified `file://`
+archives and installs `pile-candidate`; it is distinct from the public
+`barspielberg/tap/pile` formula and its install/upgrade path.
+
+Earlier local-candidate testing at `7c77ab5` exposed a **test-only** macOS temp
+path expectation (`/var` versus `/private/var`). The merge resolves the expected
+path in the test, and all 11 `test_homebrew_formula.py` tests passed on macOS at
+`7e9f8d1`. This was not a release binary behavior change. The pending glyph
+rendering issue observed inside Herdr was isolated to Herdr, not a pile defect.
+
+Current readiness and remaining validation:
+
+- The public tap repository is initialized and the token is saved. Automation
+  is **not enabled**; there is no public stable release.
+- Public `barspielberg/tap/pile` install, `brew test`, version, and upgrade
+  validation remain open. Candidate acceptance does not satisfy these checks.
+- Linux release installation and desktop integrations remain untested. Exercise
+  browser and clipboard behavior in native graphical sessions.
+- Native runtime acceptance beyond macOS arm64 remains open: macOS amd64 and
+  Linux amd64/arm64. Four matching archive hashes and cross-builds do not prove
+  native execution or integrations.
+- macOS browser downloads remain blocked pending Developer ID signing,
+  notarization, and successful Gatekeeper validation. Recommend source installs
+  now, then Homebrew once publicly available and validated.
 
 ## Stable publication and one-time Homebrew setup
 
@@ -143,13 +192,18 @@ published backports/manual retries fail without changing the tap. Unreadable
 state fails closed; the checked file SHA makes concurrent updates conflict.
 The older source-formula format is recognized for safe upgrades.
 
-Verify public installation on macOS and Linux:
+After public stable publication and tap update, verify public installation on
+macOS and Linux:
 
 ```sh
 brew install barspielberg/tap/pile
 brew test barspielberg/tap/pile
 pile --version
 ```
+
+Also validate `brew upgrade barspielberg/tap/pile` from a previously installed
+public version when one is available; record the starting and resulting versions.
+A fresh install or local candidate reinstall is not an upgrade test.
 
 Update README/install/CLI status once the first stable release and tap are
 actually public. Binary archives need gh and Linux desktop tools separately.
