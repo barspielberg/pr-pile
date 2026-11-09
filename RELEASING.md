@@ -62,7 +62,7 @@ it locally, add `--external --report "$TMPDIR/external-links.md"` to the checker
 
 ## Create a draft/RC and test it on a Mac before publication
 
-`v0.1.0-rc.1` already has draft artifacts; see its [acceptance record](#v010-rc1-acceptance).
+`v0.1.0-rc.1` had draft artifacts; see its [acceptance record](#v010-rc1-acceptance).
 For subsequent candidates, after merging validated changes, a maintainer may
 create and push a new RC tag. The release workflow runs tests, then creates a
 **draft prerelease**.
@@ -149,20 +149,45 @@ path in the test, and all 11 `test_homebrew_formula.py` tests passed on macOS at
 `7e9f8d1`. This was not a release binary behavior change. The pending glyph
 rendering issue observed inside Herdr was isolated to Herdr, not a pile defect.
 
-Current readiness and remaining validation:
+## v0.1.0 stable public install acceptance
 
-- The public tap repository is initialized and the token is saved. Automation
-  is **not enabled**; there is no public stable release.
-- Public `barspielberg/tap/pile` install, `brew test`, version, and upgrade
-  validation remain open. Candidate acceptance does not satisfy these checks.
+Stable [v0.1.0](https://github.com/barspielberg/pr-pile/releases/tag/v0.1.0)
+is live (not draft or prerelease), tagged at `a7bf3b7`. The public tap formula
+is 0.1.0, the macOS install/test workflow passed, and
+`HOMEBREW_TAP_ENABLED=true` with the tap secret configured.
+
+User-reported public installation on **macOS Apple Silicon (arm64)** on
+2026-11-09, separately from the historical RC candidate checks above:
+
+| Check | Actual result |
+| --- | --- |
+| `brew update` then `brew install barspielberg/tap/pile` | PASS |
+| `brew test barspielberg/tap/pile` | PASS |
+| `pile --version` | `pile 0.1.0 (commit a7bf3b7, built 2026-11-09T21:34:51Z)`; matches the stable tag |
+| `pile` on PATH | `/opt/homebrew/bin/pile` |
+| Board loads live PRs | PASS |
+| `y` copies the selected URL | PASS; clipboard cleared first and checked with `pbpaste` |
+| `enter` opens the selected PR | PASS; subsequent user follow-up visually confirmed the correct browser PR tab |
+| `q` exits cleanly | PASS |
+
+An older Go-installed binary remains in `~/go/bin`, after `/opt/homebrew/bin`
+in the tested PATH. Check `command -v pile` and `pile --version` when switching
+install methods; changing PATH order can select that older copy again.
+
+Remaining validation:
+
+- Public `brew upgrade barspielberg/tap/pile` from a prior public version is
+  untested; a fresh install or candidate reinstall is not an upgrade test.
 - Linux release installation and desktop integrations remain untested. Exercise
   browser and clipboard behavior in native graphical sessions.
 - Native runtime acceptance beyond macOS arm64 remains open: macOS amd64 and
   Linux amd64/arm64. Four matching archive hashes and cross-builds do not prove
   native execution or integrations.
-- macOS browser downloads remain blocked pending Developer ID signing,
-  notarization, and successful Gatekeeper validation. Recommend source installs
-  now, then Homebrew once publicly available and validated.
+- Stable macOS browser downloads were **not retested**. The Gatekeeper block
+  above was observed on the RC. Stable binaries are not Developer ID signed
+  or notarized; direct macOS browser downloads remain unsupported pending
+  signing, notarization, and successful first-run Gatekeeper validation.
+  Recommend Homebrew for macOS release installs, or source installs.
 
 ## Stable publication and one-time Homebrew setup
 
@@ -170,7 +195,8 @@ Only after candidate acceptance, a maintainer may tag the validated commit with
 the stable version and review/publish its draft. Released tags must not move.
 Drafts and prereleases never publish to the tap.
 
-Before enabling automation, configure the following prerequisites:
+The v0.1.0 setup is complete as recorded above. For reference, automation
+requires the following prerequisites:
 
 1. A **public `barspielberg/homebrew-tap` repository with an initial commit** on
    its default branch. A missing/empty repository cannot receive a formula.
@@ -205,5 +231,5 @@ Also validate `brew upgrade barspielberg/tap/pile` from a previously installed
 public version when one is available; record the starting and resulting versions.
 A fresh install or local candidate reinstall is not an upgrade test.
 
-Update README/install/CLI status once the first stable release and tap are
-actually public. Binary archives need gh and Linux desktop tools separately.
+Keep README/install/CLI status aligned with public release acceptance. Binary
+archives need gh and Linux desktop tools separately.

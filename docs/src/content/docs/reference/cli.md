@@ -60,15 +60,22 @@ rather than rendered as an empty board.
 
 ## Install
 
-`go install` works today:
+Homebrew is the recommended macOS release install:
+
+```sh
+brew install barspielberg/tap/pile
+```
+
+Stable v0.1.0 is public, with Homebrew installation and interactive checks
+validated on Apple Silicon. Public upgrades remain untested. Direct macOS
+browser downloads remain unsupported; the Gatekeeper block was observed on
+v0.1.0-rc.1 and was not retested on stable.
+
+Source installs on macOS or Linux require Go 1.24.2+:
 
 ```sh
 go install github.com/barspielberg/pr-pile/cmd/pile@latest
 ```
 
-There is no public stable release yet. Public Homebrew installation and upgrades
-remain unvalidated; Homebrew will be the recommended macOS release install once
-publicly available and validated. Browser-downloaded macOS RC binaries are
-currently blocked by Gatekeeper.
-
-See [Install](../../getting-started/install/) for source options and release status.
+See [Install](../../getting-started/install/) for Linux downloads, PATH checks,
+and release validation limits.
