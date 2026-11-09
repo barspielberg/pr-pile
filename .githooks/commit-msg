@@ -1,0 +1,3 @@
+#!/bin/sh
+# Git runs commit hooks from the worktree root; quote the message-file path.
+exec go run ./tools/commitlint --commit-msg "$1"
