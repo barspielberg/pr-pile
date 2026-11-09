@@ -293,6 +293,75 @@ func TestReviewerLineIsSilentWhenNoOneHasReviewed(t *testing.T) {
 	}
 }
 
+// Labels come with the detail request, so the line is absent until it lands
+// and absent for a PR with none.
+func TestLabelsLineArrivesWithTheDetail(t *testing.T) {
+	pr := github.PR{Repo: testRepo,
+		Number: 3240, Title: "retry the sync", CIState: "SUCCESS", PassedCount: 3,
+		Author: "someone", HeadRefName: "PROJ-1900", UpdatedAt: time.Now(),
+	}
+	m := detailModel(t, pr, 24)
+	if out := stripANSI(m.detailOverlay()); strings.Contains(out, "labels") {
+		t.Errorf("labels drawn before the request landed:\n%s", out)
+	}
+
+	next, _ := m.Update(detailResponse(m, github.Detail{Repo: testRepo,
+		Number: 3240, DefaultBranch: "master", Labels: []string{"bug", "needs-qa"},
+	}))
+	if out := stripANSI(next.(Model).detailOverlay()); !strings.Contains(out, "labels    bug · needs-qa") {
+		t.Errorf("overlay missing the labels:\n%s", out)
+	}
+
+	next, _ = m.Update(detailResponse(m, github.Detail{Repo: testRepo, Number: 3240, DefaultBranch: "master"}))
+	if out := stripANSI(next.(Model).detailOverlay()); strings.Contains(out, "labels") {
+		t.Errorf("labels line drawn for a PR with none:\n%s", out)
+	}
+}
+
+// A label clipped mid-word reads as a different label, so only whole names are
+// drawn and the rest are counted. Emoji are two cells wide.
+func TestLabelsTextKeepsNamesWhole(t *testing.T) {
+	labels := []string{"Webapp 🏎️", "ready-for-e2e", "needs-qa"}
+	for _, tc := range []struct {
+		w    int
+		want string
+	}{
+		{80, "Webapp 🏎️ · ready-for-e2e · needs-qa"},
+		{30, "Webapp 🏎️ · ready-for-e2e · +1"},
+		{20, "Webapp 🏎️ · +2"},
+		{12, "Webapp… · +2"},
+		{8, "+3"},
+	} {
+		if got := stripANSI(labelsText(labels, len(labels), tc.w)); got != tc.want {
+			t.Errorf("w=%d: got %q, want %q", tc.w, got, tc.want)
+		}
+	}
+}
+
+// A first name too long to fit whole is clipped, and the rest are still
+// counted rather than dropped without a trace.
+func TestLabelsTextCountsPastALongFirstLabel(t *testing.T) {
+	got := stripANSI(labelsText([]string{"needs-security-review-before-merge", "bug", "needs-qa"}, 3, 24))
+	if !strings.HasSuffix(got, "… · +2") {
+		t.Errorf("got %q, want a clipped first label and · +2", got)
+	}
+}
+
+// Only the first 20 labels are fetched, so the count of hidden ones comes from
+// the total, not from what arrived.
+func TestLabelsTextCountsLabelsThatWereNotFetched(t *testing.T) {
+	labels := make([]string, 20)
+	for i := range labels {
+		labels[i] = fmt.Sprintf("l%d", i)
+	}
+	if got := stripANSI(labelsText(labels, 23, 200)); !strings.HasSuffix(got, "l19 · +3") {
+		t.Errorf("wide: got %q, want every fetched name and · +3", got)
+	}
+	if got := stripANSI(labelsText(labels, 23, 20)); got != "l0 · l1 · l2 · +20" {
+		t.Errorf("narrow: got %q", got)
+	}
+}
+
 // A display name is null for 36% of this board's authors, so the login is
 // always carried and stands alone when there is no name. §5.2.
 func TestPersonFallsBackToTheLogin(t *testing.T) {

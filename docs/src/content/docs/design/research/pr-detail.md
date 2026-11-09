@@ -423,7 +423,22 @@ age 15 days, max idle 14 days.
 and **only when it is worth saying** — a PR opened 2 hours ago suppresses the
 line entirely, since the row's age column already covers it.
 
-### 5.8 Labels — rejected
+### 5.8 Labels — rejected on the board query, shipped on the detail request
+
+**Re-measured (2026-11).** The cost below is the board query's: one connection
+across 50 PRs. Asked on the per-PR detail request instead, `labels(first: 20)
+{ nodes { name } }` stays at **1 rate-limit point**, adds **68 bytes** for two
+labels, and moved latency within noise (716–1,001 ms without, 800–1,067 ms
+with, three runs each; no 504). At that price the "constant" objection no
+longer outweighs the cost, so labels are a state-block line: the last one, as
+plain names joined by a muted `·`, whole names only with a `+N` for the rest.
+Not chips: reverse already means a search hit, the fill means the selection,
+GitHub's colours are hex, and a coloured `●` would collide with unresolved
+comments. Names only — colour and description would be bytes nothing draws.
+Rows still do not carry them: a row is one line and the near-constant below
+holds.
+
+The original measurement, against the board query:
 
 +2,597 bytes and **+1 rate-limit point** (a connection). Measured on the live
 board:

@@ -39,6 +39,7 @@ The state block is labelled lines about the PR, not its CI:
 | `base: release-2026.06` | the target branch, shown only when it is not the default |
 | `branch: grace/fix-sync` | the head branch |
 | `opened: 3w ago · idle 4d` | how long it has been open, and how long it has sat |
+| `labels: bug · needs-qa` | the PR's labels, shown only when it has some |
 
 Lines with nothing to say are not drawn. Long pages scroll rather than dropping
 failures or state lines. A PR behind its base shows whether the repository
@@ -47,8 +48,8 @@ a blocker. A native GitHub stack is identified in the state block.
 
 ## What arrives late
 
-The conflict/behind count, the unresolved-comment count, the reviewers, and the
-default branch come from a second request, made once per `d` press. It takes
+The conflict/behind count, the unresolved-comment count, the reviewers, the
+labels, and the default branch come from a second request, made once per `d` press. It takes
 1.2–1.9s, so the overlay draws without those lines and they land a moment
 later. The page never waits on the network, and a failed request costs those
 lines and nothing else. The reviewers are only those who have actually

@@ -708,6 +708,8 @@ type Detail struct {
 	Unresolved    int
 	Reviewers     []Reviewer
 	DefaultBranch string
+	Labels        []string
+	LabelCount    int // can exceed len(Labels): only the first 20 are fetched
 
 	// Stack is every PR in the PR's native stack, bottom first, merged and
 	// closed ones included. Empty when it is in none.
@@ -742,7 +744,8 @@ query($o: String!, $r: String!, $n: Int!, $head: String!) {
       reviewThreads(first: 100) { nodes { isResolved isOutdated } }
       latestOpinionatedReviews(first: 10) {
         nodes { state author { login ... on User { name } } }
-      }%s
+      }
+      labels(first: 20) { totalCount nodes { name } }%s
     }
   }
 }`
@@ -797,6 +800,12 @@ func (c *Client) Detail(ctx context.Context, repo string, number int, head strin
 							} `json:"author"`
 						} `json:"nodes"`
 					} `json:"latestOpinionatedReviews"`
+					Labels struct {
+						TotalCount int `json:"totalCount"`
+						Nodes      []struct {
+							Name string `json:"name"`
+						} `json:"nodes"`
+					} `json:"labels"`
 					Stack *struct {
 						Entries struct {
 							Nodes []struct {
@@ -847,6 +856,10 @@ func (c *Client) Detail(ctx context.Context, repo string, number int, head strin
 			Login: r.Author.Login, Name: r.Author.Name, State: r.State,
 		})
 	}
+	for _, l := range pr.Labels.Nodes {
+		d.Labels = append(d.Labels, l.Name)
+	}
+	d.LabelCount = max(pr.Labels.TotalCount, len(d.Labels))
 	if pr.Stack != nil {
 		for _, e := range pr.Stack.Entries.Nodes {
 			p := e.PullRequest
