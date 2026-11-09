@@ -1,0 +1,35 @@
+version: 2
+project_name: pile
+
+builds:
+  - main: ./cmd/pile
+    binary: pile
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.date={{ .Date }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: 'pile_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - README.md
+      - LICENSE
+      - LICENSE-docs
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: barspielberg
+    name: pr-pile
+  draft: true
+  prerelease: auto
+
+changelog:
+  sort: asc

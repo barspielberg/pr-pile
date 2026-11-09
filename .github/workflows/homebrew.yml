@@ -1,0 +1,73 @@
+name: Update Homebrew tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release tag (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: vars.HOMEBREW_TAP_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || !github.event.release.prerelease)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate formula from published binary archive checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          python3 -c 'import os, runpy; runpy.run_path("scripts/homebrew-formula.py")["stable_version"](os.environ["RELEASE_TAG"])'
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease --jq 'if .isDraft or .isPrerelease then error("release must be public and stable") else empty end'
+          for attempt in 1 2 3; do
+            if gh release download "$RELEASE_TAG" --repo barspielberg/pr-pile --pattern checksums.txt --dir "$RUNNER_TEMP/pile-release" --clobber; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep "$attempt"
+          done
+          mkdir -p tap/Formula
+          python3 scripts/homebrew-formula.py "$RELEASE_TAG" "$RUNNER_TEMP/pile-release/checksums.txt" > tap/Formula/pile.rb
+      - name: Test the formula before publishing
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew tap barspielberg/tap
+          tap_root=$(brew --repository barspielberg/tap)
+          mkdir -p "$tap_root/Formula"
+          cp tap/Formula/pile.rb "$tap_root/Formula/pile.rb"
+          brew install barspielberg/tap/pile
+          brew test barspielberg/tap/pile
+      - name: Publish formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          gh api repos/barspielberg/homebrew-tap/contents/Formula/pile.rb > "$RUNNER_TEMP/pile-existing.json" 2> "$RUNNER_TEMP/pile-existing.err" || {
+            if ! grep -q 'HTTP 404' "$RUNNER_TEMP/pile-existing.err"; then
+              cat "$RUNNER_TEMP/pile-existing.err" >&2
+              exit 1
+            fi
+            echo '{}' > "$RUNNER_TEMP/pile-existing.json"
+          }
+          python3 - <<'PY'
+          import json, os, runpy
+          from pathlib import Path
+          temp = Path(os.environ["RUNNER_TEMP"])
+          existing = json.loads((temp / "pile-existing.json").read_text())
+          update_payload = runpy.run_path("scripts/homebrew-formula.py")["update_payload"]
+          payload = update_payload(os.environ["RELEASE_TAG"], Path("tap/Formula/pile.rb").read_text(), existing)
+          (temp / "pile-update.json").write_text(json.dumps(payload))
+          PY
+          gh api --method PUT repos/barspielberg/homebrew-tap/contents/Formula/pile.rb --input "$RUNNER_TEMP/pile-update.json" --silent

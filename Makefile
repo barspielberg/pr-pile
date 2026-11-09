@@ -18,6 +18,13 @@ run: build
 install: check
 	go install ./cmd/pile
 
+# Requires GoReleaser v2.20.0 (the same version used in CI).
+release-check:
+	goreleaser check
+
+release-snapshot: release-check
+	goreleaser release --snapshot --clean
+
 # docs-assets regenerates the demo recording (GIF + MP4) and the OG image from
 # their sources, so neither can drift from the UI or the wordmark. It builds
 # ./pile first because docs/assets/demo.tape runs the real tool.
@@ -29,4 +36,4 @@ docs-assets: build
 	vhs docs/assets/demo.tape
 	convert -background none docs/assets/og.svg docs/public/og.png
 
-.PHONY: build test check run install docs-assets
+.PHONY: build test check run install release-check release-snapshot docs-assets
