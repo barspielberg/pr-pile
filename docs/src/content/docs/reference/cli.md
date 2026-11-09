@@ -60,16 +60,15 @@ rather than rendered as an empty board.
 
 ## Install
 
-`go install` works today, before any release:
+`go install` works today:
 
 ```sh
 go install github.com/barspielberg/pr-pile/cmd/pile@latest
 ```
 
-Homebrew is planned for the first release:
+There is no public stable release yet. Public Homebrew installation and upgrades
+remain unvalidated; Homebrew will be the recommended macOS release install once
+publicly available and validated. Browser-downloaded macOS RC binaries are
+currently blocked by Gatekeeper.
 
-```sh
-brew install barspielberg/tap/pile
-```
-
-See [Install](../../getting-started/install/) for the full options.
+See [Install](../../getting-started/install/) for source options and release status.
