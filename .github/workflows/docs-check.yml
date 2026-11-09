@@ -1,0 +1,39 @@
+name: Validate built docs
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: docs/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: docs
+      - run: pnpm build
+        working-directory: docs
+      - name: Install pinned Lychee (installation failures are separate from link failures)
+        run: python3 scripts/install-lychee.py "$RUNNER_TEMP/link-tools"
+      - name: Exercise valid links, missing pages and missing anchors
+        env:
+          LYCHEE: ${{ runner.temp }}/link-tools/lychee
+          PILE_REQUIRE_LYCHEE: '1'
+        run: python3 -B -m unittest discover -s scripts -p 'test_doc_links.py' -v
+      - name: Check built internal pages and fragment anchors offline
+        run: python3 scripts/check-doc-links.py docs/dist --lychee "$RUNNER_TEMP/link-tools/lychee"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/dist

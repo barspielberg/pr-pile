@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := runCLI(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "pile:", err)
 		os.Exit(1)
 	}

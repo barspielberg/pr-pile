@@ -51,6 +51,11 @@ uses the built-in `open` and `pbcopy`.
 go install github.com/barspielberg/pr-pile/cmd/pile@latest
 ```
 
+Run `pile --help` for usage and `pile --version` for build information. These
+commands work without a config file or GitHub authentication. After the first
+release, [installation options](https://barspielberg.github.io/pr-pile/getting-started/install/)
+will also include binary downloads and Homebrew.
+
 From a local checkout of a GitHub repository, run:
 
 ```sh
