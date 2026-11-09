@@ -29,11 +29,14 @@ func TestAggregateCheckRequiresTestsPackagingAndDocs(t *testing.T) {
 	}
 	var config struct {
 		Jobs map[string]struct {
-			Name  string
-			If    string
-			Needs []string
-			Steps []workflowStep
-			Uses  string
+			Name     string
+			If       string
+			Needs    []string
+			Steps    []workflowStep
+			Uses     string
+			Strategy struct {
+				Matrix struct{ OS []string }
+			}
 		}
 	}
 	if err := yaml.Unmarshal(data, &config); err != nil {
@@ -49,6 +52,15 @@ func TestAggregateCheckRequiresTestsPackagingAndDocs(t *testing.T) {
 	if config.Jobs["docs"].Uses != "./.github/workflows/docs-check.yml" {
 		t.Fatal("internal docs validation must gate the aggregate")
 	}
+	if strings.Join(config.Jobs["test"].Strategy.Matrix.OS, ",") != "ubuntu-latest,macos-latest" {
+		t.Fatal("packaging regressions must cover both supported OS families")
+	}
+	for _, step := range config.Jobs["test"].Steps {
+		if step.Run == "python3 -B -m unittest discover -s scripts -p 'test_*.py' -v" {
+			return
+		}
+	}
+	t.Fatal("Python packaging regressions must run in the OS matrix")
 }
 
 func goreleaserStep(t *testing.T, workflow, job string) workflowStep {

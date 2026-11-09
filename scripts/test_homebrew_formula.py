@@ -52,14 +52,17 @@ class HomebrewFormulaTests(unittest.TestCase):
 
     def test_local_rc_candidate_preserves_version_and_verifies_every_download(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
+            # Exercise macOS-style temp-directory aliases on Linux CI too.
+            alias = root / "downloads-link"
+            alias.symlink_to(root, target_is_directory=True)
             lines = []
             for system, arch in PLATFORMS:
                 path = root / f"pile_0.1.0-rc.1_{system}_{arch}.tar.gz"
                 path.write_bytes(f"fixture {system} {arch}".encode())
                 lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
             sums = "\n".join(lines)
-            rendered = formula("v0.1.0-rc.1", sums, root)
+            rendered = formula("v0.1.0-rc.1", sums, alias)
             self.assertIn('class PileCandidate', rendered)
             self.assertIn('version "0.1.0-rc.1"', rendered)
             self.assertIn('bin.install "pile" => "pile-candidate"', rendered)
