@@ -19,6 +19,36 @@ type workflowStep struct {
 	Uses string
 	With map[string]string
 	Env  map[string]string
+	Run  string
+}
+
+func TestAggregateCheckRequiresTestsPackagingAndDocs(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Jobs map[string]struct {
+			Name  string
+			If    string
+			Needs []string
+			Steps []workflowStep
+			Uses  string
+		}
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	check := config.Jobs["check"]
+	if check.Name != "check" || check.If != "${{ always() }}" || strings.Join(check.Needs, ",") != "test,package,docs" {
+		t.Fatalf("aggregate must run even on failed/skipped dependencies: %+v", check)
+	}
+	if len(check.Steps) != 2 || check.Steps[1].Run != "python3 scripts/check-ci.py" || check.Steps[1].Env["CI_NEEDS"] != "${{ toJSON(needs) }}" {
+		t.Fatal("aggregate must pass actual dependency results to the tested checker")
+	}
+	if config.Jobs["docs"].Uses != "./.github/workflows/docs-check.yml" {
+		t.Fatal("internal docs validation must gate the aggregate")
+	}
 }
 
 func goreleaserStep(t *testing.T, workflow, job string) workflowStep {

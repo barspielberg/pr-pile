@@ -1,0 +1,38 @@
+name: External docs link report
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: docs/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: docs
+      - run: pnpm build
+        working-directory: docs
+      - name: Install pinned and checksum-verified Lychee
+        run: python3 scripts/install-lychee.py "$RUNNER_TEMP/link-tools"
+      - name: Report external links with retries (does not gate PRs)
+        continue-on-error: true
+        run: python3 scripts/check-doc-links.py docs/dist --lychee "$RUNNER_TEMP/link-tools/lychee" --external --report "$RUNNER_TEMP/external-links.md"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: external-links
+          path: ${{ runner.temp }}/external-links.md
+          if-no-files-found: ignore

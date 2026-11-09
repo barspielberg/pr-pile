@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  test:
+    name: tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -65,3 +66,18 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/checksums.txt
+
+  docs:
+    uses: ./.github/workflows/docs-check.yml
+
+  check:
+    name: check
+    if: ${{ always() }}
+    needs: [test, package, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require every dependency to succeed
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/check-ci.py
