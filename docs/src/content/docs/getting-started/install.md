@@ -4,8 +4,9 @@ description: Requirements and install options for pile.
 ---
 
 pile runs on macOS and Linux, needs `gh` for its token, and builds from source with
-Go 1.24.2+. There are no tagged releases yet, so install is `go install` or a
-checkout build. Binary downloads and Homebrew follow the first release.
+Go 1.24.2+. Install from source today using `go install` or a checkout build.
+`v0.1.0-rc.1` has draft artifacts, but there is no public stable release yet.
+The public Homebrew install and upgrade paths have not been validated.
 
 ## Requirements
 
@@ -30,32 +31,34 @@ Works today, no release needed:
 go install github.com/barspielberg/pr-pile/cmd/pile@latest
 ```
 
+For a source install of a specific published version, use
+`go install github.com/barspielberg/pr-pile/cmd/pile@vVERSION` instead of `@latest`.
+
 ### Homebrew
+
+**Not publicly available yet.** Once the first stable release and public tap
+are available and validated, Homebrew will be the recommended macOS release
+install:
 
 ```sh
 brew install barspielberg/tap/pile
 ```
 
-Available after the first stable release and tap setup. The formula selects
-the macOS/Linux and amd64/arm64 release archive, verifies its SHA-256 from the
-published manifest, and installs `gh` as a runtime dependency. It preserves
-the release binary's version, commit and build date. You still need to run
-`gh auth login` yourself.
+The formula selects the macOS/Linux and amd64/arm64 release archive, verifies
+its SHA-256 from the published manifest, and installs `gh` as a runtime
+dependency. It preserves the release binary's version, commit and build date.
+You still need to run `gh auth login` yourself.
 
-Maintainers must first create the public `barspielberg/homebrew-tap` repository
-with an initial commit. In `pr-pile`, add the Actions secret
-`HOMEBREW_TAP_TOKEN` as a fine-grained token scoped to that tap only, with
-Contents read/write permission. Set `HOMEBREW_TAP_ENABLED=true` only after the
-tap, token and candidate tests are ready. Add secrets through GitHub settings;
-never send them in chat. Drafts and RC releases do not update the stable tap.
-See the [release guide](https://github.com/barspielberg/pr-pile/blob/main/RELEASING.md)
-for authenticated draft/RC downloads and local Mac candidate-formula tests
-before stable publication. Homebrew testing and direct-download Gatekeeper
-testing are separate steps.
+A local `pile-candidate` formula using verified draft RC archives passed
+reinstall, `brew test`, version, board, clipboard, browser, and quit checks on
+Apple Silicon. That test does not validate `barspielberg/tap/pile` or public
+upgrades. See the
+[release guide and acceptance record](https://github.com/barspielberg/pr-pile/blob/main/RELEASING.md#v010-rc1-acceptance)
+for maintainer checks and remaining release work.
 
 ### Binary downloads
 
-After the first release, the [releases page](https://github.com/barspielberg/pr-pile/releases)
+After the first public stable release, the [releases page](https://github.com/barspielberg/pr-pile/releases)
 will provide archives for macOS (`darwin`) and Linux, on Intel/AMD (`amd64`)
 and ARM (`arm64`). Each archive includes `pile`, the README, and license files.
 
@@ -69,14 +72,26 @@ tar -xzf pile_VERSION_linux_amd64.tar.gz
 install -Dm755 pile "$HOME/.local/bin/pile"
 ```
 
-On macOS, check the matching archive with
-`shasum -a 256 -c checksums.txt --ignore-missing`, extract it, then run
-`mkdir -p "$HOME/.local/bin"` and `install -m755 pile "$HOME/.local/bin/pile"`.
 Ensure `~/.local/bin` is on your `PATH`. A binary download does not install
 `gh` or Linux desktop tools; install the requirements above separately.
 
-For a source install of a specific published version, use
-`go install github.com/barspielberg/pr-pile/cmd/pile@vVERSION` instead of `@latest`.
+#### macOS browser-download limitation
+
+The current macOS RC binary is not Developer ID signed and notarized. In the
+Apple Silicon test, Firefox downloads retained quarantine after both Terminal
+`tar` extraction and Finder extraction. macOS blocked execution with an
+“Apple could not verify” dialog; `pile --version` was killed with exit 137.
+
+The archive's SHA-256 matched the release manifest, and `codesign --verify`
+accepted the linker's ad-hoc signature, which has no Team ID. Those checks do
+not establish Gatekeeper acceptance: `spctl --assess --type execute` rejected
+the binary. A successful local Homebrew candidate test does not reproduce the
+browser-download experience.
+
+Use the [source install](#go-install) today. Once publicly available and
+validated, use [Homebrew](#homebrew) for macOS release binaries. Direct macOS
+browser downloads are not a supported install path until signing, notarization,
+and first-run Gatekeeper validation are complete.
 
 ### From a checkout
 
