@@ -40,12 +40,20 @@
 ## Get started
 
 Requires **macOS or Linux**, [GitHub CLI](https://cli.github.com/) installed
-and logged in, and **Go 1.24.2+**. pile uses your existing `gh` authentication.
+and logged in. pile uses your existing `gh` authentication.
+
+On macOS, Homebrew is the recommended release install:
+
+```sh
+brew install barspielberg/tap/pile
+```
 
 On Linux, install `xdg-open` (usually packaged as `xdg-utils`) to open PRs in
 your browser. Copying needs `wl-copy` (`wl-clipboard`) on Wayland or `xclip` /
 `xsel` on X11. These integrations require a graphical desktop session; macOS
 uses the built-in `open` and `pbcopy`.
+
+To install from source on macOS or Linux, use **Go 1.24.2+**:
 
 ```sh
 go install github.com/barspielberg/pr-pile/cmd/pile@latest
@@ -54,12 +62,10 @@ go install github.com/barspielberg/pr-pile/cmd/pile@latest
 Run `pile --help` for usage and `pile --version` for build information. These
 commands work without a config file or GitHub authentication.
 
-There is no public stable release or validated public Homebrew install yet.
-Once publicly available and validated, Homebrew will be the recommended macOS
-release install. Browser-downloaded macOS RC binaries are currently blocked by
-Gatekeeper; use the source install above today. See
-[installation options](https://barspielberg.github.io/pr-pile/getting-started/install/)
-for the limitation and release status.
+[v0.1.0](https://github.com/barspielberg/pr-pile/releases/tag/v0.1.0) is live.
+The public Homebrew install and interactive checks passed on Apple Silicon.
+See [installation options](https://barspielberg.github.io/pr-pile/getting-started/install/)
+for Linux downloads and the unsupported direct macOS browser-download path.
 
 From a local checkout of a GitHub repository, run:
 
@@ -71,8 +77,9 @@ On first run, pile detects that repository and writes a commented starter
 config to `~/.config/pile/config.yml`. The board starts with four sections:
 **Mine**, **Needs my review**, **Involved**, and **All open**.
 
-If your shell cannot find `pile`, add Go's binary directory (`$(go env GOPATH)/bin`
-by default) to your `PATH`.
+For source installs, add Go's binary directory (`$(go env GOPATH)/bin` by default)
+to your `PATH` if needed. If an older Go-installed copy is also present, check
+`command -v pile` and `pile --version`; put the intended install first in `PATH`.
 
 <details>
 <summary>Build from a checkout</summary>
@@ -156,12 +163,12 @@ Queries use GitHub search syntax. pile adds the repositories and
 
 ## Project status
 
-pile is a personal tool at **0.x**. `v0.1.0-rc.1` has draft artifacts, with
-Apple Silicon candidate Homebrew and interactive checks passing; there is no
-public stable release yet. Tested on macOS and Linux (Wayland and XWayland),
-with CI builds and automated tests on Linux and macOS. Release validation on
-Linux, other native architectures, and the public tap remains open. See the
-[release acceptance record](RELEASING.md#v010-rc1-acceptance) for results.
+pile is a personal tool at **0.x**, with stable **v0.1.0** released. Public
+Homebrew installation, version, board, clipboard, browser, and quit checks passed
+on macOS Apple Silicon. CI builds and automated tests run on Linux and macOS;
+public upgrades, Linux release installation/desktop integrations, and other
+native architectures remain unvalidated. See the
+[stable acceptance record](RELEASING.md#v010-stable-public-install-acceptance) for results.
 Built-in write actions and a preview pane are not implemented. The
 [documentation](https://barspielberg.github.io/pr-pile/) tracks `main`.
 
