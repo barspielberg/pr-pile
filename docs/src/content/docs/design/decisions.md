@@ -23,6 +23,7 @@ How the board gets its information, and what it is allowed to assume about it.
 | Author is per-rule (`author: true`), not global | A rule like `author:@me` is all one person, so the column is dead weight there. This is what gh-dash #464 asks for and what neomutt has done for decades. The search matches the initials only when the column is drawn, since it matches what is drawn. |
 | `-review:approved` on "Needs my review" | Drops PRs somebody else already signed off, which is what makes it an action queue rather than a status list. Changes-requested PRs stay — those still want you. Note GitHub already drops a PR from `review-requested:@me` once *you* approve it. |
 | Draft split out of the review slot | Draft is a lifecycle state, review is an outcome, and a draft PR has both. Showing draft in the review slot hid whether it was already approved. |
+| Labels on the detail request, not the board query | On the 50-PR search they cost +2,597 bytes and a rate-limit point to render a near-constant (`Webapp 🏎️` is on 29 of 32 labelled PRs). On the per-PR detail request they cost 68 bytes and no extra point. They are drawn as plain names, not chips — reverse is the search hit, the fill is the selection, and GitHub's colours are hex. `pr-detail.md` §5.8. |
 | No CODEOWNERS path matching | GitHub already turns CODEOWNERS into team review requests, so `team-review-requested:` covers it for free. No per-PR file-list fetch. |
 
 ## Colour

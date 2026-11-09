@@ -494,6 +494,7 @@ which is what the page became; the checks are still the top of it.
   base       fix-PROJ-1839-reject-legacy-option
   branch   PROJ-1951-unit-number-integrity
   opened    6d ago · idle 1d
+  labels    ready-for-e2e · review: XL
 
   esc q d close · j/k scroll · / search
 ```
@@ -512,6 +513,14 @@ is *here*, rather than something has not happened yet. That line is the highest
 unresolved comments and on **5 of those 6 the row's review glyph does not say
 `✗`**; two are drawn `✓ approved` with conversations still open.
 
+**Labels are the last state line**, and the first one dropped. They come with
+the second request, so being last means their arrival moves only the stack
+block. They are plain names in `fg` joined by a `muted` `·`, never chips:
+reverse is the search hit, the fill is the selection, and GitHub's label colours
+are hex. Names are drawn whole, and what does not fit — or was past the 20
+fetched — is counted as a `muted` `· +N`; only a first name too long to fit
+alone is clipped. `pr-detail.md` §5.8 has the measurement that moved them here.
+
 There is no conflicting-file list, and there will not be one. GitHub exposes no
 per-file conflict data in either API, and the only computable proxy (files both
 branches touched) over-reports by 3× in the median case and 8× at worst against
@@ -519,19 +528,20 @@ a real `git merge-tree`. `N commits behind` is the honest answer to the question
 underneath "which files conflict" — *how much work is this to fix?*
 `pr-detail.md` §4 has the ground-truth measurements.
 
-**Two of these lines arrive late.** `behindBy`, unresolved threads, the reviewer
-names and the default branch come from a second request made on `d` press,
-measured at 1.2–1.9 s. The overlay is drawn immediately from data the board
-already holds, so `d` is instant and opening and scrolling works even if the request
-never returns. A **skeleton line stands where those lines will land** — `⠹
-checking for conflicts and open conversations` — so the common case resolves in
-place instead of inserting a row and pushing the rest of the block down. It is
-one line and not one per field: both fields are conditional (unresolved threads
-exist on 6 of 50 PRs), so a placeholder each would draw rows that vanish on most
-PRs. `pr-detail.md` §7.1 records the reversal of the original "absent, not a
-placeholder" rule and why the user's report is the evidence against it. Fetching them upfront
-would mean ~100 requests on a cold start, roughly doubling the 2–4 s the tool
-commits to in §2.
+**Some of these lines arrive late.** `behindBy`, unresolved threads, the
+reviewer names, the labels and the default branch (which decides the `base`
+line) come from a second request made on `d` press, measured at 1.2–1.9 s. The
+overlay is drawn immediately from data the board already holds, so `d` is
+instant and opening and scrolling works even if the request never returns. A
+**skeleton line stands where the behind count and unresolved threads will
+land** — `⠹ checking for conflicts and open conversations` — so the common case
+resolves in place instead of inserting a row and pushing the rest of the block
+down. It is one line and not one per field: both fields are conditional
+(unresolved threads exist on 6 of 50 PRs), so a placeholder each would draw rows
+that vanish on most PRs. `pr-detail.md` §7.1 records the reversal of the
+original "absent, not a placeholder" rule and why the user's report is the
+evidence against it. Fetching them upfront would mean ~100 requests on a cold
+start, roughly doubling the 2–4 s the tool commits to in §2.
 
 Most late lines are simply **absent** until they arrive — a line that appears
 disturbs less than one that changes under the eye. The **reviewer line is the
