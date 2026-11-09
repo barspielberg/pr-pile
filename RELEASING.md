@@ -1,12 +1,13 @@
 # Releasing pile
 
-pile ships one binary for each of macOS and Linux on amd64 and arm64.
-GoReleaser v2.20.0 builds archives and SHA-256 checksums. Each archive contains
-the binary, README, and both license files. Go and gh are not bundled; gh is a
-runtime requirement, and Linux desktop integrations use the tools listed in
-the installation guide.
+GoReleaser v2.20.0 produces `pile_VERSION_OS_ARCH.tar.gz` for macOS (`darwin`)
+and Linux, each on `amd64` and `arm64`. `VERSION` has no `v` prefix; an RC keeps
+its suffix, e.g. `pile_0.1.0-rc.1_darwin_arm64.tar.gz`. Archives contain the
+binary, README and both licenses. `checksums.txt` lists their SHA-256 hashes.
+The binary embeds version, commit and build date. Homebrew installs that same
+binary, preserving its metadata; it needs `gh` at runtime and does not build Go.
 
-## Validate locally
+## Local checks
 
 Install GoReleaser v2.20.0, then run:
 
@@ -17,74 +18,138 @@ PILE_REQUIRE_GORELEASER=1 go test ./scripts -count=1 -v
 make release-snapshot
 ```
 
-The snapshot command writes to ignored `dist/` and publishes nothing. Extract
-the archive for your host and check `pile --version` and `pile --help` without
-gh or config. Inside `dist/`, verify checksums with `sha256sum -c checksums.txt`
-(macOS: `shasum -a 256 -c checksums.txt`).
+Snapshots write ignored `dist/` and publish nothing. Inside `dist/`, run
+`sha256sum -c checksums.txt` (macOS: `shasum -a 256 -c checksums.txt`). Test the
+host binary's `--version` and `--help` without gh/config, then open and copy a
+PR in a desktop session. Cross-compiling is not a desktop integration test.
 
-CI runs tests and vet on macOS and Linux, builds all four packages, and
-smoke-tests the Linux amd64 archive. PR CI also checks Homebrew publication
-payloads (creation, retries, upgrades, downgrade rejection, and invalid input)
-and runs a GoReleaser integration test with simulated RC/stable tags at HEAD.
-The simulation creates no Git tags. Before claiming desktop integration for
-a platform, also check opening a PR and copying a URL in a graphical session.
-Cross-compilation alone does not verify those integrations. The macOS archives
-are not Developer ID signed or notarized; verify the download experience on
-a clean Mac before publishing. The Homebrew formula builds from source.
+The required CI job is named **check**. It runs even if dependencies fail or
+are skipped, and succeeds only when both OS test legs, packaging, and internal
+docs validation succeed. Configure the repository ruleset to require **check**.
+External-link availability never gates it.
 
-## Create a release
+## Docs links
 
-1. Merge the packaging changes and confirm CI passes on the release commit.
-2. For a rehearsal, tag a prerelease such as `v0.1.0-rc.1` and push that tag.
-   The release workflow checks macOS and Linux, then creates a draft prerelease.
-3. Download and inspect the draft artifacts, verify checksums and version output,
-   and review the generated release notes. Publish the prerelease when ready.
-4. Tag the validated commit with a stable version, for example `v0.1.0`, and
-   push that tag. Review its draft and publish it. Released tags must not move.
-5. Verify the public archive downloads, versioned `go install`, and Homebrew
-   installation. Update the README and install/CLI docs when the first release
-   and tap are available; until then they correctly describe source installs.
-
-Only tag pushes create release drafts. Ordinary pushes and pull requests run
-snapshot builds. GitHub Releases remain drafts until a maintainer publishes
-them. The release job alone receives repository contents write permission.
-GoReleaser is explicitly bound to the triggering tag, so promoting an RC's
-commit to a stable release selects the stable tag even when both point at HEAD.
-
-## Set up Homebrew once
-
-1. Create the public repository `barspielberg/homebrew-tap` with an initial
-   commit on its default branch.
-2. In `pr-pile`, create the Actions secret `HOMEBREW_TAP_TOKEN`: a fine-grained
-   token with contents read/write access to **only** `homebrew-tap`.
-3. Set the Actions repository variable `HOMEBREW_TAP_ENABLED` to `true`.
-4. After publishing the first stable release, run **Update Homebrew tap** with
-   its tag. Future published stable releases trigger the workflow automatically;
-   drafts and prereleases do not update the tap.
-5. Test on macOS and Linux:
-
-   ```sh
-   brew install --build-from-source barspielberg/tap/pile
-   brew test barspielberg/tap/pile
-   pile --version
-   ```
-
-The workflow hashes the published tag's source archive and renders
-`scripts/homebrew-formula.py` into `Formula/pile.rb` in the tap, building and
-testing it on macOS before publishing the update. The formula
-declares Go as a build dependency, gh as a runtime dependency, and tests help
-and version output without authentication. A manual dispatch retries a failed
-tap update after the release is public. Immediately before the API write, the
-workflow compares the requested version with the existing formula's source
-URL. First creation, same-version retries, and forward updates are allowed.
-Older versions (including published backports and manual old-tag retries)
-fail the job without updating the tap. Unreadable existing formula state also
-fails closed. The write includes the checked file's SHA, so a concurrent change
-causes an API conflict rather than bypassing the comparison. To inspect a formula locally:
+With Node 24+, the pnpm version from `docs/package.json`, and Python 3:
 
 ```sh
-python3 scripts/homebrew-formula.py v0.1.0 SOURCE_ARCHIVE_SHA256 > /tmp/pile.rb
+cd docs
+pnpm install --frozen-lockfile
+pnpm build
+cd ..
+python3 scripts/install-lychee.py "$TMPDIR/pile-link-tools"
+LYCHEE="$TMPDIR/pile-link-tools/lychee" PILE_REQUIRE_LYCHEE=1 \
+  python3 -B -m unittest discover -s scripts -p 'test_doc_links.py' -v
+python3 scripts/check-doc-links.py docs/dist --lychee "$TMPDIR/pile-link-tools/lychee"
 ```
 
-Use the actual source archive checksum, not the checksum of a binary archive.
-The placeholder above is rejected until replaced with a 64-character SHA-256.
+Set `TMPDIR` to a writable scratch directory first. The installer pins Lychee
+0.24.2 and platform-specific SHA-256 values, verifies before extracting, and
+retries downloads three times. Its failure is an installation error, not a
+broken-link result. Internal checking copies built HTML into scratch, maps the
+deployed `/pr-pile` base (including absolute self-hosted URLs), requires directory
+`index.html` files, supports Pages' extensionless `.html` URLs, and checks fragment
+anchors offline. Exit 0 means success, 1 means link failures, and 2 means missing
+build/tool prerequisites. Fixtures prove valid links pass and missing pages or
+anchors fail. The checker does not consult the currently deployed site.
+
+**External docs link report** runs weekly or via manual dispatch, builds HTML,
+and checks external HTTP(S) URLs in up to three passes, retrying failed reports
+after a short delay (including transient HTTP 5xx responses). Its Markdown
+report is uploaded as the `external-links` artifact. It does not run on PRs;
+external checker failures are reported without gating ordinary merges. To run
+it locally, add `--external --report "$TMPDIR/external-links.md"` to the checker.
+
+## Create a draft/RC and test it on a Mac before publication
+
+After merging validated changes, a maintainer may tag `v0.1.0-rc.1` and push
+that tag. The release workflow runs tests, then creates a **draft prerelease**.
+It explicitly binds GoReleaser to the triggering tag, even when RC and stable
+tags share a commit. Review release notes and inspect artifacts before deciding
+to publish. Ordinary pushes and PRs create snapshots only.
+
+Run the following **on a Mac**, from the repository root, to download release
+assets and create a local candidate tap:
+
+```sh
+tag=v0.1.0-rc.1                 # also accepts an actual stable draft tag
+candidate=$(mktemp -d "${TMPDIR:?}/pile-candidate.XXXXXX")
+mkdir "$candidate/artifacts"
+gh release download "$tag" --repo barspielberg/pr-pile \
+  --pattern checksums.txt --pattern 'pile_*.tar.gz' --dir "$candidate/artifacts"
+python3 scripts/homebrew-formula.py "$tag" "$candidate/artifacts/checksums.txt" \
+  --candidate-dir "$candidate/artifacts" > "$candidate/pile-candidate.rb"
+brew tap-new --no-git barspielberg/pile-candidate
+cp "$candidate/pile-candidate.rb" "$(brew --repository barspielberg/pile-candidate)/Formula/pile-candidate.rb"
+brew install barspielberg/pile-candidate/pile-candidate
+brew test barspielberg/pile-candidate/pile-candidate
+pile-candidate --version
+```
+
+`gh` must be authenticated as someone who can read the draft. Private draft
+assets cannot reliably be fetched at public `/releases/download/TAG/` URLs;
+`gh release download` uses authenticated asset APIs. Keep credentials out of
+formulae, logs, and shared messages. All four archives must be downloaded: the
+generator rejects malformed/missing/duplicate manifest entries, wrong versions,
+and any archive hash mismatch before producing the candidate. Its `file://`
+URLs reference already-verified local files, not authenticated URLs or secrets.
+It retains the real RC version, uses class `PileCandidate`, installs
+`pile-candidate`, and is rejected by the stable tap publication guard.
+
+Keep the candidate directory until testing finishes. If the local candidate tap
+already exists, omit `brew tap-new`, replace its formula and use
+`brew reinstall barspielberg/pile-candidate/pile-candidate` followed by `brew test`.
+Test opening/copying a PR with `pile-candidate` too. For cleanup, explicitly run
+`brew uninstall barspielberg/pile-candidate/pile-candidate`, then
+`brew untap barspielberg/pile-candidate`; remove only the candidate directory you
+created when no longer needed.
+
+**Direct archive/Gatekeeper testing is separate.** The binaries are not Developer
+ID signed/notarized. A Homebrew/local-file test or gh download does not reproduce
+browser quarantine. To check the end-user download experience, download the
+matching archive via the authenticated GitHub draft UI in a browser, compare
+its SHA-256 with the draft manifest, extract it and execute `pile --version` on
+a clean Mac. Record any Gatekeeper prompt/failure; do not strip quarantine or
+approve trust dialogs to silently turn that test into a pass. Check signing
+status separately with `codesign --verify --verbose PATH_TO_PILE` and
+`spctl --assess --type execute --verbose PATH_TO_PILE`. Repeat direct-download
+testing with the public stable URLs before advertising that installation path.
+
+## Stable publication and one-time Homebrew setup
+
+Only after candidate acceptance, a maintainer may tag the validated commit with
+the stable version and review/publish its draft. Released tags must not move.
+Drafts and prereleases never publish to the tap.
+
+Before enabling automation, configure the following prerequisites:
+
+1. A **public `barspielberg/homebrew-tap` repository with an initial commit** on
+   its default branch. A missing/empty repository cannot receive a formula.
+2. In `pr-pile`, an Actions secret named **`HOMEBREW_TAP_TOKEN`**, containing a
+   fine-grained PAT scoped to **only `homebrew-tap`, Contents: read and write**
+   (plus GitHub's mandatory metadata access). It does not need write access to
+   `pr-pile`. Add the secret through GitHub settings and keep its value private.
+3. Set the `pr-pile` Actions variable **`HOMEBREW_TAP_ENABLED=true` only after**
+   the tap, token, candidate tests, and workflow on the default branch are ready.
+   Until then leave it unset/false.
+
+After publishing the first stable release, manually run **Update Homebrew tap**
+with its tag. Future stable `published` events trigger it automatically. The
+workflow confirms public/stable state, downloads the published checksum manifest
+with retries, renders four binary URLs/checksums, installs/tests the formula on
+macOS, then checks the existing remote formula immediately before writing.
+First creation, equal-version retries and forward versions are allowed; older
+published backports/manual retries fail without changing the tap. Unreadable
+state fails closed; the checked file SHA makes concurrent updates conflict.
+The older source-formula format is recognized for safe upgrades.
+
+Verify public installation on macOS and Linux:
+
+```sh
+brew install barspielberg/tap/pile
+brew test barspielberg/tap/pile
+pile --version
+```
+
+Update README/install/CLI status once the first stable release and tap are
+actually public. Binary archives need gh and Linux desktop tools separately.

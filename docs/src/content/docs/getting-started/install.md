@@ -17,8 +17,8 @@ checkout build. Binary downloads and Homebrew follow the first release.
 - **`gh`** — installed and logged in. pile reads your token from `gh auth token`
   and infers the repo with `gh repo view`, so it never asks you to provision a
   credential of its own.
-- **Go 1.24.2+** — only if you build from source. Homebrew installs Go as a
-  build dependency.
+- **Go 1.24.2+** — only if you build from source. Binary downloads and Homebrew
+  use prebuilt release binaries and do not require Go.
 
 ## Install
 
@@ -36,9 +36,22 @@ go install github.com/barspielberg/pr-pile/cmd/pile@latest
 brew install barspielberg/tap/pile
 ```
 
-Available after the first stable release and tap setup. The formula builds
-from source and installs `gh` as a runtime dependency. You still need to run
+Available after the first stable release and tap setup. The formula selects
+the macOS/Linux and amd64/arm64 release archive, verifies its SHA-256 from the
+published manifest, and installs `gh` as a runtime dependency. It preserves
+the release binary's version, commit and build date. You still need to run
 `gh auth login` yourself.
+
+Maintainers must first create the public `barspielberg/homebrew-tap` repository
+with an initial commit. In `pr-pile`, add the Actions secret
+`HOMEBREW_TAP_TOKEN` as a fine-grained token scoped to that tap only, with
+Contents read/write permission. Set `HOMEBREW_TAP_ENABLED=true` only after the
+tap, token and candidate tests are ready. Add secrets through GitHub settings;
+never send them in chat. Drafts and RC releases do not update the stable tap.
+See the [release guide](https://github.com/barspielberg/pr-pile/blob/main/RELEASING.md)
+for authenticated draft/RC downloads and local Mac candidate-formula tests
+before stable publication. Homebrew testing and direct-download Gatekeeper
+testing are separate steps.
 
 ### Binary downloads
 

@@ -23,17 +23,22 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Generate formula from the published source archive
+      - name: Generate formula from published binary archive checksums
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
         run: |
           python3 -c 'import os, runpy; runpy.run_path("scripts/homebrew-formula.py")["stable_version"](os.environ["RELEASE_TAG"])'
           gh release view "$RELEASE_TAG" --json isDraft,isPrerelease --jq 'if .isDraft or .isPrerelease then error("release must be public and stable") else empty end'
-          curl --fail --location --retry 3 "https://github.com/barspielberg/pr-pile/archive/refs/tags/$RELEASE_TAG.tar.gz" --output "$RUNNER_TEMP/pile-source.tar.gz"
-          source_checksum=$(shasum -a 256 "$RUNNER_TEMP/pile-source.tar.gz" | cut -d ' ' -f 1)
+          for attempt in 1 2 3; do
+            if gh release download "$RELEASE_TAG" --repo barspielberg/pr-pile --pattern checksums.txt --dir "$RUNNER_TEMP/pile-release" --clobber; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep "$attempt"
+          done
           mkdir -p tap/Formula
-          python3 scripts/homebrew-formula.py "$RELEASE_TAG" "$source_checksum" > tap/Formula/pile.rb
+          python3 scripts/homebrew-formula.py "$RELEASE_TAG" "$RUNNER_TEMP/pile-release/checksums.txt" > tap/Formula/pile.rb
       - name: Test the formula before publishing
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
@@ -42,7 +47,7 @@ jobs:
           tap_root=$(brew --repository barspielberg/tap)
           mkdir -p "$tap_root/Formula"
           cp tap/Formula/pile.rb "$tap_root/Formula/pile.rb"
-          brew install --build-from-source barspielberg/tap/pile
+          brew install barspielberg/tap/pile
           brew test barspielberg/tap/pile
       - name: Publish formula
         env:
