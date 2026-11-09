@@ -84,10 +84,82 @@ when there is no token or the repo is unreachable.
   [principles](../design/) checklist, and the visual spec is the maintained
   record of what each token means. There is a test that fails if a fixed
   256-cube colour reappears.
-- **Commit style** follows the existing history: imperative, one line, no scope
-  prefix (`Add the review TUI guide`, `Rewrite the README`). A commit message
-  that names a fixed value or a count is a claim about one tree at one moment —
-  put facts the code enforces in a test or a table, not a message.
+- **Commit subjects and PR titles** use Conventional Commits, as described
+  below. Keep the description imperative and explain the change.
 - **Docs live beside the change.** Behaviour that a user reads about is
   checked against the code; behaviour that only the design research discusses
   belongs in the [research archive](../design/research/), prefaced as history.
+
+## Commit subjects and PR titles
+
+New commit subjects and all PR titles must follow:
+
+```text
+type(scope)!: description
+```
+
+The scope and breaking-change `!` are optional. Allowed lowercase types are
+`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`,
+`chore`, and `revert`. Scopes start with a lowercase letter or digit and may
+contain lowercase letters, digits, `.`, `_`, `/`, and `-`. Use exactly one space
+after the colon and a nonempty description with no leading/trailing whitespace
+or control characters. Commit bodies and trailers are unrestricted.
+
+Examples:
+
+```text
+feat: add repository filters
+fix(ui): keep selection after refresh
+docs(contributing): explain local hooks
+refactor(config)!: remove the legacy schema
+```
+
+`Add filters`, `Fix: handle refresh`, and `fix(ui):missing space` are rejected.
+Use `!` for a breaking change, optionally explaining it with a `BREAKING CHANGE:`
+trailer in the body.
+
+### Install the local hook
+
+With Go on `PATH`, run from your checkout:
+
+```sh
+git config --local core.hooksPath .githooks
+```
+
+The executable `commit-msg` hook runs the shared Go validator on the first line
+of each new commit message, including amended messages. No Node packages or
+additional tooling are needed. This setting replaces any existing hooks path;
+if you already use hooks, integrate `.githooks/commit-msg` into your existing
+`commit-msg` hook instead. Each checkout needs setup. Linked worktrees normally
+share local Git configuration, so coordinate that setting across worktrees.
+To remove this setup, run `git config --local --unset core.hooksPath` (or restore
+your previous value).
+
+To check a message file or run the policy's regression tests manually:
+
+```sh
+go run ./tools/commitlint --commit-msg /path/to/message
+go test ./tools/commitlint
+```
+
+### Squash merges and CI
+
+We squash and merge, using the PR title as the final commit subject. The
+`Conventional PR title` check validates the current title on PR open, reopen,
+new commits (`synchronize`), and edits (including title changes). It reads the
+title as JSON data from the event file; title text is never evaluated as shell
+code. The workflow uses unprivileged `pull_request`, read-only contents access,
+and checkout without persisted credentials.
+
+CI deliberately does not lint the individual commits in a PR or its base
+history. Historical commits and existing commits in the packaging PR #9 are
+grandfathered; do not rewrite them just to pass this policy. Use the hook for
+new work and ensure the PR title describes the complete squash. Local hooks
+can be bypassed, so they provide early feedback rather than a remote guarantee.
+Maintainers must preserve the validated title as the squash commit subject
+when merging.
+
+A maintainer should require **Conventional PR title** in the branch protection
+or ruleset for `main` after the workflow first runs. This change does not modify
+repository settings. CI cannot prevent a maintainer from manually replacing
+the squash subject with an invalid one in the merge dialog.

@@ -1,0 +1,24 @@
+name: Conventional Commits
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test policy and workflow
+        run: go test ./tools/commitlint
+      - name: Validate squash title
+        run: go run ./tools/commitlint --event "$GITHUB_EVENT_PATH"
