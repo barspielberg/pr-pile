@@ -517,8 +517,9 @@ unresolved comments and on **5 of those 6 the row's review glyph does not say
 the second request, so being last means their arrival moves only the stack
 block. They are plain names in `fg` joined by a `muted` `·`, never chips:
 reverse is the search hit, the fill is the selection, and GitHub's label colours
-are hex. A name is never cut — what does not fit is counted as a `muted`
-`· +N`. `pr-detail.md` §5.8 has the measurement that moved them here.
+are hex. Names are drawn whole, and what does not fit — or was past the 20
+fetched — is counted as a `muted` `· +N`; only a first name too long to fit
+alone is clipped. `pr-detail.md` §5.8 has the measurement that moved them here.
 
 There is no conflicting-file list, and there will not be one. GitHub exposes no
 per-file conflict data in either API, and the only computable proxy (files both

@@ -560,7 +560,7 @@ func TestDetailListsTheStackBottomFirst(t *testing.T) {
 func TestDetailCarriesTheLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{
-		  "labels":{"nodes":[{"name":"bug"},{"name":"needs-qa"}]}}}}}`))
+		  "labels":{"totalCount":23,"nodes":[{"name":"bug"},{"name":"needs-qa"}]}}}}}`))
 	}))
 	defer srv.Close()
 	c := &Client{token: "x", http: srv.Client(), endpoint: srv.URL}
@@ -569,8 +569,8 @@ func TestDetailCarriesTheLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(d.Labels) != "[bug needs-qa]" {
-		t.Errorf("got %v", d.Labels)
+	if fmt.Sprint(d.Labels) != "[bug needs-qa]" || d.LabelCount != 23 {
+		t.Errorf("got %v of %d", d.Labels, d.LabelCount)
 	}
 }
 

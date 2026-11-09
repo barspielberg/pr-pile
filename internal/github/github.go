@@ -709,6 +709,7 @@ type Detail struct {
 	Reviewers     []Reviewer
 	DefaultBranch string
 	Labels        []string
+	LabelCount    int // can exceed len(Labels): only the first 20 are fetched
 
 	// Stack is every PR in the PR's native stack, bottom first, merged and
 	// closed ones included. Empty when it is in none.
@@ -744,7 +745,7 @@ query($o: String!, $r: String!, $n: Int!, $head: String!) {
       latestOpinionatedReviews(first: 10) {
         nodes { state author { login ... on User { name } } }
       }
-      labels(first: 20) { nodes { name } }%s
+      labels(first: 20) { totalCount nodes { name } }%s
     }
   }
 }`
@@ -800,7 +801,8 @@ func (c *Client) Detail(ctx context.Context, repo string, number int, head strin
 						} `json:"nodes"`
 					} `json:"latestOpinionatedReviews"`
 					Labels struct {
-						Nodes []struct {
+						TotalCount int `json:"totalCount"`
+						Nodes      []struct {
 							Name string `json:"name"`
 						} `json:"nodes"`
 					} `json:"labels"`
@@ -857,6 +859,7 @@ func (c *Client) Detail(ctx context.Context, repo string, number int, head strin
 	for _, l := range pr.Labels.Nodes {
 		d.Labels = append(d.Labels, l.Name)
 	}
+	d.LabelCount = max(pr.Labels.TotalCount, len(d.Labels))
 	if pr.Stack != nil {
 		for _, e := range pr.Stack.Entries.Nodes {
 			p := e.PullRequest

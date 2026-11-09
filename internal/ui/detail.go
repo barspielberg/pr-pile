@@ -67,7 +67,7 @@ func (m Model) stateLines(pr github.PR) []string {
 	// Last because it arrives with the detail request, so landing moves only
 	// the stack block below it.
 	if loaded && len(d.Labels) > 0 {
-		out = append(out, "  "+mutedStyle.Render(pad("labels", 10))+labelsText(d.Labels, max(0, body-12)))
+		out = append(out, "  "+mutedStyle.Render(pad("labels", 10))+labelsText(d.Labels, d.LabelCount, max(0, body-12)))
 	}
 	return out
 }
@@ -76,23 +76,33 @@ func (m Model) stateLines(pr github.PR) []string {
 // mid-word reads as a different label. Plain text, not chips: reverse and a
 // fill already mean a search hit and the selection, and GitHub's label colours
 // are hex. See docs/pr-detail.md §5.8.
-func labelsText(labels []string, w int) string {
+//
+// total counts labels that were not fetched, so a PR with more than were asked
+// for still says how many are hidden.
+func labelsText(labels []string, total, w int) string {
 	names := make([]string, len(labels))
 	for i, l := range labels {
 		names[i] = terminalText(l)
 	}
+	total = max(total, len(names))
 	more := func(k int) string {
-		if k == len(names) {
+		if k == total {
 			return ""
 		}
-		return fmt.Sprintf(" · +%d", len(names)-k)
+		return fmt.Sprintf(" · +%d", total-k)
 	}
 	k := len(names)
 	for k > 0 && lipgloss.Width(strings.Join(names[:k], " · ")+more(k)) > w {
 		k--
 	}
+	// Even one whole name does not fit: clip it, since the ellipsis shows it was
+	// cut, but keep the count.
 	if k == 0 {
-		return clip(names[0], w)
+		first := clip(names[0], w-lipgloss.Width(more(1)))
+		if first == "" {
+			return mutedStyle.Render(clip(fmt.Sprintf("+%d", total), w))
+		}
+		return first + mutedStyle.Render(more(1))
 	}
 	return strings.Join(names[:k], mutedStyle.Render(" · ")) + mutedStyle.Render(more(k))
 }
