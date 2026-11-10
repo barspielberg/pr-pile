@@ -42,9 +42,10 @@ pile never waits for a badge. Scripts run in the background, at most
 in higher rules get their badges first, then rows in board order.
 
 An answer is kept for the badge's `ttl` and stays on screen while the script
-runs again. Nothing else makes a badge run early: a new commit or a new title
-does not, and neither does `r`. A script that fails keeps its last answer on
-the row and tries again within a minute.
+runs again. A new commit or a new title does not make it run early, and nor
+does the board's timed refresh. `r` does: it reruns every badge alongside the
+board's refetch, and the old answers stay up until new ones land. A script
+that fails keeps its last answer on the row and tries again within a minute.
 
 A script that runs past `timeout` is killed with everything it started. So is
 every script still running when you quit.
@@ -68,7 +69,9 @@ removed.
 
 `d` on a row shows each badge in full, how long ago it answered, and the last
 error, which the row cannot show. `?` lists the configured badges, since there
-is no column header to say what one is. A search matches badge text like any
+is no column header to say what one is. A badge that fails on every row is
+named in the footer, since an empty column would otherwise look like a script
+with nothing to say. A search matches badge text like any
 other text on the row.
 
 ## Badges on other people's PRs

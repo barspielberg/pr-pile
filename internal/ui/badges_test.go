@@ -281,3 +281,54 @@ func TestNoBadgesConfiguredDrawsTheRowAsBefore(t *testing.T) {
 		t.Fatalf("row = %q", line)
 	}
 }
+
+func TestFooterNamesABadgeFailingOnEveryRow(t *testing.T) {
+	m := badgeBoard(t, 120, false, config.Badge{Name: "jira", Run: "true"}, config.Badge{Name: "ci", Run: "true"})
+	for _, pr := range badgePRs {
+		answer(m, "jira", pr, "", errors.New("jira-status: not found"))
+	}
+	answer(m, "ci", badgePRs[0], "", errors.New("flaky"))
+	answer(m, "ci", badgePRs[1], "green", nil)
+	foot := ansi.Strip(m.footer(""))
+	if !strings.Contains(foot, "badge jira failing: jira-status: not found") {
+		t.Fatalf("footer = %q, want jira named", foot)
+	}
+	if strings.Contains(foot, "ci") {
+		t.Fatalf("footer = %q, but ci answered on one row", foot)
+	}
+	m.status = "worktree ✓"
+	if foot := ansi.Strip(m.footer("")); !strings.Contains(foot, "worktree ✓") {
+		t.Fatalf("footer = %q, want the status to win", foot)
+	}
+}
+
+// r reruns every badge at once rather than waiting for its TTL, and does it
+// alongside the board's refetch.
+func TestReloadRerunsBadgesBesideTheRefetch(t *testing.T) {
+	m := badgeBoard(t, 100, false, config.Badge{Name: "jira", Run: "true"})
+	defer m.Close()
+	for _, pr := range badgePRs {
+		answer(m, "jira", pr, "old", nil)
+	}
+	m = pressKey(m, "r")
+	if !m.fetching {
+		t.Fatal("r did not refetch the board")
+	}
+	for _, pr := range badgePRs {
+		e, _ := m.badges.cache.Get(badge.KeyFor("jira", pr.Repo, pr.Number))
+		if !e.Running || e.Text != "old" {
+			t.Fatalf("#%d entry = %+v, want it rerunning with its old text up", pr.Number, e)
+		}
+	}
+}
+
+// The timed refresh is not r: badges keep to their TTL.
+func TestTimedRefreshLeavesBadgesToTheirTTL(t *testing.T) {
+	m := badgeBoard(t, 100, false, config.Badge{Name: "jira", Run: "true"})
+	answer(m, "jira", badgePRs[0], "old", nil)
+	next, _ := m.Update(tickMsg{seq: m.refreshSeq})
+	m = next.(Model)
+	if e, _ := m.badges.cache.Get(badge.KeyFor("jira", testRepo, 1)); e.Running {
+		t.Fatal("a timed refresh reran a badge before its TTL")
+	}
+}

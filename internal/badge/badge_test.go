@@ -99,3 +99,23 @@ func TestKeyIgnoresRepoCase(t *testing.T) {
 		t.Fatal("keys differ by repo case")
 	}
 }
+
+func TestExpireMakesAnsweredKeysDueAndKeepsTheirText(t *testing.T) {
+	c := NewCache(1)
+	ks := keys(2)
+	c.Take(ks[:1], t0)
+	c.Done(Result{Key: ks[0], Text: "old"}, time.Hour, t0)
+	c.Take(ks[1:], t0)
+	c.Expire(ks)
+	if got := c.Take(ks, t0); len(got) != 0 {
+		t.Fatalf("took %v with the only slot still busy", got)
+	}
+	c.Done(Result{Key: ks[1], Text: "x"}, time.Hour, t0)
+	c.Expire(ks)
+	if got := c.Take(ks, t0); len(got) != 1 || got[0] != ks[0] {
+		t.Fatalf("took %v, want #1 again before its hour is up", got)
+	}
+	if e, _ := c.Get(ks[0]); e.Text != "old" {
+		t.Fatalf("text = %q, want the old answer kept while it reruns", e.Text)
+	}
+}

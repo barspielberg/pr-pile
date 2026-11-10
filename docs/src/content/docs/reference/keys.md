@@ -26,7 +26,7 @@ to the board and the help page.
 | `m` | watch the selected PRs; press again to stop watching |
 | `/` | open the search prompt |
 | `n` / `N` | next / previous match, wrapping |
-| `r` | refresh the board |
+| `r` | refresh the board, and rerun every badge |
 | `?` | open the help page |
 | `q` / `esc` / `ctrl+c` | quit |
 

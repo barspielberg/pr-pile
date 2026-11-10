@@ -126,3 +126,13 @@ func (c *Cache) NextDue(wants []Key) (due time.Time, ok bool) {
 
 // Busy reports whether every worker slot is taken.
 func (c *Cache) Busy() bool { return c.inFlight >= c.workers }
+
+// Expire makes every key due now, for a manual refresh. A key already running
+// keeps its run, and every entry keeps its text until the new answer lands.
+func (c *Cache) Expire(keys []Key) {
+	for _, k := range keys {
+		if e := c.entries[k]; e != nil && !e.Running {
+			e.Due = time.Time{}
+		}
+	}
+}

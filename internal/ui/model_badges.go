@@ -325,7 +325,7 @@ func (m Model) badgeHelp() []helpRow {
 		}
 		rows = append(rows, glyph(def.Name, where+", refreshed every "+shortDuration(def.TTL), badgeStyle(def.Color)))
 	}
-	return rows
+	return append(rows, row("r", "reloads the board and reruns every badge"))
 }
 
 // fetchedAgo is finer than a row's age cell, because a badge's TTL is minutes.
@@ -367,4 +367,67 @@ func shortDuration(d time.Duration) string {
 		s = strings.TrimSuffix(s, "0m")
 	}
 	return s
+}
+
+// refreshBadges is `r` for badges: every badge on the board runs again, in the
+// usual order and under the usual cap, while the board refetches beside it.
+// The old answers stay up until the new ones land.
+func (m Model) refreshBadges() tea.Cmd {
+	if m.badges == nil {
+		return nil
+	}
+	wants := m.badgeWants()
+	keys := make([]badge.Key, len(wants))
+	for i, w := range wants {
+		keys[i] = w.key
+	}
+	m.badges.cache.Expire(keys)
+	return m.dispatchBadges(time.Now())
+}
+
+// badgeFailure is the footer's word on a badge that has failed on every row it
+// ran on. One failing row is the script's business and shows in `d`; failing
+// everywhere usually means the script itself is broken, and a blank column
+// would otherwise look like it had nothing to say.
+func (m Model) badgeFailure() string {
+	if m.badges == nil {
+		return ""
+	}
+	type tally struct {
+		failed, answered int
+		err              error
+	}
+	tallies := map[string]*tally{}
+	for _, w := range m.badgeWants() {
+		e, ok := m.badges.cache.Get(w.key)
+		if !ok {
+			continue
+		}
+		t := tallies[w.def.Name]
+		if t == nil {
+			t = &tally{}
+			tallies[w.def.Name] = t
+		}
+		switch {
+		case e.Err != nil:
+			t.failed++
+			t.err = e.Err
+		case !e.Fetched.IsZero():
+			t.answered++
+		}
+	}
+	var names []string
+	var first error
+	for _, def := range m.badges.defs {
+		if t := tallies[def.Name]; t != nil && t.failed > 0 && t.answered == 0 {
+			names = append(names, terminalText(def.Name))
+			if first == nil {
+				first = t.err
+			}
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "badge " + strings.Join(names, ", ") + " failing: " + terminalText(first.Error())
 }

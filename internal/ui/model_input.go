@@ -292,7 +292,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = len(m.slots()) - 1
 		m.clampCursor()
 	case "r":
-		return m.refresh()
+		// Badges rerun beside the refetch, not after it: neither waits on the
+		// other, and the old answers stay up until new ones land.
+		badges := m.refreshBadges()
+		next, cmd := m.refresh()
+		return next, tea.Batch(cmd, badges)
 	case "enter", "o":
 		next, cmd := m.openSelected()
 		return next, cmd
