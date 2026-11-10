@@ -59,7 +59,7 @@ export default defineConfig({
         },
         {
           label: 'Reference',
-          items: ['reference/config', 'reference/rules', 'reference/actions', 'reference/keys', 'reference/cli'],
+          items: ['reference/config', 'reference/rules', 'reference/actions', 'reference/badges', 'reference/keys', 'reference/cli'],
         },
         {
           label: 'Design',

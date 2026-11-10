@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func withConfigPath(t *testing.T, path string) {
@@ -182,5 +185,69 @@ func TestLabelSettlesACollision(t *testing.T) {
 	}
 	if err := c.Validate(); err != nil {
 		t.Error(err)
+	}
+}
+
+func badgeCfg(rule Rule, badges ...Badge) Config {
+	return Config{Repos: []Repo{{Name: "o/r"}}, Rules: []Rule{rule}, Badges: badges}
+}
+
+func TestValidateRejectsBadBadges(t *testing.T) {
+	rule := Rule{Name: "a", Query: "b"}
+	ok := Badge{Name: "jira", Run: "jira-status {{.Branch}}"}
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{"no name", badgeCfg(rule, Badge{Run: "true"})},
+		{"no run", badgeCfg(rule, Badge{Name: "x"})},
+		{"twice", badgeCfg(rule, ok, ok)},
+		{"does not parse", badgeCfg(rule, Badge{Name: "x", Run: "echo {{.Number"})},
+		{"plural field", badgeCfg(rule, Badge{Name: "x", Run: "echo {{.Numbers}}"})},
+		{"title", badgeCfg(rule, Badge{Name: "x", Run: "echo {{.Title}}"})},
+		{"unknown color", badgeCfg(rule, Badge{Name: "x", Run: "true", Color: "blue"})},
+		{"unknown side", badgeCfg(rule, Badge{Name: "x", Run: "true", Side: "middle"})},
+		{"negative width", badgeCfg(rule, Badge{Name: "x", Run: "true", MaxWidth: -1})},
+		{"negative ttl", badgeCfg(rule, Badge{Name: "x", Run: "true", TTL: -time.Second})},
+		{"negative timeout", badgeCfg(rule, Badge{Name: "x", Run: "true", Timeout: -time.Second})},
+		{"unknown badge in a rule", badgeCfg(Rule{Name: "a", Query: "b", Badges: &[]string{"nope"}}, ok)},
+		{"negative workers", func() Config { c := badgeCfg(rule, ok); c.BadgeWorkers = -1; return c }()},
+	} {
+		if err := tc.cfg.Validate(); err == nil {
+			t.Errorf("%s: expected an error", tc.name)
+		}
+	}
+	if err := badgeCfg(rule, ok).Validate(); err != nil {
+		t.Errorf("a plain badge was refused: %v", err)
+	}
+}
+
+// Left out means every badge and an empty list means none, which only a
+// pointer can tell apart once YAML has decoded it.
+func TestRuleBadgesDistinguishesAbsentFromEmpty(t *testing.T) {
+	var cfg struct {
+		Rules []Rule `yaml:"rules"`
+	}
+	data := "rules:\n  - name: all\n  - name: none\n    badges: []\n  - name: one\n    badges: [jira]\n"
+	if err := yaml.Unmarshal([]byte(data), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []bool{true, false, true} {
+		if got := cfg.Rules[i].ShowsBadge("jira"); got != want {
+			t.Errorf("rule %q shows jira = %v, want %v", cfg.Rules[i].Name, got, want)
+		}
+	}
+	if cfg.Rules[2].ShowsBadge("deploy") {
+		t.Error("a rule listing jira also showed deploy")
+	}
+}
+
+func TestBadgeDefaults(t *testing.T) {
+	b := Badge{Name: "x", Run: "true"}.WithDefaults()
+	if b.Color != "muted" || b.Side != "left" || b.MaxWidth != 20 || b.TTL != 5*time.Minute || b.Timeout != 10*time.Second {
+		t.Errorf("defaults = %+v", b)
+	}
+	if got := (Config{}).Workers(); got != 4 {
+		t.Errorf("workers = %d, want 4", got)
 	}
 }

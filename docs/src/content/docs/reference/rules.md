@@ -16,6 +16,7 @@ A rule is one section of the board. This page lists its fields; the top-level
 | `tree` | bool | `false` | Group stacked PRs into a chain. |
 | `author` | bool | `false` | Show the author's initials on each row. |
 | `repos` | list | all configured repos | Repository labels this rule searches. |
+| `badges` | list | every badge | Names of the [badges](../badges/) this rule's rows show; `[]` for none. |
 
 ## Ordering is configuration
 
