@@ -391,3 +391,41 @@ func TestReloadDuringBadgeRunUsesRefetchedPR(t *testing.T) {
 		})
 	}
 }
+
+func TestBadgeDetailsWrapTextAndErrorsBeforePagination(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		m := badgeBoard(t, 40, false, config.Badge{Name: "b", Run: "true", MaxWidth: 4})
+		defer m.Close()
+		pr := badgePRs[0]
+		text := strings.Repeat("界x ", 80) + "END"
+		if failed {
+			answer(m, "b", pr, "", errors.New(text))
+		} else {
+			answer(m, "b", pr, text, nil)
+		}
+		for i, s := range m.slots() {
+			if s.isRow() && s.row.PR.Key() == pr.Key() {
+				m.cursor = i
+			}
+		}
+		lines := m.badgeLines(pr)
+		if len(lines) <= 1 {
+			t.Fatalf("badge details were not split into physical lines (failed=%v)", failed)
+		}
+		for _, line := range lines {
+			if lipgloss.Width(line) > m.width {
+				t.Fatalf("detail line exceeds %d cells: %q", m.width, line)
+			}
+		}
+		if !strings.Contains(ansi.Strip(strings.Join(lines, "")), text) {
+			t.Fatal("wrapping lost badge content")
+		}
+		m.height = 8
+		body := m.overlayBody(pr)
+		m.detailScroll = len(body)
+		view := ansi.Strip(m.detailOverlay())
+		if len(strings.Split(view, "\n")) > m.height || !strings.Contains(view, "END") || !strings.Contains(view, "esc q d close") || m.detailTop(len(body)) != len(body)-m.detailRows(len(body)) {
+			t.Fatalf("last detail page does not show the complete answer and hint:\n%s", view)
+		}
+	}
+}

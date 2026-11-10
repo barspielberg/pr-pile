@@ -12,6 +12,7 @@ import (
 	"github.com/barspielberg/pr-pile/internal/shelltmpl"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // badges is everything the board needs to run badge scripts. It sits behind a
@@ -314,7 +315,9 @@ func (m Model) badgeLines(pr github.PR) []string {
 			parts = append(parts, errorStyle.Render("failed: "+terminalText(e.Err.Error())))
 		}
 		line := "  " + mutedStyle.Render(pad(label, 10)) + pad(terminalText(def.Name), nameW) + "  " + strings.Join(parts, mutedStyle.Render(" · "))
-		out = append(out, line)
+		// Pagination counts these strings as physical rows. Preserve all
+		// content (including long errors), ANSI styles and wide graphemes.
+		out = append(out, strings.Split(ansi.Hardwrap(line, m.width, true), "\n")...)
 		label = ""
 	}
 	return out
