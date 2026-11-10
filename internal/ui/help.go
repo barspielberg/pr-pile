@@ -80,7 +80,7 @@ func (m Model) helpBlocks() []helpBlock {
 		}
 	}
 
-	return []helpBlock{
+	blocks := []helpBlock{
 		keys,
 		// This page's own scroll and close keys are on its bottom row, live,
 		// so listing them here too would be the one redundancy a legend cannot
@@ -130,6 +130,10 @@ func (m Model) helpBlocks() []helpBlock {
 			glyph(newsGlyph, "something changed; enter or d clears it", attentionStyle),
 		}},
 	}
+	if rows := m.badgeHelp(); len(rows) > 0 {
+		blocks = append(blocks, helpBlock{"BADGES", rows})
+	}
+	return blocks
 }
 
 // helpSegment is one styled run of a legend line. A line is a list of them

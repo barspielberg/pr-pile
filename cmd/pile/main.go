@@ -57,6 +57,8 @@ func run() error {
 	// vanish. Re-detect from the terminal itself first.
 	lipgloss.SetColorProfile(termenv.NewOutput(os.Stdout).Profile)
 
-	_, err = tea.NewProgram(ui.New(cfg, client), tea.WithAltScreen(), tea.WithOutput(ui.Terminal)).Run()
+	model := ui.New(cfg, client)
+	defer model.Close()
+	_, err = tea.NewProgram(model, tea.WithAltScreen(), tea.WithOutput(ui.Terminal)).Run()
 	return err
 }

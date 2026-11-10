@@ -114,6 +114,7 @@ type Model struct {
 	// boardAt is when the board's current fetch was sent, what a watch
 	// poll's copy has to be newer than to be drawn.
 	boardAt     time.Time
+	badges      *badges
 	confirmQuit bool
 }
 
@@ -164,7 +165,7 @@ func New(cfg config.Config, client *github.Client) Model {
 		inflight: map[github.Key]detailRequest{}, detailIdentity: map[github.Key]detailRequest{},
 		detailFailed: map[github.Key]detailRequest{},
 		selection:    map[github.Key]bool{}, rangeOwned: map[github.Key]bool{}, anchor: -1,
-		watched: map[github.Key]*watchEntry{}, boardAt: time.Now()}
+		watched: map[github.Key]*watchEntry{}, boardAt: time.Now(), badges: newBadges(cfg)}
 }
 
 func (m Model) Init() tea.Cmd {
