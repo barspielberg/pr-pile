@@ -45,6 +45,41 @@ func TestRunDoesNotWaitForABackgroundChild(t *testing.T) {
 	}
 }
 
+func TestRunnerCleansUpChildrenAfterShellExit(t *testing.T) {
+	for _, tc := range []struct{ name, redirect string }{
+		{"inherited-pipes", ""},
+		{"closed-pipes", ">/dev/null 2>&1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := NewRunner()
+			defer runner.Stop()
+			pidFile := filepath.Join(t.TempDir(), "pid")
+			start := time.Now()
+			r := runner.Run(Job{Line: `sleep 30 ` + tc.redirect + ` & echo $! > '` + strings.ReplaceAll(pidFile, "'", "'\"'\"'") + `'; echo ok`, Timeout: 5 * time.Second})
+			b, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+			if err != nil || pid <= 0 {
+				t.Fatalf("invalid child pid %q: %v", b, err)
+			}
+			// Only this test's child is signalled, including on baseline failure.
+			defer syscall.Kill(pid, syscall.SIGKILL)
+			if r.Err != nil || r.Text != "ok" || time.Since(start) > 2*time.Second {
+				t.Fatalf("result = %+v after %v", r, time.Since(start))
+			}
+			out, _ := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+			if stat := strings.TrimSpace(string(out)); stat != "" && !strings.HasPrefix(stat, "Z") {
+				t.Fatalf("child still alive after Run returned: %s", stat)
+			}
+			if len(runner.groups) != 0 {
+				t.Fatal("completed job still tracked")
+			}
+		})
+	}
+}
+
 func TestRunDrainsOutputPastTheCap(t *testing.T) {
 	r, _ := run(t, `head -c 1000000 /dev/zero | tr '\0' x; echo; echo done >&2`, 5*time.Second)
 	if r.Err != nil || len(r.Text) != outputCap {

@@ -68,6 +68,11 @@ func runJob(ctx context.Context, job Job, groups *Runner) Result {
 			killGroup(cmd.Process.Pid)
 		}
 		err = cmd.Wait()
+		// Wait (including WaitDelay) only reaps the shell and closes pipes.
+		// Its ordinary background children still belong to this job, even
+		// when they redirected both outputs. Kill them before forgetting the
+		// group, while preserving the shell's successful answer below.
+		killGroup(cmd.Process.Pid)
 		if groups != nil {
 			groups.untrack(cmd.Process.Pid)
 		}
