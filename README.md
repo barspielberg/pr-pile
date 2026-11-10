@@ -62,10 +62,8 @@ go install github.com/barspielberg/pr-pile/cmd/pile@latest
 Run `pile --help` for usage and `pile --version` for build information. These
 commands work without a config file or GitHub authentication.
 
-[v0.1.0](https://github.com/barspielberg/pr-pile/releases/tag/v0.1.0) is live.
-The public Homebrew install and interactive checks passed on Apple Silicon.
 See [installation options](https://barspielberg.github.io/pr-pile/getting-started/install/)
-for Linux downloads and the unsupported direct macOS browser-download path.
+for Linux downloads and building from a checkout.
 
 From a local checkout of a GitHub repository, run:
 
@@ -163,14 +161,10 @@ Queries use GitHub search syntax. pile adds the repositories and
 
 ## Project status
 
-pile is a personal tool at **0.x**, with stable **v0.1.0** released. Public
-Homebrew installation, version, board, clipboard, browser, and quit checks passed
-on macOS Apple Silicon. CI builds and automated tests run on Linux and macOS;
-public upgrades, Linux release installation/desktop integrations, and other
-native architectures remain unvalidated. See the
-[stable acceptance record](RELEASING.md#v010-stable-public-install-acceptance) for results.
-Built-in write actions and a preview pane are not implemented. The
-[documentation](https://barspielberg.github.io/pr-pile/) tracks `main`.
+pile is a personal tool at **0.x**; the
+[documentation](https://barspielberg.github.io/pr-pile/) tracks `main`. See
+[Limitations](https://barspielberg.github.io/pr-pile/help/limitations/) for what
+is not built or not yet tested.
 
 ## License
 

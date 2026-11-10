@@ -46,3 +46,8 @@ user).
 **Untested against reality:** whether ~2–4s cold start is tolerable behind a
 spinner in daily use; whether the board reads correctly on a light theme (the
 `muted`/`selBg` reasoning is by construction, not observation).
+
+**Untested releases:** upgrading a public Homebrew install; installing a Linux
+release and its desktop integration (`xdg-open`, clipboard); running natively on
+any architecture other than macOS Apple Silicon. CI builds and tests on Linux and
+macOS.
