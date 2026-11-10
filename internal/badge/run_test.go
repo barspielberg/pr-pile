@@ -3,6 +3,7 @@ package badge
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -92,5 +93,34 @@ func TestRunKillsTheWholeGroupOnTimeout(t *testing.T) {
 			t.Fatalf("background child %d outlived the timed-out script", pid)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Stop has to kill before it returns: pile exits right after, and a kill left
+// to exec's own goroutine never runs.
+func TestRunnerStopKillsBeforeReturning(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	r := NewRunner()
+	done := make(chan Result, 1)
+	go func() { done <- r.Run(Job{Line: `echo $$ > ` + pidFile + `; exec sleep 30`, Timeout: time.Minute}) }()
+	var pid int
+	for deadline := time.Now().Add(2 * time.Second); pid == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("script never started")
+		}
+		b, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+	}
+	// Only the kill Stop makes itself counts: the one exec makes on its own
+	// goroutine is the one that loses the race with exit.
+	r.cancel = func() {}
+	r.Stop()
+	// Straight after Stop, before Run has reaped it: dead or a zombie.
+	out, _ := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	if stat := strings.TrimSpace(string(out)); stat != "" && !strings.HasPrefix(stat, "Z") {
+		t.Fatalf("script is %q after Stop returned, want it dead", stat)
+	}
+	if res := <-done; res.Err == nil {
+		t.Fatalf("result = %+v, want an error", res)
 	}
 }

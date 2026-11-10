@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -39,7 +40,9 @@ const waitDelay = 500 * time.Millisecond
 // gets its own session, so ssh, git or gh cannot prompt on /dev/tty over the
 // board, and a timeout or a cancelled ctx kills the whole process group, not
 // only sh.
-func Run(ctx context.Context, job Job) Result {
+func Run(ctx context.Context, job Job) Result { return runJob(ctx, job, nil) }
+
+func runJob(ctx context.Context, job Job, groups *Runner) Result {
 	ctx, cancel := context.WithTimeout(ctx, job.Timeout)
 	defer cancel()
 
@@ -59,7 +62,16 @@ func Run(ctx context.Context, job Job) Result {
 	stderr.limit = outputCap
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		if groups != nil && !groups.track(cmd.Process.Pid) {
+			killGroup(cmd.Process.Pid)
+		}
+		err = cmd.Wait()
+		if groups != nil {
+			groups.untrack(cmd.Process.Pid)
+		}
+	}
 	// WaitDelay reports an error even for a script that answered and exited 0
 	// while a child it left behind still held stdout. The answer stands.
 	if errors.Is(err, exec.ErrWaitDelay) {
@@ -111,4 +123,52 @@ func killGroup(pid int) error {
 		syscall.Kill(-pid, syscall.SIGKILL)
 	}
 	return err
+}
+
+// Runner runs jobs and can stop them all at once. Cancelling a context is not
+// enough on the way out: exec kills on its own goroutine, and pile can exit
+// before that runs, leaving every script in its own session to finish alone.
+type Runner struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	mu      sync.Mutex
+	groups  map[int]bool
+	stopped bool
+}
+
+func NewRunner() *Runner {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Runner{ctx: ctx, cancel: cancel, groups: map[int]bool{}}
+}
+
+func (r *Runner) Run(job Job) Result { return runJob(r.ctx, job, r) }
+
+// Stop kills every running script's group before it returns.
+func (r *Runner) Stop() {
+	r.cancel()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stopped = true
+	for pid := range r.groups {
+		killGroup(pid)
+	}
+}
+
+// track reports false once Stop has run, so a script that started as pile
+// was quitting is killed rather than missed.
+func (r *Runner) track(pid int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stopped {
+		return false
+	}
+	r.groups[pid] = true
+	return true
+}
+
+func (r *Runner) untrack(pid int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.groups, pid)
 }

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -16,13 +15,12 @@ import (
 )
 
 // badges is everything the board needs to run badge scripts. It sits behind a
-// pointer so the Model's value receivers share one cache and one context, and
+// pointer so the Model's value receivers share one cache and one runner, and
 // is nil when the config has no badges.
 type badges struct {
 	defs  []config.Badge // with defaults filled in, in config order
 	cache *badge.Cache
-	ctx   context.Context
-	stop  context.CancelFunc
+	run   *badge.Runner
 	// timerSeq numbers the expiry timer, so only the newest one dispatches.
 	timerSeq uint64
 }
@@ -43,7 +41,7 @@ func newBadges(cfg config.Config) *badges {
 	for _, def := range cfg.Badges {
 		b.defs = append(b.defs, def.WithDefaults())
 	}
-	b.ctx, b.stop = context.WithCancel(context.Background())
+	b.run = badge.NewRunner()
 	return b
 }
 
@@ -51,7 +49,7 @@ func newBadges(cfg config.Config) *badges {
 // so the terminal closing does not reach them.
 func (m Model) Close() {
 	if m.badges != nil {
-		m.badges.stop()
+		m.badges.run.Stop()
 	}
 }
 
@@ -118,8 +116,8 @@ func (m Model) dispatchBadges(now time.Time) tea.Cmd {
 				failed = true
 				continue
 			}
-			ctx := m.badges.ctx
-			cmds = append(cmds, func() tea.Msg { return badgeDoneMsg{badge.Run(ctx, job)} })
+			run := m.badges.run
+			cmds = append(cmds, func() tea.Msg { return badgeDoneMsg{run.Run(job)} })
 		}
 		if !failed {
 			break
@@ -325,7 +323,7 @@ func (m Model) badgeHelp() []helpRow {
 		if def.Side == "right" {
 			where = "before the author"
 		}
-		rows = append(rows, glyph(def.Name, where+", refreshed every "+def.TTL.String(), badgeStyle(def.Color)))
+		rows = append(rows, glyph(def.Name, where+", refreshed every "+shortDuration(def.TTL), badgeStyle(def.Color)))
 	}
 	return rows
 }
@@ -357,4 +355,16 @@ func clipBadge(s string, w int) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// shortDuration drops the zero units Duration.String spells out: 5m, not 5m0s.
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
