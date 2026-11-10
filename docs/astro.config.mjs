@@ -54,6 +54,7 @@ export default defineConfig({
               label: 'Actions',
               items: ['guide/actions', 'guide/actions/worktree', 'guide/actions/review-tui'],
             },
+            'guide/badges',
             'guide/team-board',
           ],
         },

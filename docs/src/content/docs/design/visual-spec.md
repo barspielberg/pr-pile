@@ -663,6 +663,30 @@ tiers columns 0–10 never move at all, so the left edge of the board is identic
 from 40 to 400 columns. The section header is full-width at every tier and has
 no columns to keep stable.
 
+## 3.8.1 Badges share the title cell
+
+Badges are drawn inside the title's cell, never as columns of their own, so
+they move no breakpoint and no other column:
+
+```
+ ▌ #3248  ✗2 ○ !  feat(api): refuse empty… PROJ-123        ✓dev abc  2h
+                  └ title          left ┘   slack    right ┘
+```
+
+- A `left` badge follows the title text, one space after it. A `right` badge
+  ends at the cell's right edge, just before the author or age. The slack
+  between them is blank.
+- The title keeps its starting column. Its share of the cell is its own width
+  when badges are drawn, and the whole cell when none are, so a row without
+  badges draws exactly as it did before badges existed.
+- When the title and its badges do not fit, the title is cut down to 24 cells,
+  then badges drop from the last in config order.
+- Badges are not drawn in the NARROW tier, along with age and author.
+- Colour comes from the board's own tokens: `fg`, `muted` (the default), `ok`,
+  `attention`, `error`, `accent`. The selected row paints its background under
+  every badge and the slack, like every other segment.
+- A badge not answered yet is blank, never `·`, which already means "none".
+
 ## 3.9 Vertical budget
 
 Chrome is **one line**: the footer. 20 rows − 1 chrome = 19 list lines: one
