@@ -63,7 +63,9 @@ func TestRunStopsWhenTheContextIsCancelled(t *testing.T) {
 }
 
 func TestRunCannotPromptOnTheTerminal(t *testing.T) {
-	r, _ := run(t, `if : </dev/tty 2>/dev/null; then echo tty; else echo none; fi`, 5*time.Second)
+	// In a subshell: dash exits the whole shell when a redirect on the
+	// special builtin : fails.
+	r, _ := run(t, `if (exec </dev/tty) 2>/dev/null; then echo tty; else echo none; fi`, 5*time.Second)
 	if r.Text != "none" {
 		t.Fatalf("script reached a terminal: %+v", r)
 	}
