@@ -141,9 +141,9 @@ unapproved PRs, `review:required` returns 19 — it drops all three of these:
 
 | PR | review state | dropped by `review:required` |
 |---|---|---|
-| #2859 | `CHANGES_REQUESTED` | yes |
-| #3006 | none | yes |
-| #3224 | none | yes |
+| #201 | `CHANGES_REQUESTED` | yes |
+| #214 | none | yes |
+| #228 | none | yes |
 
 A PR with changes requested still wants work, and a PR nobody has been asked
 about is the most "needs review" state there is. `-review:approved` keeps all
@@ -238,17 +238,17 @@ is on for rules 1–4 here.
 
 A chain is worked out from the PRs **in that section**, which matters because
 first-match-wins routinely splits one. A chain of
-`#3228 → #3234 → #3239 → #3251 → #3254` splits across rules 2 and 3, and each
+`#231 → #232 → #233 → #234 → #235` splits across rules 2 and 3, and each
 section draws a correctly-closed sub-chain of what it holds:
 
 ```
 MY TEAM NEEDS REVIEW          MY TEAM
-  ╭╴ #3228                      ╭╴ #3251
-  │  #3234                      ╰╴ #3254
-  ╰╴ #3239
+  ╭╴ #231                       ╭╴ #234
+  │  #232                       ╰╴ #235
+  ╰╴ #233
 ```
 
-That reads correctly — `#3251` and `#3254` genuinely are stacked on each other.
+That reads correctly — `#234` and `#235` genuinely are stacked on each other.
 Two cases are worth knowing about:
 
 - **Only the top of a stack is in the section.** It gets no glyph at all and

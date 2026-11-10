@@ -4,8 +4,8 @@ description: The design decisions that shaped pile, each with the evidence behin
 ---
 
 Every decision pile makes is a trade with a reason. This page is the record of
-those reasons, grouped by what they concern — data, colour, layout,
-interaction — so a decision can be revisited without re-arguing it from first
+those reasons, grouped by what they concern — data, the detail page, colour,
+layout, interaction — so a decision can be revisited without re-arguing it from first
 principles. The [principles](../) sit above this table; the
 [visual spec](../visual-spec/) is what the decisions add up to.
 
@@ -23,8 +23,24 @@ How the board gets its information, and what it is allowed to assume about it.
 | Author is per-rule (`author: true`), not global | A rule like `author:@me` is all one person, so the column is dead weight there. This is what gh-dash #464 asks for and what neomutt has done for decades. The search matches the initials only when the column is drawn, since it matches what is drawn. |
 | `-review:approved` on "Needs my review" | Drops PRs somebody else already signed off, which is what makes it an action queue rather than a status list. Changes-requested PRs stay — those still want you. Note GitHub already drops a PR from `review-requested:@me` once *you* approve it. |
 | Draft split out of the review slot | Draft is a lifecycle state, review is an outcome, and a draft PR has both. Showing draft in the review slot hid whether it was already approved. |
-| Labels on the detail request, not the board query | On the 50-PR search they cost +2,597 bytes and a rate-limit point to render a near-constant (`Webapp 🏎️` is on 29 of 32 labelled PRs). On the per-PR detail request they cost 68 bytes and no extra point. They are drawn as plain names, not chips — reverse is the search hit, the fill is the selection, and GitHub's colours are hex. `pr-detail.md` §5.8. |
+| Labels on the detail request, not the board query | On the 50-PR search they cost +2,597 bytes and a rate-limit point to render a near-constant (one label was on 29 of 32 labelled PRs). On the per-PR detail request they cost 68 bytes and no extra point. They are drawn as plain names, not chips — reverse is the search hit, the fill is the selection, and GitHub's colours are hex. |
 | No CODEOWNERS path matching | GitHub already turns CODEOWNERS into team review requests, so `team-review-requested:` covers it for free. No per-PR file-list fetch. |
+
+## Detail page
+
+What the `d` page shows about a PR beyond its checks, and what it leaves out.
+Measured against 50 live PRs.
+
+| Decision | Why |
+| --- | --- |
+| No list of conflicting files | GitHub does not expose one: GraphQL `PullRequestChangedFile` and REST `pulls/{n}/files` say what the PR did to a file, not whether it conflicts, and `mergeable` / `mergeStateStatus` are the whole conflict vocabulary. The web UI computes its list server-side and keeps it. The only API proxy, files both sides touched since the merge base, over-reported on 9 of 10 conflicted PRs against `git merge-tree` (median 3×, worst 8×), so it would name files that merge cleanly. Running `git merge-tree` locally is exact, but it needs a fetch (2.3s for one ref), a configured `repoPath`, and a clone the tool otherwise never touches. |
+| `N commits behind <base>` instead | Exact, one field on a request already made, and it answers the question under "which files": how much work is this? 3 behind is a rebase; 26 is an afternoon. |
+| `mergeStateStatus` only for `BEHIND` | `BEHIND` is the only per-PR field that says the repo *requires* an up-to-date branch: `CLEAN` PRs merged fine 28–35 commits behind in one repo, while a `✓ ✓` PR was refused for it in another. `BLOCKED` is not drawn — on 35 of 50 PRs it meant "waiting for a required review", which `reviewDecision` already says. |
+| Unresolved threads, not total comments | Total comments are nonzero on 98% of PRs and count conversations already resolved. Unresolved threads are nonzero on 12%, and every one is live. |
+| Reviewers who gave an opinion are named; requested ones are not | Names were first rejected for costing 6.5 KB and a rate-limit point on every board fetch. On the per-PR detail request they cost no extra point and no extra round trip, and the name says *whom* to talk to. Requested reviewers name no opinion yet, and many are teams that restate the section header. |
+| No PR body | Unbounded Markdown needs wrapping and truncation, would dominate the page, and is often an unfilled template. It is the first step to a page you scroll through; `enter` opens the browser, which is where prose belongs. |
+| No linked issues | `closingIssuesReferences` was empty on nearly every PR: work tracked outside GitHub Issues puts the ticket in the title, which is already on the board. |
+| No merge-queue state | No PR was in a merge queue when this was measured, so the field was constant `false`. The premise has since changed — PRs have been seen in one — so this is worth revisiting rather than citing as settled. |
 
 ## Colour
 
@@ -48,6 +64,8 @@ How the board is shaped, and why nothing takes more than a line.
 | Every row is exactly one line | Five commits tried to stabilise the scroll while rows had data-dependent heights, and each traded one symptom for another: a single keypress moved the board 0–3 lines depending on whether a neighbouring row carried a failing-check line and whether a section header was crossing the edge. Gate names moved to the `d` overlay, and section names to a header row the cursor can sit on, so every line in the list is a position the cursor can reach and one keypress scrolls at most one line — unconditionally, not by argument. |
 | Section headers are inline, not pinned | A pinned line with a `N of M` count was built and reverted. Bound to the top visible row it could not name the wrong section — but on a pane tall enough to show the whole board nothing scrolls, so it froze on the first section and read `MINE · 1 of 5` while the cursor was three sections away. An inline header cannot go stale (it is always directly above its rows) and cannot be a constant (it scrolls away with them). |
 | The cursor can sit on a section header | It is the difference between a delta of 1 and a delta of 2. A line the cursor cannot occupy has to be crossed *in addition to* the row it precedes, so a viewport following the cursor jumps. Making the header addressable — but not actionable, so `enter`/`d`/`y` do nothing there — makes the list's lines and the cursor's positions the same set, and the invariant arithmetic. This also removed the blank separator, the last unselectable line. |
+| Detail is an overlay, not a pane or an expanded row | gh-dash's preview pane takes 45% of the width by default and holds the only copy of its check detail, so the pane becomes load-bearing: its non-preview path shipped a panic (gh-dash #798) because almost nobody ran it. Expanding the selected row makes row height depend on the cursor, so the scroll offset depends on itself — fzf needs a two-phase loop to avoid oscillating there. An overlay costs no board space and leaves the scroll math alone. |
+| Sections share one list, not tabs | Tabs cost 3 rows of permanent chrome and hide every section but one, so "do I need to do anything right now?" means visiting each tab. `l`/`h` jump within one list and keep the neighbouring sections in view. |
 | Scroll margin of 2 rows | lazygit ships 2, fzf migrated 0 → 3 in 2024, nnn/micro use 3; no tool surveyed migrated the other way. 2 is the smallest in the cluster and still guarantees the first line of the next PR is visible. Every implementation caps at half the viewport; none is proportional (helix rejected that on the record, #8403). |
 | Sections keep their rows while refetching | Rebuilding from empty collapsed the board and re-expanded it section by section, shoving every row below each one that resolved. A row should move when a value changes, not because a request finished. |
 | A resolved empty section collapses to one line | Reserving six blank rows for a section that *knows* it has nothing wasted most of a short pane. The reservation applies only while loading. |

@@ -68,10 +68,6 @@ export default defineConfig({
             'design/decisions',
             'design/visual-spec',
             'design/measurements',
-            {
-              label: 'Research archive',
-              items: [{ autogenerate: { directory: 'design/research' } }],
-            },
           ],
         },
         {

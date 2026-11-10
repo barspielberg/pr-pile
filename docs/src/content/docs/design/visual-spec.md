@@ -15,7 +15,7 @@ cursor can occupy (§3.5).
 | 1 | mark | 0 | 1 | — | `▌` when selected, else space |
 | 2 | sign | 1 | 1 | — | `•` when picked, else the watch flag (below), else space |
 | 3 | tree | 2 | 2 | left | `╭╴` `│ ` `╰╴` or two spaces |
-| 4 | number | 4 | 6 | left | `#3248`, padded right |
+| 4 | number | 4 | 6 | left | `#143`, padded right |
 | 5 | gutter | 10 | 1 | — | space |
 | 6 | status | 11 | 7 | left | glyph cluster, §3.2 |
 | 7 | gutter | 18 | 1 | — | space |
@@ -54,7 +54,7 @@ say `◐` for minutes after the footer said CI passed.
 **Every line is exactly one line, and every line is a slot.** Row height does
 not depend on the data, and there is no line in the list the cursor cannot
 occupy. Together those give the invariant the whole viewport rests on: one
-keypress scrolls the board at most one line. See `uniform-rows.md` §4.1.
+keypress scrolls the board at most one line.
 
 ```
 body  = mark(1)+gut(1)+tree(2)+number(6)+gut(1)+status(7)+gut(1)+gut(1)+age(3) = 23
@@ -65,7 +65,7 @@ titleWidth -= 4 when the rule sets author: true    [FULL only]
 All padding clamps at zero (`max(0, w - width(s))`) — never an unclamped
 `strings.Repeat`; gh-dash shipped a `negative Repeat count` panic from exactly
 this. When `titleWidth <= 3` the title renders empty rather than a bare `…`.
-Number holds `#99999` (the board this was built against is at ~#3200); if one ever exceeds it, let it eat
+Number holds `#99999`; if one ever exceeds it, let it eat
 the following gutter — never push the status cluster right.
 
 ## 3.2 Status cluster (7 cells, sub-offsets relative to column 11)
@@ -334,10 +334,10 @@ return to a fixed cube grey, which had its own failure (§3.3).
 
 ```
 ▌ Mine                                                                       5
-   #3248  ✓  ○   fix(ordering): reach the dependency popup before it settles  2h
-   #3251  ◐  ○   feat(api-service): backfill the roster by materialized path  2h
+   #143   ✓  ○   feat(sync): add a --since flag to the sync command           2h
+   #144   ◐  ○   refactor(sync): tidy the --since parser                      2h
   Involved                                                                   6
-   #3199  ✓  ✗   fix(billing-service): stop double-charging the proration     1d
+   #139   ✓  ✗   fix(cache): expire entries on the configured TTL             1d
 ```
 
 Each section is announced by a **full-width header row**: the rule name at the
@@ -387,16 +387,15 @@ stopping there would read as the motion having missed.
 occupy costs exactly one line of scroll delta, as does a blank separator; two
 independent implementations measured `3` for blank-plus-unselectable-header and
 `2` for unselectable-header-alone, against `1` here. The general rule —
-**every unselectable line in the list costs one to the worst-case delta** — and
-the three passes it took to find it are recorded in `uniform-rows.md` §4.1.
-The gutter this replaced is §4 of that document.
+**every unselectable line in the list costs one to the worst-case delta** — took
+three passes to find.
 
 A section with no rows to show occupies its header plus exactly one **note**
 line — the spinner while loading, `—` once resolved and empty, the error text on
 failure — and that line is a slot like any other. It has to be: a note the
 cursor could not reach was an unselectable line in the middle of the list, and
 by the rule above it cost a line of delta. That was a real defect, shipped and
-caught in review; `uniform-rows.md` §4.1 records it.
+caught in review.
 
 **There is no placeholder block.** A pending section used to reserve roughly its
 final height in blank lines so that sections below it were not pushed down as it
@@ -431,7 +430,7 @@ shaped like a cursor position, was never one.
 Neither cursor-binding nor showing the line conditionally rescues it.
 Cursor-binding is redundant when the board fits, because every boundary is then
 visible. A conditional line changes the list height as you scroll, which is the
-bug class `uniform-rows.md` exists to kill. See `section-layout.md` §13.
+bug class uniform rows exist to kill.
 
 **An inline header avoids all of it by scrolling.** It cannot go stale, because
 it is always directly above the rows it describes; it cannot be a constant,
@@ -460,14 +459,14 @@ The overlay **names what you can act on and counts what you cannot**:
 | skipped | counted, in the same tally | — |
 
 ```
-  #3230 chore: bump @types/send from 0.17.4 to 1.2.1
+  #151 chore: bump the yaml parser from 3.0.1 to 3.1.0
 
-  ✗ build-push-image customer-portal
-  ✗ build-push-image billing-service
-  ✗ build-push-image web-client
-  ✗ build-push-image webapp
-  ◐ webapp_e2e
-  ◐ web_client_e2e
+  ✗ build linux-amd64
+  ✗ build linux-arm64
+  ✗ build darwin-arm64
+  ✗ lint
+  ◐ e2e
+  ◐ e2e-windows
   ✓ 9 passing, 12 skipped
 
   esc q d close · j/k scroll · / search
@@ -482,19 +481,19 @@ page. The key was `c` while it was the checks page and is now `d` for detail,
 which is what the page became; the checks are still the top of it.
 
 ```
-  #3186 fix(api-service): PROJ-1951 free unit numbers when a plan is abandoned
+  #138 fix(sync): release the lock when a sync is cancelled
 
   ✓ all 18 checks passing
 
-  ! conflicted · 26 commits behind master
+  ! conflicted · 26 commits behind main
   ● 9 unresolved comments
   author    Carol Diaz (cdiaz88)
   review    ✓ Alice Chen (alicechen)
   size      +596 −45 · 7 files
-  base       fix-PROJ-1839-reject-legacy-option
-  branch   PROJ-1951-unit-number-integrity
+  base       fix-retry-backoff
+  branch   release-sync-lock
   opened    6d ago · idle 1d
-  labels    ready-for-e2e · review: XL
+  labels    bug · needs-qa
 
   esc q d close · j/k scroll · / search
 ```
@@ -519,14 +518,14 @@ block. They are plain names in `fg` joined by a `muted` `·`, never chips:
 reverse is the search hit, the fill is the selection, and GitHub's label colours
 are hex. Names are drawn whole, and what does not fit — or was past the 20
 fetched — is counted as a `muted` `· +N`; only a first name too long to fit
-alone is clipped. `pr-detail.md` §5.8 has the measurement that moved them here.
+alone is clipped. [Decisions](../decisions/) has the measurement that moved them here.
 
 There is no conflicting-file list, and there will not be one. GitHub exposes no
 per-file conflict data in either API, and the only computable proxy (files both
 branches touched) over-reports by 3× in the median case and 8× at worst against
 a real `git merge-tree`. `N commits behind` is the honest answer to the question
 underneath "which files conflict" — *how much work is this to fix?*
-`pr-detail.md` §4 has the ground-truth measurements.
+[Decisions](../decisions/) has the measurements.
 
 **Some of these lines arrive late.** `behindBy`, unresolved threads, the
 reviewer names, the labels and the default branch (which decides the `base`
@@ -538,9 +537,9 @@ land** — `⠹ checking for conflicts and open conversations` — so the common
 resolves in place instead of inserting a row and pushing the rest of the block
 down. It is one line and not one per field: both fields are conditional
 (unresolved threads exist on 6 of 50 PRs), so a placeholder each would draw rows
-that vanish on most PRs. `pr-detail.md` §7.1 records the reversal of the
-original "absent, not a placeholder" rule and why the user's report is the
-evidence against it. Fetching them upfront would mean ~100 requests on a cold
+that vanish on most PRs. This reverses an earlier "absent, not a placeholder"
+rule: a late line does not just appear, it inserts at the top of the block and
+pushes every line below it down, which is what a user reported. Fetching them upfront would mean ~100 requests on a cold
 start, roughly doubling the 2–4 s the tool commits to in §2.
 
 Most late lines are simply **absent** until they arrive — a line that appears
@@ -559,15 +558,15 @@ A PR already answered is never re-asked within a session.
 
 **A PR in a GitHub native stack ends the page with a stack block**, last so
 that its late half only grows the bottom of the page. Its header is from the
-search, so it draws at once: `stack  #4215 · 8 PRs · on master`. The entries
+search, so it draws at once: `stack  #120 · 8 PRs · on main`. The entries
 come with the same second request, behind a `⠹ listing the stack` loader,
 bottom first (position 1 to the top), merged and closed PRs included:
 
 ```
-  stack     #2904 · 5 PRs · on master
-    1  #2899  merged  [1/5] feat(ordering-ms): accept a one-time XLR8 code
-    4  #2902  open    [4/5] test(ordering-e2e): stub the XLR8 code exchange
-  ▌ 5  #2906  open    [5/5] refactor(ordering-e2e): rewrite the upstream stub
+  stack     #160 · 5 PRs · on main
+    1  #156   merged  [1/5] feat(auth): accept a one-time device code
+    4  #159   open    [4/5] test(auth): stub the device code exchange
+  ▌ 5  #161   open    [5/5] refactor(auth): rewrite the token stub
 ```
 
 `▌` marks the PR the page is about. States are words, not glyphs: `✓` and `✗`
@@ -586,9 +585,8 @@ Passing checks are counted rather than listed because on the live board **47% of
 check contexts are skipped and 45% pass, against 4% failing** — a full list puts
 7 signal lines under 24 on the worst PR and overflows the 20-row design target.
 Pending checks *are* named because they are few (1–3 per PR, never more) and
-specific: knowing it is `webapp_e2e` rather than `lint` is the difference
-between ten minutes and thirty seconds. `checks-page.md` has the measurements
-and the industry comparison.
+specific: knowing it is `e2e` rather than `lint` is the difference
+between ten minutes and thirty seconds.
 
 The tally reconciles: named lines plus counted ones account for every check
 considered, the way `gh pr checks` closes with its own tally. Without the
@@ -602,7 +600,7 @@ Its bottom hint row remains visible, including when every line fits, so the
 reader always knows how to move and leave the page.
 
 Names are deduped per bucket and stripped of shard suffixes
-(`apps_ci / webapp_e2e / Run E2E Tests (1, 5)`), ported from
+(`ci / e2e / Run E2E Tests (1, 5)`), ported from
 `pr-status.jq`. Umbrella gates (`CI Gate`, `E2E Status`) are dropped from every
 bucket because they only restate their children — which means the tally counts
 the contexts *we consider*, typically one or two below GitHub's raw total.
@@ -678,7 +676,6 @@ they are cheap in the way the blank separator was not: a header carries the
 section's name and its count, and the cursor can rest on it, so it costs a line
 and gives back both a label and a scroll delta of 1. A blank separator carried
 nothing and cost a line *and* a line of delta — which is why there is none.
-`uniform-rows.md` §4.1 has the measurement.
 
 A second chrome line was tried above the list (§3.5.1) and reverted, so the row
 it cost is back. Verified in a real 120×40 pane: the whole 29-row board plus the
@@ -693,8 +690,7 @@ have. The repo yielded that slot, being a constant the user chose while the
 section changes under every keypress. It is bound to the **cursor**, never to
 the top visible row: at 40 rows the board does not scroll, so a top-row binding is
 frozen at the first section forever, which is exactly how the reverted sticky
-line failed. `section-layout.md` §14 has the walk that verifies it changes on
-every keypress. When the two fields do not both fit the keys clip and the name
+line failed. When the two fields do not both fit the keys clip and the name
 survives whole. A status message *replaces* the keybinding text rather than
 adding a row — the keybindings are the least urgent thing on the board. While the
 search prompt is open it is a second chrome row between the list and the footer
