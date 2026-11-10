@@ -67,7 +67,7 @@ func (m Model) renderPrompt(query string, total, at int) string {
 // It is bound to the cursor, not to the top visible row: a board that fits the
 // pane never scrolls, so a top-row-bound field is frozen at its first section
 // forever -- which is exactly how the reverted sticky line failed. See
-// docs/section-layout.md §14.
+// visual-spec.md §3.9.
 //
 // Read off the slot the cursor is actually on, not recomputed by walking the
 // sections: the section a slot belongs to is recorded on the slot, and a second

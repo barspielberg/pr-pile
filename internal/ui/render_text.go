@@ -91,7 +91,7 @@ const numberWidth = 6
 // The column is muted, like age. It carried a 15-entry hue palette so the same
 // person was the same colour on every row; that was a grouping hint costing 15
 // fixed cube values that overrode the user's theme, to decorate a fact the
-// initials already carried. Colour is a budget (DESIGN-GUIDE.md §1) and who
+// initials already carried. Colour is a budget (design/index.md §1) and who
 // wrote a PR does not compete with whether it is broken.
 const authorWidth = 3
 

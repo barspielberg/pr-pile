@@ -7,7 +7,7 @@ import (
 // body renders every section and reports the line each cursor slot starts on.
 // EVERY line is a slot -- headers, PR rows and the no-rows note alike -- so
 // slotStarts is the identity, which is the property that makes the scroll
-// rhythm even. See docs/uniform-rows.md §4.1.
+// rhythm even. See visual-spec.md §3.5.
 func (m Model) body(spin string) (lines []string, slotStarts []int) {
 	slotIdx := 0
 	addSlot := func(line string) {
@@ -18,7 +18,7 @@ func (m Model) body(spin string) (lines []string, slotStarts []int) {
 	// A section with no rows still occupies exactly one note line -- the
 	// spinner while loading, an em dash once resolved empty, the error text on
 	// failure -- and that line is a SLOT. It was not, and the cursor skipped
-	// it: by the rule in docs/uniform-rows.md §4.1 every unselectable line in
+	// it: by the rule in visual-spec.md §3.5 every unselectable line in
 	// the list costs one to the worst-case scroll delta, so an empty, failed
 	// or pending section broke the very invariant this layout exists to hold.
 	//
@@ -94,7 +94,7 @@ const scrollOff = 2
 // read as jumping. Now every line on the board is addressable -- gate names
 // live in the `d` overlay and the section name lives in its own header row the
 // cursor can sit on -- so the clamp in scrollTop is the whole of it. See
-// docs/uniform-rows.md.
+// decisions.md.
 //
 // It also reports the index of the top visible line, which the top row needs to
 // name the section of the row you are actually looking at -- not knowable

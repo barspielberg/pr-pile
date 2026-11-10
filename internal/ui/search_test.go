@@ -86,7 +86,7 @@ func loaded(t *testing.T, width, height int, mine, review []github.PR) Model {
 
 func samplePRs() ([]github.PR, []github.PR) {
 	mine := []github.PR{
-		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse quota plan writes",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
 		{Repo: testRepo, Number: 3100, Title: "fix(pricing): rounding on invoice totals",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(200, 0)},
@@ -122,7 +122,7 @@ func TestQueryDoesNotNarrowTheBoard(t *testing.T) {
 // highlighted, so the user can see which is which.
 func TestNumberIsOrdinarySearchableText(t *testing.T) {
 	mine := []github.PR{
-		{Repo: testRepo, Number: 3248, Title: "feat(api-service): refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(api-service): refuse quota plan writes",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
 		{Repo: testRepo, Number: 3100, Title: "fix(pricing): round the 324 cent remainder",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(200, 0)},
@@ -501,7 +501,7 @@ func TestMatchedCharactersAreHighlighted(t *testing.T) {
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	mine := []github.PR{{Repo: testRepo,
-		Number: 3248, Title: "feat(api-service): refuse order plan writes",
+		Number: 3248, Title: "feat(api-service): refuse quota plan writes",
 		CIState: "SUCCESS", UpdatedAt: time.Now(),
 	}}
 	m := typeQuery(loaded(t, 100, 20, mine, nil), "api-serv")
@@ -534,7 +534,7 @@ func TestMatchedCharactersAreHighlighted(t *testing.T) {
 func TestSpaceIsTypedIntoTheQuery(t *testing.T) {
 	mine, review := samplePRs()
 	m := press(loaded(t, 120, 40, mine, review), runeKey('/'))
-	for _, r := range "order" {
+	for _, r := range "quota" {
 		m = press(m, runeKey(r))
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeySpace})
@@ -542,8 +542,8 @@ func TestSpaceIsTypedIntoTheQuery(t *testing.T) {
 		m = press(m, runeKey(r))
 	}
 
-	if m.query != "order plan" {
-		t.Fatalf("query is %q, want %q", m.query, "order plan")
+	if m.query != "quota plan" {
+		t.Fatalf("query is %q, want %q", m.query, "quota plan")
 	}
 	matches := m.matchIndexes()
 	pr, ok := prAt(m, matches[0])
@@ -600,14 +600,14 @@ func numbersOf(rows []board.Row) []int {
 // under the title.
 func TestSearchTextMatchesWhatIsRendered(t *testing.T) {
 	prs := []github.PR{
-		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse quota plan writes",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
 		{Repo: testRepo, Number: 7, Title: "fix: tiny", Author: "ab", CIState: "FAILURE", UpdatedAt: time.Unix(200, 0)},
 		{Repo: testRepo, Number: 41234, Title: "chore(deps): bump lipgloss to the version with the fix",
 			Author: "dependabot", CIState: "PENDING", UpdatedAt: time.Unix(100, 0)},
 		{Repo: testRepo, Number: 4001, Title: "修复订单计划写入被拒绝的问题",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(400, 0)},
-		{Repo: testRepo, Number: 4002, Title: "🚀🚀 fix the ordering thing",
+		{Repo: testRepo, Number: 4002, Title: "🚀🚀 fix the checkout thing",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(500, 0)},
 		{Repo: testRepo, Number: 4003, Title: "修复 fix(api): 订单 plan writes 被拒绝",
 			Author: "immanuel", CIState: "FAILURE", UpdatedAt: time.Unix(600, 0)},
@@ -663,9 +663,9 @@ func TestSearchTextMatchesWhatIsRendered(t *testing.T) {
 // title is the case the arithmetic they replaced got wrong.
 func TestSearchTextOffsetsLandOnTheCells(t *testing.T) {
 	for _, title := range []string{
-		"feat(api): refuse order plan writes",
+		"feat(api): refuse quota plan writes",
 		"修复订单计划写入被拒绝的问题",
-		"🚀🚀 refuse order plan writes",
+		"🚀🚀 refuse quota plan writes",
 	} {
 		pr := github.PR{Repo: testRepo, Number: 3248, Title: title,
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}
@@ -701,10 +701,10 @@ func TestSearchTextOffsetsLandOnTheCells(t *testing.T) {
 // altogether while the row still counted as a match.
 func TestAuthorHighlightSurvivesWideRuneTitles(t *testing.T) {
 	for _, title := range []string{
-		"fix the ordering thing",
-		"🚀 fix the ordering thing",
-		"🚀🚀 fix the ordering thing",
-		"修复 fix the ordering thing",
+		"fix the checkout thing",
+		"🚀 fix the checkout thing",
+		"🚀🚀 fix the checkout thing",
+		"修复 fix the checkout thing",
 		"修复订单计划写入被拒绝的问题",
 		"修复订单计划写入被拒绝的问题，以及其他若干问题需要处理",
 	} {
@@ -734,7 +734,7 @@ func TestAuthorHighlightSurvivesWideRuneTitles(t *testing.T) {
 // and must not match. Widen the pane and the same word is found.
 func TestClippedTitleTextIsNotSearchable(t *testing.T) {
 	pr := github.PR{Repo: testRepo, Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
-		Title: "feat(api-service): refuse order plan writes while the fleet is offline"}
+		Title: "feat(api-service): refuse quota plan writes while the queue is offline"}
 
 	narrow := loaded(t, 70, 40, []github.PR{pr}, nil)
 	if narrow.rowMatches(narrow.board.Sections()[0].Rows[0], false, "offline") {
@@ -751,7 +751,7 @@ func TestClippedTitleTextIsNotSearchable(t *testing.T) {
 
 // The author column is not drawn below tierFull, so it is not searchable there.
 func TestAuthorIsNotSearchableBelowFullWidth(t *testing.T) {
-	pr := github.PR{Repo: testRepo, Number: 3248, Title: "refuse order plan writes",
+	pr := github.PR{Repo: testRepo, Number: 3248, Title: "refuse quota plan writes",
 		Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)}
 
 	mid := loaded(t, midUntil, 40, []github.PR{pr}, nil)
@@ -767,7 +767,7 @@ func TestAuthorIsNotSearchableBelowFullWidth(t *testing.T) {
 // on its own as the clock moves, and a bare digit would collide with the PR
 // number on the way to every numeric search.
 func TestAgeIsNotSearchable(t *testing.T) {
-	pr := github.PR{Repo: testRepo, Number: 3248, Title: "refuse order plan writes",
+	pr := github.PR{Repo: testRepo, Number: 3248, Title: "refuse quota plan writes",
 		Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Now().Add(-48 * time.Hour)}
 	m := loaded(t, 147, 40, []github.PR{pr}, nil)
 	r := m.board.Sections()[0].Rows[0]
@@ -800,7 +800,7 @@ func TestMatchSpansFindsEveryOccurrence(t *testing.T) {
 // adds -- would misplace every highlight without the conversion.
 func TestClippedNonASCIITitleHighlightsCorrectly(t *testing.T) {
 	pr := github.PR{Repo: testRepo, Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
-		Title: "feat(café): refuse — órder plán writes for the whole fleet at once"}
+		Title: "feat(café): refuse — quóta plán writes for the whole queue at once"}
 	// 80, not 90: the section gutter's 10 cells went back to the title when
 	// sections moved to their own header row, so 90 no longer clips this.
 	m := loaded(t, 80, 40, []github.PR{pr}, nil)
@@ -812,7 +812,7 @@ func TestClippedNonASCIITitleHighlightsCorrectly(t *testing.T) {
 		t.Fatalf("fixture is not clipped at this width: %q", string(txt))
 	}
 
-	for _, q := range []string{"café", "órder", "—"} {
+	for _, q := range []string{"café", "quóta", "—"} {
 		spans := m.matchSpans(r, false, q)
 		if len(spans) == 0 {
 			t.Errorf("%q did not match: %q", q, string(txt))
@@ -879,7 +879,7 @@ func TestEveryMatchIsVisiblyHighlighted(t *testing.T) {
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	mine := []github.PR{
-		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(api-service): PROJ-2037 refuse quota plan writes",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
 		{Repo: testRepo, Number: 3100, Title: "fix(pricing): rounding on invoice totals",
 			Author: "cdiaz88", CIState: "SUCCESS", UpdatedAt: time.Unix(200, 0)},
@@ -887,7 +887,7 @@ func TestEveryMatchIsVisiblyHighlighted(t *testing.T) {
 		// step, which is where a match can be counted and still draw nothing.
 		{Repo: testRepo, Number: 3301, Title: "修复订单计划写入被拒绝的问题",
 			Author: "immanuel", CIState: "SUCCESS", UpdatedAt: time.Unix(250, 0)},
-		{Repo: testRepo, Number: 3302, Title: "🚀🚀 refuse order plan writes",
+		{Repo: testRepo, Number: 3302, Title: "🚀🚀 refuse quota plan writes",
 			Author: "cdiaz88", CIState: "FAILURE", UpdatedAt: time.Unix(240, 0)},
 		{Repo: testRepo, Number: 3303, Title: "修复 fix(api): 订单 refuse PROJ-2037 被拒绝",
 			Author: "dependabot", CIState: "SUCCESS", UpdatedAt: time.Unix(230, 0)},
@@ -1083,7 +1083,7 @@ func TestTypingOnAMatchingRowDoesNotMoveTheCursor(t *testing.T) {
 	m := typeQuery(loaded(t, 120, 40, mine, review), "refuse")
 	landed := m.cursor
 
-	for _, r := range " order" {
+	for _, r := range " quota" {
 		m = press(m, runeKey(r))
 		if m.cursor != landed {
 			t.Fatalf("cursor moved to %d while the row still matched", m.cursor)
@@ -1113,14 +1113,14 @@ func TestBoardDoesNotMoveWhileSearching(t *testing.T) {
 	var mine []github.PR
 	for i := 0; i < 12; i++ {
 		mine = append(mine, github.PR{Repo: testRepo,
-			Number: 3000 + i, Title: fmt.Sprintf("feat(ordering): AF-1%d do the thing", i),
+			Number: 3000 + i, Title: fmt.Sprintf("feat(checkout): TK-1%d do the thing", i),
 			CIState: "SUCCESS", UpdatedAt: time.Unix(int64(900-i), 0),
 		})
 	}
 	_, review := samplePRs()
 
 	before := loaded(t, 147, 40, mine, review)
-	after := typeQuery(loaded(t, 147, 40, mine, review), "AF-13")
+	after := typeQuery(loaded(t, 147, 40, mine, review), "TK-13")
 
 	// The cursor moves, so compare the rows rather than the whole frame.
 	b, a := before.visibleRows(), after.visibleRows()
@@ -1173,16 +1173,16 @@ func searched(t *testing.T, m Model, q string) Model {
 // other; TestNStopsOnAMatchingHeader covers that.
 func TestNCrossesSectionBoundaries(t *testing.T) {
 	mine := []github.PR{
-		{Repo: testRepo, Number: 3248, Title: "feat(ordering): refuse order plan writes",
+		{Repo: testRepo, Number: 3248, Title: "feat(checkout): refuse quota plan writes",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0)},
 		{Repo: testRepo, Number: 3100, Title: "fix(pricing): rounding on invoice totals",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(200, 0)},
 	}
 	review := []github.PR{
-		{Repo: testRepo, Number: 4001, Title: "chore(ordering): bump lipgloss",
+		{Repo: testRepo, Number: 4001, Title: "chore(checkout): bump lipgloss",
 			CIState: "SUCCESS", UpdatedAt: time.Unix(100, 0)},
 	}
-	m := searched(t, loaded(t, 147, 40, mine, review), "ordering")
+	m := searched(t, loaded(t, 147, 40, mine, review), "checkout")
 
 	matches := m.matchIndexes()
 	if len(matches) != 2 {
@@ -1375,7 +1375,7 @@ func TestSearchSurvivesRefresh(t *testing.T) {
 // match set. Widening reveals matches a narrow pane clipped away.
 func TestResizeRecomputesMatches(t *testing.T) {
 	mine := []github.PR{{Repo: testRepo, Number: 3248, CIState: "SUCCESS", UpdatedAt: time.Unix(300, 0),
-		Title: "feat(api-service): refuse order plan writes while the fleet is offline"}}
+		Title: "feat(api-service): refuse quota plan writes while the queue is offline"}}
 
 	m := loaded(t, 70, 40, mine, nil)
 	if got := len(typeQuery(m, "offline").matchIndexes()); got != 0 {
@@ -1394,7 +1394,7 @@ func TestResizeRecomputesMatches(t *testing.T) {
 // This is pinned because the two used to disagree: the search motions skipped
 // furniture while j stopped on it, so the same board answered two different
 // keys differently. "The cursor sits on headers" is the whole design this
-// layout rests on (docs/uniform-rows.md §4.1), so a fallback that quietly
+// layout rests on (visual-spec.md §3.5), so a fallback that quietly
 // skipped headers was the fallback contradicting the design.
 func TestEmptyQueryMotionMatchesPlainMovement(t *testing.T) {
 	mine, review := samplePRs()
@@ -1486,7 +1486,7 @@ func TestHitSetsBothGroundAndFigure(t *testing.T) {
 		strings.Contains(seq, "48;5;") || strings.Contains(seq, "48;2;")
 	if !fg || !bg {
 		t.Errorf("hitStyle sets fg=%v bg=%v; a highlight must set both "+
-			"(see DESIGN.md §3.3.3): %q", fg, bg, seq)
+			"(see visual-spec.md §3.3.3): %q", fg, bg, seq)
 	}
 }
 
@@ -1498,15 +1498,15 @@ func TestHitDoesNotInheritWhatItLandsOn(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	// "ordering" sits inside the scope of both titles, so the hit lands on
+	// "checkout" sits inside the scope of both titles, so the hit lands on
 	// faint text; one row is selected and one is not.
 	mine := []github.PR{
-		{Repo: testRepo, Number: 3248, Title: "fix(ordering): reach the popup", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3248, Title: "fix(checkout): reach the popup", CIState: "SUCCESS",
 			UpdatedAt: time.Unix(300, 0)},
-		{Repo: testRepo, Number: 3100, Title: "feat(ordering): add the thing", CIState: "SUCCESS",
+		{Repo: testRepo, Number: 3100, Title: "feat(checkout): add the thing", CIState: "SUCCESS",
 			UpdatedAt: time.Unix(200, 0)},
 	}
-	m := searched(t, onRow(t, loaded(t, 147, 20, mine, nil), 0), "ordering")
+	m := searched(t, onRow(t, loaded(t, 147, 20, mine, nil), 0), "checkout")
 
 	for _, want := range []string{"#3248", "#3100"} {
 		line := rowFor(t, m, want)
@@ -1604,7 +1604,7 @@ func TestSectionHeaderNeverOverflowsItsWidth(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	names := []string{"Mine", "All ordering", "My team needs review",
+	names := []string{"Mine", "All checkout", "My team needs review",
 		"A section name far too long to fit in any of these panes",
 		"修复订单计划", "🚀 rocket"}
 	for _, q := range []string{"", "a", "Mine", "订单", "🚀"} {
@@ -1672,7 +1672,7 @@ func TestMatchedSectionTitleIsHighlighted(t *testing.T) {
 func TestHeaderAndSharedMatcherAgree(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width = 200 // wide enough that clipping is not in play
-	texts := []string{"Mine", "All ordering", "Review requested",
+	texts := []string{"Mine", "All checkout", "Review requested",
 		"  j / k     move ( ↓ ↑ )", "修复订单计划", "🚀 rocket", ""}
 	queries := []string{"", " ", "  ", "mine", "MINE", "ord", "ORD",
 		"订单", "🚀", "j / k", "zzz"}
@@ -1774,7 +1774,7 @@ func TestSectionTitleMatchesAreCounted(t *testing.T) {
 }
 
 // n and N stop on a matched header. It is addressable but not actionable
-// (docs/uniform-rows.md §4.1), so landing there is a position this layout
+// (visual-spec.md §3.5), so landing there is a position this layout
 // already supports -- and skipping it would strand a counted match.
 func TestNStopsOnAMatchingHeader(t *testing.T) {
 	mine := []github.PR{

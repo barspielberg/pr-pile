@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-// TestReferencePagesDocumentEveryKey guards DOCS-PLAN.md §6.2: every `yaml:`
-// tag on Config, Rule and Action must appear as a `code` span on its reference
+// TestReferencePagesDocumentEveryKey: every `yaml:` tag on Config, Rule and Action must appear as a `code` span on its reference
 // page. A renamed or added key then fails here instead of drifting out of the
 // docs. The tags are read off the structs with reflection, so the test cannot
 // fall out of step with config.go.

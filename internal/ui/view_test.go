@@ -62,7 +62,7 @@ func TestViewRendersStatesAndGates(t *testing.T) {
 	m.width = 140
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 7, Title: "red pr", CIState: "FAILURE", Mergeable: "CONFLICTING",
-		Review: "CHANGES_REQUESTED", FailedGates: []string{"webapp_e2e"}, UpdatedAt: time.Now(),
+		Review: "CHANGES_REQUESTED", FailedGates: []string{"portal_e2e"}, UpdatedAt: time.Now(),
 	}}})
 	m.board.Apply(board.Result{Index: 1})
 
@@ -76,12 +76,12 @@ func TestViewRendersStatesAndGates(t *testing.T) {
 	}
 	// The gate NAME is not in the list: it would cost the row a second line,
 	// which is what made the board scroll unevenly. It lives behind `d`.
-	if strings.Contains(out, "webapp_e2e") {
+	if strings.Contains(out, "portal_e2e") {
 		t.Errorf("gate name should not be in the row:\n%s", out)
 	}
 	m = onRow(t, m, 0)
 	m.showChecks = true
-	if !strings.Contains(m.View(), "webapp_e2e") {
+	if !strings.Contains(m.View(), "portal_e2e") {
 		t.Errorf("gate name missing from the checks overlay:\n%s", m.View())
 	}
 }
@@ -212,7 +212,7 @@ func TestStatusClusterIsPinnedAcrossWidths(t *testing.T) {
 		m := New(testCfg(), nil)
 		m.width = w
 		m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
-			Number: 3248, Title: "feat(api-service): PROJ-2037 refuse order plan writes",
+			Number: 3248, Title: "feat(api-service): PROJ-2037 refuse quota plan writes",
 			CIState: "SUCCESS", Review: "REVIEW_REQUIRED", UpdatedAt: time.Now(),
 		}}})
 		m.board.Apply(board.Result{Index: 1})
@@ -234,7 +234,7 @@ func TestStatusClusterIsPinnedAcrossWidths(t *testing.T) {
 
 func TestNarrowWidthsDropFieldsInOrder(t *testing.T) {
 	pr := github.PR{Repo: testRepo,
-		Number: 3248, Title: "feat(api-service): refuse order plan writes",
+		Number: 3248, Title: "feat(api-service): refuse quota plan writes",
 		CIState: "SUCCESS", Review: "REVIEW_REQUIRED", UpdatedAt: time.Now().Add(-2 * time.Hour),
 	}
 	rowAt := func(w int) string {
@@ -1299,14 +1299,14 @@ func TestChecksOverlayClosesWithoutMoving(t *testing.T) {
 // The overlay names what is wrong and what is running, and collapses what
 // passed. Listing passing checks would bury the signal: on the live board 45%
 // of contexts pass and 47% are skipped, against 4% failing.
-// See docs/checks-page.md.
+// See decisions.md.
 func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 24
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{{Repo: testRepo,
 		Number: 7, Title: "t", CIState: "FAILURE", UpdatedAt: time.Now(),
-		FailedGates:  []string{"build-push-image webapp"},
-		PendingGates: []string{"webapp_e2e"},
+		FailedGates:  []string{"build-push-image portal"},
+		PendingGates: []string{"portal_e2e"},
 		PassedCount:  22, SkippedCount: 10,
 	}}})
 	m.board.Apply(board.Result{Index: 1})
@@ -1315,8 +1315,8 @@ func TestChecksOverlayNamesFailuresAndPendingButCountsPasses(t *testing.T) {
 
 	out := stripANSI(m.View())
 	for _, want := range []string{
-		"✗ build-push-image webapp", // failing, named
-		"◐ webapp_e2e",              // pending, named
+		"✗ build-push-image portal", // failing, named
+		"◐ portal_e2e",              // pending, named
 		"22 passing, 10 skipped",    // the rest, counted
 	} {
 		if !strings.Contains(out, want) {
@@ -1456,7 +1456,7 @@ func TestChecksOverlayTallyIsReachedByScrolling(t *testing.T) {
 // The board's first line is a row, not a section header. A pinned header was
 // tried and removed: bound to the top visible row it froze on the first section
 // on any pane tall enough to show the whole board, which is the common case.
-// See docs/section-layout.md §13.
+// See visual-spec.md §3.5.1.
 func TestNoChromeLineAboveTheList(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 40
@@ -1563,7 +1563,7 @@ func TestSectionHeaderCarriesTheRowCount(t *testing.T) {
 
 // Sections are separated by the header's own background, not by a blank row.
 // A blank is a line the cursor cannot occupy, and every such line costs one to
-// the worst-case scroll delta -- docs/uniform-rows.md §4.1.
+// the worst-case scroll delta -- visual-spec.md §3.5.
 func TestNoBlankRowBetweenSections(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 20
@@ -1589,8 +1589,7 @@ func TestNoBlankRowBetweenSections(t *testing.T) {
 // The footer names the cursor's section and where the cursor sits inside it.
 // It is bound to the cursor and not to the top visible row: at the user's 40
 // rows the board does not scroll, so a top-row binding is frozen at the first
-// section forever. That is how the sticky line died -- docs/section-layout.md
-// §13.1, §14.
+// section forever. That is how the sticky line died -- visual-spec.md §3.5.1.
 func TestFooterNamesTheCursorSection(t *testing.T) {
 	m := New(testCfg(), nil)
 	m.width, m.height = 120, 40
@@ -2163,7 +2162,7 @@ func TestCopyKeyIsDocumented(t *testing.T) {
 }
 
 // Guards the tier breakpoints and the title arithmetic against drifting from
-// DESIGN.md §3.8's table. The minWidth constant itself is not asserted here --
+// visual-spec.md §3.8's table. The minWidth constant itself is not asserted here --
 // four tests below use it as a loop bound, which exercises it against real
 // rendering rather than restating its value.
 func TestDocumentedTiersMatchTheCode(t *testing.T) {
@@ -2306,7 +2305,7 @@ var errTest = errors.New("rule query failed")
 // This test exists because the first version of it did not vary state: it
 // applied rows to every rule, so every section was Ready and non-empty, and it
 // passed while three kinds of unselectable line were live in body(). Each cost
-// a line of delta by the rule in docs/uniform-rows.md §4.1, and the pending
+// a line of delta by the rule in visual-spec.md §3.5, and the pending
 // case cost more as the pane grew, because the placeholder block scaled with
 // height. Cold start is every launch, so that was the common case.
 //
@@ -2410,10 +2409,10 @@ func TestOneKeypressScrollsAtMostOneLineAcrossSectionStates(t *testing.T) {
 // five commit-type tints, a header band and a brightened selection accent were
 // all fixed 256-cube values, and all of them are gone.
 //
-// A fixed value is not banned in principle -- DESIGN-GUIDE.md §3 allows one
+// A fixed value is not banned in principle -- design/index.md §3 allows one
 // where a measured contrast requirement has no themed answer -- but there is
 // currently no such case, so any cube index appearing here is a regression
-// until DESIGN.md §3.3's table says otherwise.
+// until visual-spec.md §3.3's table says otherwise.
 func TestNoFixedCubeColoursAnywhereOnTheBoard(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
@@ -2427,7 +2426,7 @@ func TestNoFixedCubeColoursAnywhereOnTheBoard(t *testing.T) {
 	m := New(cfg, nil)
 	m.width, m.height = 147, 24
 	m.board.Apply(board.Result{Index: 0, PRs: []github.PR{
-		{Repo: testRepo, Number: 1, Title: "fix(api): AF-1 a failing one", CIState: "FAILURE",
+		{Repo: testRepo, Number: 1, Title: "fix(api): TK-1 a failing one", CIState: "FAILURE",
 			FailedGates: []string{"g1", "g2"}, Mergeable: "CONFLICTING", UpdatedAt: time.Now()},
 		{Repo: testRepo, Number: 2, Title: "feat(web): a draft", CIState: "PENDING",
 			IsDraft: true, Author: "someone", UpdatedAt: time.Now()},

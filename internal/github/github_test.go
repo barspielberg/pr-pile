@@ -20,14 +20,14 @@ func TestSearchBucketsChecksByState(t *testing.T) {
 	const body = `{"data":{"search":{"nodes":[{
 	  "number":3229,"title":"t","url":"u","isDraft":false,
 	  "commits":{"nodes":[{"commit":{"rollupState":{"state":"FAILURE"},"statusCheckRollup":{"contexts":{"nodes":[
-	    {"__typename":"CheckRun","name":"apps_ci / build-push-image webapp","status":"COMPLETED","conclusion":"FAILURE"},
-	    {"__typename":"CheckRun","name":"bump-affected","status":"COMPLETED","conclusion":"FAILURE"},
-	    {"__typename":"CheckRun","name":"apps_ci / CI Gate","status":"COMPLETED","conclusion":"FAILURE"},
-	    {"__typename":"CheckRun","name":"apps_ci / Deploy","status":"COMPLETED","conclusion":"SKIPPED"},
-	    {"__typename":"CheckRun","name":"apps_ci / lint-typecheck-test webapp","status":"COMPLETED","conclusion":"SUCCESS"},
+	    {"__typename":"CheckRun","name":"main_ci / build-push-image portal","status":"COMPLETED","conclusion":"FAILURE"},
+	    {"__typename":"CheckRun","name":"bump-versions","status":"COMPLETED","conclusion":"FAILURE"},
+	    {"__typename":"CheckRun","name":"main_ci / CI Gate","status":"COMPLETED","conclusion":"FAILURE"},
+	    {"__typename":"CheckRun","name":"main_ci / Deploy","status":"COMPLETED","conclusion":"SKIPPED"},
+	    {"__typename":"CheckRun","name":"main_ci / lint-typecheck-test portal","status":"COMPLETED","conclusion":"SUCCESS"},
 	    {"__typename":"CheckRun","name":"Analyze Changed Files","status":"COMPLETED","conclusion":"NEUTRAL"},
 	    {"__typename":"CheckRun","name":"e2e-shard","status":"IN_PROGRESS","conclusion":null},
-	    {"__typename":"StatusContext","context":"webapp_e2e","state":"PENDING"}
+	    {"__typename":"StatusContext","context":"portal_e2e","state":"PENDING"}
 	  ]}}}}]}
 	}]}}}`
 
@@ -49,7 +49,7 @@ func TestSearchBucketsChecksByState(t *testing.T) {
 
 	// "CI Gate" is an umbrella that only restates its children, so it is
 	// dropped from every bucket rather than counted in one.
-	want := []string{"build-push-image webapp", "bump-affected"}
+	want := []string{"build-push-image portal", "bump-versions"}
 	if len(pr.FailedGates) != len(want) {
 		t.Fatalf("failed gates %v, want %v", pr.FailedGates, want)
 	}
@@ -61,7 +61,7 @@ func TestSearchBucketsChecksByState(t *testing.T) {
 
 	// A CheckRun with a null conclusion and an IN_PROGRESS status is running,
 	// as is a PENDING StatusContext.
-	wantPending := []string{"e2e-shard", "webapp_e2e"}
+	wantPending := []string{"e2e-shard", "portal_e2e"}
 	if len(pr.PendingGates) != len(wantPending) {
 		t.Fatalf("pending gates %v, want %v", pr.PendingGates, wantPending)
 	}
@@ -124,7 +124,7 @@ func TestSearchAsksForTheRollupStateApartFromContexts(t *testing.T) {
 	}
 }
 
-// Captured from Autofleet/api-gateway-ms#1020: a second workflow run started 4s
+// Captured from a real PR: a second workflow run started 4s
 // after the first and cancelled it. GitHub's PR page is green, so only the
 // newest run of each check may be listed.
 func TestSearchKeepsOnlyTheNewestRunOfEachCheck(t *testing.T) {
@@ -197,7 +197,7 @@ func TestSearchKeepsTheSameWorkflowFromDifferentEventsApart(t *testing.T) {
 	}
 }
 
-// Captured from Autofleet/api-gateway-ms#1020 a day later: run 4113 replaced
+// Captured from the same PR a day later: run 4113 replaced
 // 4112 but had not reached the Deploy jobs yet, so their only runs were 4112's
 // cancels. GitHub's page drops a superseded run whole, so those are not listed.
 func TestSearchDropsJobsOnlyAnOlderRunOfTheWorkflowHas(t *testing.T) {
@@ -382,8 +382,8 @@ func TestSearchCarriesAForksHeadOwner(t *testing.T) {
 	}
 }
 
-// Shaped like Autofleet/autorepo stack 2904: three merged PRs keep positions
-// 1-3, so the lowest open one sits at 4 with its base retargeted to master.
+// A stack whose first three PRs merged keeps their positions 1-3, so the
+// lowest open one sits at 4 with its base retargeted to master.
 func TestSearchCarriesThePRsStack(t *testing.T) {
 	const body = `{"data":{"search":{"nodes":[
 	  {"number":2902,"stack":{"number":2904,"size":5,"baseRefName":"master"},"stackEntry":{"position":4}},

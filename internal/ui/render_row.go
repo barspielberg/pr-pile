@@ -62,7 +62,7 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	// the user's theme, so the numbers above describe Mocha and not a universal
 	// truth. Do not recompute them against a nominal ANSI 4 and "fix" this back
 	// to a cube colour -- that is the mistake the old comment enshrined.
-	// DESIGN.md §3.4 has the cross-theme table.
+	// visual-spec.md §3.4 has the cross-theme table.
 	accent := accentStyle
 
 	mark := " "
@@ -130,7 +130,7 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 
 	// Gate names live in the `d` overlay, not here: a row whose height depends
 	// on its data gives the list an uneven scroll rhythm, which is the bug five
-	// attempts at the viewport math could not fix. See docs/uniform-rows.md.
+	// attempts at the viewport math could not fix. See decisions.md.
 	return line
 }
 

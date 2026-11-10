@@ -26,31 +26,31 @@ func shape(s string) string {
 	return string(out)
 }
 
-// Real titles sampled off the board, including the free-form ones. A parse
-// that is wrong here is wrong on every row the user actually sees.
+// Titles shaped like real ones, including the free-form ones. A parse that
+// is wrong here is wrong on every row the user actually sees.
 func TestParseTitleOnRealTitles(t *testing.T) {
 	cases := []struct{ title, want string }{
-		{"fix(control-center): AF-12632 re-sync task status from the reloaded task",
+		{"fix(release-runner): TK-12632 re-sync file status from the reloaded file",
 			"TTTSSSSSSSSSSSSSSSSS.JJJJJJJJ..........................................."},
-		{"refactor(ordering): AF-12418 drop transferPlate from the trade-in snapshot",
+		{"refactor(checkout): TK-12418 drop legacyAddress from the importer snapshot",
 			"TTTTTTTTSSSSSSSSSSS.JJJJJJJJ.............................................."},
-		{"fix(ordering,ordering-ms): AF-13043 CLO wizard Step 2 dependency modal",
+		{"fix(checkout,checkout-ms): TK-13043 New wizard Step 2 dependency modal",
 			"TTTSSSSSSSSSSSSSSSSSSSSSSS.JJJJJJJJ..................................."},
-		{"feat(ordering-ms,schemas): AF-12880 build the XLR8 order-submit payload",
+		{"feat(checkout-ms,schemas): TK-12880 build the SAML token-submit payload",
 			"TTTTSSSSSSSSSSSSSSSSSSSSSS.JJJJJJJJ...................................."},
 		{"ci: bump the github-actions group with 2 updates",
 			"TTS............................................."},
-		{"chore: bump @types/send from 0.17.4 to 1.2.1",
+		{"chore: bump yaml-parser from 0.17.4 to 1.2.1",
 			"TTTTTS......................................"},
-		{"perf(control-center): halve lint-strict with eslint --concurrency 4",
+		{"perf(release-runner): halve lint-strict with eslint --concurrency 4",
 			"TTTTSSSSSSSSSSSSSSSSS.............................................."},
-		{"fix(sadot): DASC-1391 preserve custom field filter types",
+		{"fix(forms): DOCS-1391 preserve custom field filter types",
 			"TTTSSSSSSSS.JJJJJJJJJ..................................."},
 
 		// A Jira key can be the whole prefix, with or without a separator.
-		{"AF-12872 Order plan activity logs", "JJJJJJJJ........................."},
-		{"AF-12835: raw ride export async when flag on", "JJJJJJJJJ..................................."},
-		{"AF-12776 | Vehicle form breakdown picker sends contextId",
+		{"TK-12872 Audit plan activity logs", "JJJJJJJJ........................."},
+		{"TK-12835: raw file export async when flag on", "JJJJJJJJJ..................................."},
+		{"TK-12776 | Billing form breakdown picker sends contextId",
 			"JJJJJJJJJJ.............................................."},
 
 		// No prefix at all: "" means parseTitle returned nil and the renderer
@@ -72,8 +72,8 @@ func TestParseTitleRequiresTheColon(t *testing.T) {
 		"Fix location widget",
 		"fix location widget",
 		"feat something without punctuation",
-		"fix(ordering) missing the colon",
-		"refactor the ordering module",
+		"fix(checkout) missing the colon",
+		"refactor the checkout module",
 		"perf improvements",
 	} {
 		if parseTitle(s) != nil {
@@ -90,7 +90,7 @@ func TestParseTitleRejectsUnknownTypes(t *testing.T) {
 		"wip: halfway there",
 		"Fix: capitalised is not the convention",
 		": leading colon",
-		"(ordering): scope with no type",
+		"(checkout): scope with no type",
 	} {
 		if parseTitle(s) != nil {
 			t.Errorf("%q is not a conventional prefix: %q", s, shape(s))
@@ -101,7 +101,7 @@ func TestParseTitleRejectsUnknownTypes(t *testing.T) {
 // Clipping cuts wherever the width lands, including mid-scope and mid-key.
 // Every offset must parse without panicking and without labelling past the end.
 func TestParseTitleSurvivesClippingAtEveryOffset(t *testing.T) {
-	full := "fix(ordering,ordering-ms): AF-13043 CLO wizard Step 2 dependency modal"
+	full := "fix(checkout,checkout-ms): TK-13043 New wizard Step 2 dependency modal"
 	for w := 0; w <= len(full)+5; w++ {
 		text := pad(clip(full, w), w)
 		parts := parseTitle(text)
@@ -141,15 +141,15 @@ func TestSearchFillWinsOverPrefixColour(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	title := "fix(ordering): AF-13043 wizard dependency modal"
+	title := "fix(checkout): TK-13043 wizard dependency modal"
 	mine := []github.PR{{Repo: testRepo,
 		Number: 3248, Title: title, CIState: "SUCCESS", UpdatedAt: time.Now(),
 	}}
 	fill := hitFill()
 
-	// "ordering" is entirely inside the scope, which is the faint part -- the
+	// "checkout" is entirely inside the scope, which is the faint part -- the
 	// case an underline used to be missable in.
-	m := typeQuery(loaded(t, 120, 20, mine, nil), "ordering")
+	m := typeQuery(loaded(t, 120, 20, mine, nil), "checkout")
 	rows := m.board.Sections()[0].Rows
 	if len(rows) == 0 {
 		t.Fatal("query should have matched the row")
@@ -159,7 +159,7 @@ func TestSearchFillWinsOverPrefixColour(t *testing.T) {
 	if got := stripANSI(scopeRun); !strings.Contains(got, title) {
 		t.Fatalf("title did not render intact: %q", got)
 	}
-	seg := segmentAround(t, scopeRun, "ordering")
+	seg := segmentAround(t, scopeRun, "checkout")
 	if !strings.Contains(seg, fill) {
 		t.Errorf("the matched scope is not filled: %q", seg)
 	}
@@ -265,7 +265,7 @@ func TestEveryTypeSharesOneColour(t *testing.T) {
 	seg := func(word string) string {
 		t.Helper()
 		m := loaded(t, 120, 20, []github.PR{{Repo: testRepo,
-			Number: 3248, Title: word + "(ordering): do the thing",
+			Number: 3248, Title: word + "(checkout): do the thing",
 			CIState: "SUCCESS", UpdatedAt: time.Now(),
 		}}, nil)
 		m.cursor = -1
@@ -304,7 +304,7 @@ func TestPrefixColourLayersOntoTheRowStyle(t *testing.T) {
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	m := loaded(t, 120, 20, []github.PR{{Repo: testRepo,
-		Number: 3248, Title: "feat(ordering): add the thing",
+		Number: 3248, Title: "feat(checkout): add the thing",
 		CIState: "SUCCESS", IsDraft: true, UpdatedAt: time.Now(),
 	}}, nil)
 	m.cursor = -1

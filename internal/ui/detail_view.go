@@ -19,7 +19,7 @@ import (
 // unresolved conversations, who it is from, how big, what it targets.
 //
 // Two of those lines arrive on a second request and are simply absent until it
-// lands (docs/pr-detail.md §7). The page never waits for the network.
+// lands (visual-spec.md §3.6). The page never waits for the network.
 //
 // It navigates like the `?` page: the scroll keys scroll, everything else
 // closes, and the bottom row says so at every height. It used to clip on a
@@ -51,7 +51,7 @@ func (m Model) detailOverlay() string {
 }
 
 // overlayBody is every block, unclipped. The checks block comes first so it is
-// what a short pane shows before any scrolling. See docs/pr-detail.md §6.2.
+// what a short pane shows before any scrolling.
 func (m Model) overlayBody(pr github.PR) []string {
 	out := append([]string(nil), m.checkLines(pr)...)
 	for _, block := range [][]string{m.stateLines(pr), m.stackLines(pr)} {

@@ -67,7 +67,7 @@ func parseTitle(s string) []titlePart {
 		markTypePrefix(parts, r[:n])
 		i = n
 	} else if n := scanTicket(r, 0); n > 0 && ticketDelimited(r, n) {
-		// A bare Jira key is its own prefix: "AF-12872 Order plan activity
+		// A bare Jira key is its own prefix: "TK-12872 Audit plan activity
 		// logs" carries the same "this is the tag, that is the subject" shape,
 		// and muting the key leaves the subject brightest either way.
 		fill(parts, 0, n, partTicket)
@@ -118,7 +118,7 @@ func scanTypePrefix(r []rune) int {
 
 // markTypePrefix labels an already-validated `type(scope):` span. Only the
 // bare type word takes the hue; the parens, the `!` and the colon are
-// punctuation and recede with the scope, so "ci:" and "fix(ordering):" put the
+// punctuation and recede with the scope, so "ci:" and "fix(checkout):" put the
 // same amount of colour on the same kind of thing.
 func markTypePrefix(parts []titlePart, prefix []rune) {
 	word := 0
@@ -159,7 +159,7 @@ func scanTicket(r []rune, i int) int {
 }
 
 // ticketDelimited rejects a key that runs straight into more text, so
-// "AF-1foo" is not mistaken for a tag.
+// "TK-1foo" is not mistaken for a tag.
 func ticketDelimited(r []rune, end int) bool {
 	return end >= len(r) || r[end] == ' '
 }

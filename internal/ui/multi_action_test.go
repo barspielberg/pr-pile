@@ -175,8 +175,8 @@ func TestTitlesIsRefusedWithAWayToGetIt(t *testing.T) {
 }
 
 // The guard against someone adding a GitHub string to the template data as a
-// plain field, which would reach the command unchecked. DESIGN-GUIDE.md section
-// 12: an audit nothing re-checks goes stale.
+// plain field, which would reach the command unchecked. An audit nothing
+// re-checks goes stale (design/index.md §12).
 func TestTemplateDataExposesNoUncheckedString(t *testing.T) {
 	// Repo and RepoPath come from the user's own config, not from GitHub, and
 	// Numbers is integer-derived. GitHub strings are methods that check them.

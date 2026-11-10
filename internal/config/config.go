@@ -143,7 +143,8 @@ rules:
   # This also covers CODEOWNERS, which GitHub turns into team review requests.
   # Note this is not the same as "PRs written by that team" -- GitHub has no
   # qualifier for that; enumerate the members as author:a author:b instead,
-  # which ORs. docs/config-example.md works a team-based board through.
+  # which ORs. https://barspielberg.github.io/pr-pile/guide/team-board/ works a
+  # team-based board through.
   # - name: My team's
   #   query: team-review-requested:ORG/TEAM
 

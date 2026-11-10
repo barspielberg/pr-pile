@@ -37,15 +37,14 @@ func detailModel(t *testing.T, pr github.PR, h int) Model {
 
 // The state block says what is true about the PR rather than about its CI:
 // the conflict and its size, the conversations still open, who it is from and
-// how big. This is the case docs/pr-detail.md §8.2 is written against -- CI is
-// green and the PR is still completely stuck.
+// how big. Here CI is green and the PR is still completely stuck.
 func TestDetailOverlayRendersTheStateBlock(t *testing.T) {
 	pr := github.PR{Repo: testRepo,
 		Number: 3186, Title: "free unit numbers when a plan is abandoned",
 		CIState: "SUCCESS", PassedCount: 18, Mergeable: "CONFLICTING",
 		Author: "cdiaz88", AuthorName: "Carol Diaz",
 		Additions: 596, Deletions: 45, ChangedFiles: 7,
-		HeadRefName: "PROJ-1951-unit-number-integrity", BaseRefName: "master",
+		HeadRefName: "PROJ-1951-retry-budget-accounts", BaseRefName: "master",
 		CreatedAt: time.Now().Add(-6 * 24 * time.Hour),
 		UpdatedAt: time.Now().Add(-25 * time.Hour),
 	}
@@ -61,7 +60,7 @@ func TestDetailOverlayRendersTheStateBlock(t *testing.T) {
 		"● 9 unresolved comments",
 		"author    Carol Diaz (cdiaz88)",
 		"size      +596 −45 · 7 files",
-		"branch    PROJ-1951-unit-number-integrity",
+		"branch    PROJ-1951-retry-budget-accounts",
 		"opened    6d ago",
 	} {
 		if !strings.Contains(out, want) {
@@ -108,15 +107,15 @@ func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
 	pr := github.PR{Repo: testRepo,
 		Number: 3109, Title: "forbid only the move that re-opens a cycle",
 		CIState: "SUCCESS", PassedCount: 16, Author: "barspielberg",
-		HeadRefName: "fix-PROJ-1850-seat-mapping-error",
-		BaseRefName: "fix-PROJ-1839-reject-legacy-option",
+		HeadRefName: "fix-PROJ-1850-port-mapping-error",
+		BaseRefName: "fix-PROJ-1839-reject-stale-session",
 		UpdatedAt:   time.Now(),
 	}
 	m := detailModel(t, pr, 24)
 	m.detail[prKey(3109)] = github.Detail{Repo: testRepo, Number: 3109, DefaultBranch: "master"}
 
 	if out := stripANSI(m.detailOverlay()); !strings.Contains(out,
-		"base      fix-PROJ-1839-reject-legacy-option") {
+		"base      fix-PROJ-1839-reject-stale-session") {
 		t.Errorf("overlay missing the stacked base:\n%s", out)
 	}
 
@@ -135,15 +134,15 @@ func TestDetailOverlayNamesANonDefaultBase(t *testing.T) {
 // no way to see them. §6.2, at the 14 rows the spec sizes the page for.
 func TestDetailOverlayScrollsToTheStateBlock(t *testing.T) {
 	pr := github.PR{Repo: testRepo,
-		Number: 3230, Title: "bump @types/send from 0.17.4 to 1.2.1",
+		Number: 3230, Title: "bump yaml-parser from 0.17.4 to 1.2.1",
 		CIState: "FAILURE", Author: "dependabot",
 		FailedGates: []string{
-			"build-push-image customer-portal",
-			"build-push-image billing-service",
-			"build-push-image web-client",
-			"build-push-image webapp",
+			"build-push-image partner-console",
+			"build-push-image payment-gateway",
+			"build-push-image web-viewer",
+			"build-push-image portal",
 		},
-		PendingGates: []string{"webapp_e2e", "web_client_e2e"},
+		PendingGates: []string{"portal_e2e", "web_viewer_e2e"},
 		PassedCount:  9, SkippedCount: 12,
 		Additions: 194, Deletions: 143, ChangedFiles: 1,
 		HeadRefName: "dependabot/npm_and_yarn/types/send-1.2.1",
@@ -209,7 +208,7 @@ func TestDetailOverlayIsUsableBeforeTheRequestLands(t *testing.T) {
 		PassedCount: 18, Mergeable: "CONFLICTING", Review: "REVIEW_REQUIRED",
 		Author: "cdiaz88", AuthorName: "Carol Diaz",
 		Additions: 596, Deletions: 45, ChangedFiles: 7,
-		HeadRefName: "PROJ-1951-unit-number-integrity", BaseRefName: "master",
+		HeadRefName: "PROJ-1951-retry-budget-accounts", BaseRefName: "master",
 		UpdatedAt: time.Now(),
 	}
 	m := detailModel(t, pr, 24)
@@ -321,15 +320,15 @@ func TestLabelsLineArrivesWithTheDetail(t *testing.T) {
 // A label clipped mid-word reads as a different label, so only whole names are
 // drawn and the rest are counted. Emoji are two cells wide.
 func TestLabelsTextKeepsNamesWhole(t *testing.T) {
-	labels := []string{"Webapp 🏎️", "ready-for-e2e", "needs-qa"}
+	labels := []string{"Portal 🛠️", "awaiting-docs", "needs-qa"}
 	for _, tc := range []struct {
 		w    int
 		want string
 	}{
-		{80, "Webapp 🏎️ · ready-for-e2e · needs-qa"},
-		{30, "Webapp 🏎️ · ready-for-e2e · +1"},
-		{20, "Webapp 🏎️ · +2"},
-		{12, "Webapp… · +2"},
+		{80, "Portal 🛠️ · awaiting-docs · needs-qa"},
+		{30, "Portal 🛠️ · awaiting-docs · +1"},
+		{20, "Portal 🛠️ · +2"},
+		{12, "Portal… · +2"},
 		{8, "+3"},
 	} {
 		if got := stripANSI(labelsText(labels, len(labels), tc.w)); got != tc.want {
@@ -477,7 +476,7 @@ func TestDetailOverlayFitsEveryPane(t *testing.T) {
 		PendingGates: []string{"p1", "p2", "p3"}, PassedCount: 9, SkippedCount: 12,
 		Author: "cdiaz88", AuthorName: "Carol Diaz",
 		Additions: 596, Deletions: 45, ChangedFiles: 7,
-		HeadRefName: "PROJ-1951-unit-number-integrity", BaseRefName: "other-branch",
+		HeadRefName: "PROJ-1951-retry-budget-accounts", BaseRefName: "other-branch",
 		CreatedAt: time.Now().Add(-6 * 24 * time.Hour),
 		UpdatedAt: time.Now().Add(-72 * time.Hour),
 	}
@@ -545,8 +544,8 @@ func TestUnresolvedLineAgreesWithItsCount(t *testing.T) {
 // The page says it is still loading, and it says so where the answer will
 // land: the skeleton line stands in the on-demand lines' own position, so the
 // common case -- one of the two lines arriving -- resolves in place and nothing
-// below it moves. docs/pr-detail.md §7 chose to draw nothing and let the lines
-// appear; that reflows the whole block and shows no loading state at all.
+// below it moves. An earlier version drew nothing and let the lines appear;
+// that reflows the whole block and shows no loading state at all.
 func TestDetailOverlayShowsItIsStillLoading(t *testing.T) {
 	pr := github.PR{Repo: testRepo,
 		Number: 3186, Title: "free unit numbers", CIState: "SUCCESS",

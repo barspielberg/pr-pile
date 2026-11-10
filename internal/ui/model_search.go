@@ -20,7 +20,7 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// space -- a space with no way to name a header -- rather than a choice.
 	// Now that a header can match, skipping it would have the footer count a
 	// match the user cannot step to, which is the worse of the two. A header is
-	// addressable but not actionable (docs/uniform-rows.md §4.1), so landing on
+	// addressable but not actionable (visual-spec.md §3.5), so landing on
 	// one is a position this layout already supports.
 	//
 	// An empty query is not a search, so these fall through to plain movement
