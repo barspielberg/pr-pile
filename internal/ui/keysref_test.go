@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestKeysReferencePageDocumentsEveryBinding: every binding in the help page's KEYS table must appear as a `code` span on the
-// keys reference page. A key shipped in the UI but left off the docs fails
+// TestKeysReferencePageDocumentsEveryBinding: every binding in the help page's
+// KEYS table must appear as a `code` span on the keys reference page. A key shipped in the UI but left off the docs fails
 // here. The bindings are read from helpBlocks, the same table the user sees, so
 // the test cannot fall out of step with help.go.
 func TestKeysReferencePageDocumentsEveryBinding(t *testing.T) {
