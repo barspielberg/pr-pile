@@ -72,7 +72,7 @@ type PR struct {
 	Title       string
 	URL         string
 	Author      string // login; the identifier you actually @-mention
-	AuthorName  string // display name, null for 36% of this board: see docs/pr-detail.md §5.2
+	AuthorName  string // display name, null for about a third of PRs
 	IsDraft     bool
 	Review      string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
 	Mergeable   string // MERGEABLE | CONFLICTING | UNKNOWN
@@ -89,7 +89,7 @@ type PR struct {
 	FailedGates    []string // names of failing checks, deduped
 	PendingGates   []string // names of still-running checks, deduped
 	CancelledGates []string // names of checks whose latest run was cancelled, deduped
-	PassedCount    int      // passing checks are counted, not named: see docs/checks-page.md
+	PassedCount    int      // passing checks are counted, not named: see decisions.md
 
 	// Skipped is the largest bucket on this board (47% of contexts) and means
 	// a job's path filter did not match, which is a fact about the workflow
@@ -100,7 +100,7 @@ type PR struct {
 	// MergeState is mergeStateStatus, and only BEHIND is drawn: it is the one
 	// state that says the repo requires the branch to be up to date, which
 	// BehindBy cannot. The rest repeat what review and CI already show. See
-	// docs/pr-detail.md §5.12.
+	// decisions.md.
 	MergeState string // BEHIND | BLOCKED | CLEAN | DIRTY | HAS_HOOKS | UNSTABLE | UNKNOWN
 
 	Stack Stack // zero when the PR is not in a native stack
@@ -676,7 +676,7 @@ func isSuccess(state string) bool {
 	return false
 }
 
-// Check names arrive as "main_ci / portal_e2e / Run E2E Tests (1, 5)".
+// Check names arrive as "ci / e2e / Run E2E Tests (1, 5)".
 // Keep the last path segment and drop the shard suffix so a sharded job counts
 // once. Umbrella gates just restate their children.
 func gateName(raw string) string {
@@ -698,7 +698,7 @@ func gateName(raw string) string {
 // here is either per-PR literal (compare needs the head ref, so it cannot be
 // batched across a search) or too expensive on a 50-PR query: reviewer names
 // cost +6,565 bytes and a rate-limit point on the board, and nothing here.
-// Measured at 912-1,400 bytes, 1.2-1.9s, 1 point. See docs/pr-detail.md §2.4.
+// Measured at 912-1,400 bytes, 1.2-1.9s, 1 point.
 type Detail struct {
 	// Repo and Number tag the response so a stale one can be dropped.
 	Repo   string

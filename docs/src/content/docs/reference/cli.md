@@ -5,6 +5,7 @@ description: How pile is invoked, its environment variables, and its exit codes.
 
 `pile` reads its board settings from the config file, the environment, and `gh`.
 Help and version flags work without a config file, authentication, or a terminal.
+To get `pile` onto your `PATH`, see [Install](../../getting-started/install/).
 
 ## Invocation
 
@@ -57,25 +58,3 @@ installed and logged in?)`.
 
 A repo you cannot see (an org IP allow-list, for example) is caught at startup
 rather than rendered as an empty board.
-
-## Install
-
-Homebrew is the recommended macOS release install:
-
-```sh
-brew install barspielberg/tap/pile
-```
-
-Stable v0.1.0 is public, with Homebrew installation and interactive checks
-validated on Apple Silicon. Public upgrades remain untested. Direct macOS
-browser downloads remain unsupported; the Gatekeeper block was observed on
-v0.1.0-rc.1 and was not retested on stable.
-
-Source installs on macOS or Linux require Go 1.24.2+:
-
-```sh
-go install github.com/barspielberg/pr-pile/cmd/pile@latest
-```
-
-See [Install](../../getting-started/install/) for Linux downloads, PATH checks,
-and release validation limits.

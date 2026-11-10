@@ -330,7 +330,7 @@ func TestNativeStackOrdersByPosition(t *testing.T) {
 	}
 }
 
-// Stack 2904: the first three merged and #2902 was retargeted to master, so
+// A five-PR stack whose first three merged, so #2902 was retargeted to master:
 // position 4 is the bottom of what is open and nothing is missing below it.
 func TestNativeStackBottomAfterMergesIsClosed(t *testing.T) {
 	four, five := stacked(4, 5, 2), stacked(5, 5, 1)

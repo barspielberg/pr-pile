@@ -87,8 +87,8 @@ when there is no token or the repo is unreachable.
 - **Commit subjects and PR titles** use Conventional Commits, as described
   below. Keep the description imperative and explain the change.
 - **Docs live beside the change.** Behaviour that a user reads about is
-  checked against the code; behaviour that only the design research discusses
-  belongs in the [research archive](../design/research/), prefaced as history.
+  checked against the code; the reason behind a design choice belongs in
+  [decisions](../design/decisions/), with the evidence in one line.
 
 ## Commit subjects and PR titles
 

@@ -124,7 +124,7 @@ const (
 // section headers as well as the PR rows, which is what makes every line of
 // the list reachable and the one-keypress-one-line invariant hold by
 // construction rather than by viewport arithmetic: with nothing to skip, the
-// cursor's line and its index move together. docs/uniform-rows.md §4.1.
+// cursor's line and its index move together. visual-spec.md §3.5.
 //
 // The kind is carried on the value rather than inferred from the index,
 // because index arithmetic is exactly what goes wrong once the address space

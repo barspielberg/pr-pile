@@ -382,8 +382,8 @@ func TestSearchCarriesAForksHeadOwner(t *testing.T) {
 	}
 }
 
-// Shaped like a real stack: three merged PRs keep positions
-// 1-3, so the lowest open one sits at 4 with its base retargeted to master.
+// A stack whose first three PRs merged keeps their positions 1-3, so the
+// lowest open one sits at 4 with its base retargeted to master.
 func TestSearchCarriesThePRsStack(t *testing.T) {
 	const body = `{"data":{"search":{"nodes":[
 	  {"number":2902,"stack":{"number":2904,"size":5,"baseRefName":"master"},"stackEntry":{"position":4}},

@@ -26,8 +26,8 @@ func shape(s string) string {
 	return string(out)
 }
 
-// Real titles sampled off the board, including the free-form ones. A parse
-// that is wrong here is wrong on every row the user actually sees.
+// Titles shaped like real ones, including the free-form ones. A parse that
+// is wrong here is wrong on every row the user actually sees.
 func TestParseTitleOnRealTitles(t *testing.T) {
 	cases := []struct{ title, want string }{
 		{"fix(release-runner): TK-12632 re-sync file status from the reloaded file",

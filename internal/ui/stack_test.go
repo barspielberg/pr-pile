@@ -95,8 +95,8 @@ func TestCopyStackLinkCopiesEachStackOnce(t *testing.T) {
 	}
 }
 
-// Stack 2904 as it stood: three merged PRs under #2902 and #2906, with #2902
-// on the board and #2906 the one the page is about.
+// A five-PR stack: three merged PRs under #2902 and #2906, with #2902 on the
+// board and #2906 the one the page is about.
 func stackDetailModel(t *testing.T) Model {
 	t.Helper()
 	pr := github.PR{Repo: testRepo, Number: 2906, Title: "rewrite the stub", CIState: "SUCCESS", PassedCount: 3,

@@ -37,8 +37,7 @@ func detailModel(t *testing.T, pr github.PR, h int) Model {
 
 // The state block says what is true about the PR rather than about its CI:
 // the conflict and its size, the conversations still open, who it is from and
-// how big. This is the case docs/pr-detail.md §8.2 is written against -- CI is
-// green and the PR is still completely stuck.
+// how big. Here CI is green and the PR is still completely stuck.
 func TestDetailOverlayRendersTheStateBlock(t *testing.T) {
 	pr := github.PR{Repo: testRepo,
 		Number: 3186, Title: "release the lock when a sync is cancelled",
@@ -545,8 +544,8 @@ func TestUnresolvedLineAgreesWithItsCount(t *testing.T) {
 // The page says it is still loading, and it says so where the answer will
 // land: the skeleton line stands in the on-demand lines' own position, so the
 // common case -- one of the two lines arriving -- resolves in place and nothing
-// below it moves. docs/pr-detail.md §7 chose to draw nothing and let the lines
-// appear; that reflows the whole block and shows no loading state at all.
+// below it moves. An earlier version drew nothing and let the lines appear;
+// that reflows the whole block and shows no loading state at all.
 func TestDetailOverlayShowsItIsStillLoading(t *testing.T) {
 	pr := github.PR{Repo: testRepo,
 		Number: 3186, Title: "release the lock", CIState: "SUCCESS",

@@ -42,11 +42,11 @@ var (
 //	muted author / age       ~2.54:1   <- approximate, see below
 //
 // The two below 3:1 are the accepted cost. Both clear 2:1, and status is glyph
-// shape first with colour as reinforcement (DESIGN.md §3.2), so neither is the
+// shape first with colour as reinforcement (visual-spec.md §3.2), so neither is the
 // sole carrier of anything. The muted figure is an estimate: SGR 2 has no
 // specified blend ratio, modelled here as ~55% foreground over the fill.
 //
-// This is theme-dependent by construction, which is the trade. DESIGN.md §3.4
+// This is theme-dependent by construction, which is the trade. visual-spec.md §3.4
 // has the cross-theme table -- it measures well in Mocha and Tokyo Night and
 // poorly in Gruvbox and Solarized. Check that table before concluding a
 // contrast complaint is a bug in this line.
@@ -85,10 +85,10 @@ var selBg = lipgloss.Color("8")
 // light theme, where ANSI 5's luminance flips.
 //
 // It also cannot clash with anything. There is no hue to collide with the
-// commit type's ANSI 4 (DESIGN.md §3.3.1) because reverse chooses no colour at
+// commit type's ANSI 4 (visual-spec.md §3.3.1) because reverse chooses no colour at
 // all, so hue and hit stay the independent channels §3.3 requires.
 //
-// DESIGN.md §2 rejects reverse for the SELECTED ROW, because swapping a whole
+// decisions.md rejects reverse for the SELECTED ROW, because swapping a whole
 // row's foreground into its background destroys the status colour on exactly
 // the failing rows that need it. That objection does not reach a hit run, and
 // the reason is structural rather than a judgement call: hitRuns is applied to
@@ -129,10 +129,10 @@ var hitStyle = lipgloss.NewStyle().Reverse(true)
 // cursor skips. That is the whole point of this layout: if every line on the
 // board is selectable, one keypress moves the cursor one line by construction,
 // and the scroll deltas that killed the earlier inline-header attempts cannot
-// arise. See docs/uniform-rows.md §4.1.
+// arise. See visual-spec.md §3.5.
 //
 // It is deliberately NOT sticky -- a pinned line was built and reverted
-// (DESIGN.md §3.5.1); scrolling with the content is what avoids that.
+// (visual-spec.md §3.5.1); scrolling with the content is what avoids that.
 //
 // The name is drawn through hitRuns so a query that matched this section fills
 // the runes it hit, exactly as it does in a row's number and author cells. The

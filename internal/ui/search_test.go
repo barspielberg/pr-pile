@@ -1394,7 +1394,7 @@ func TestResizeRecomputesMatches(t *testing.T) {
 // This is pinned because the two used to disagree: the search motions skipped
 // furniture while j stopped on it, so the same board answered two different
 // keys differently. "The cursor sits on headers" is the whole design this
-// layout rests on (docs/uniform-rows.md §4.1), so a fallback that quietly
+// layout rests on (visual-spec.md §3.5), so a fallback that quietly
 // skipped headers was the fallback contradicting the design.
 func TestEmptyQueryMotionMatchesPlainMovement(t *testing.T) {
 	mine, review := samplePRs()
@@ -1486,7 +1486,7 @@ func TestHitSetsBothGroundAndFigure(t *testing.T) {
 		strings.Contains(seq, "48;5;") || strings.Contains(seq, "48;2;")
 	if !fg || !bg {
 		t.Errorf("hitStyle sets fg=%v bg=%v; a highlight must set both "+
-			"(see DESIGN.md §3.3.3): %q", fg, bg, seq)
+			"(see visual-spec.md §3.3.3): %q", fg, bg, seq)
 	}
 }
 
@@ -1774,7 +1774,7 @@ func TestSectionTitleMatchesAreCounted(t *testing.T) {
 }
 
 // n and N stop on a matched header. It is addressable but not actionable
-// (docs/uniform-rows.md §4.1), so landing there is a position this layout
+// (visual-spec.md §3.5), so landing there is a position this layout
 // already supports -- and skipping it would strand a counted match.
 func TestNStopsOnAMatchingHeader(t *testing.T) {
 	mine := []github.PR{

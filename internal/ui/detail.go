@@ -15,7 +15,7 @@ import (
 // to be clipped -- so the block degrades by truncation alone.
 //
 // A line with nothing to say is not drawn. On an all-green, freshly-opened PR
-// this is three lines; docs/pr-detail.md §8.3 is the case it is tuned for.
+// this is three lines.
 func (m Model) stateLines(pr github.PR) []string {
 	d, loaded := m.detail[pr.Key()]
 	body := max(0, m.width-4)
@@ -75,7 +75,7 @@ func (m Model) stateLines(pr github.PR) []string {
 // labelsText fits whole names and counts the rest, since a label clipped
 // mid-word reads as a different label. Plain text, not chips: reverse and a
 // fill already mean a search hit and the selection, and GitHub's label colours
-// are hex. See docs/pr-detail.md §5.8.
+// are hex. See decisions.md.
 //
 // total counts labels that were not fetched, so a PR with more than were asked
 // for still says how many are hidden.
@@ -178,7 +178,7 @@ func stackState(e github.StackEntry) (string, lipgloss.Style) {
 
 // pendingLine is the page's loading state: one skeleton line standing where the
 // on-demand lines will land, so the common case resolves in place instead of
-// pushing the rest of the block down. docs/pr-detail.md §7 chose to draw
+// pushing the rest of the block down. An earlier version chose to draw
 // nothing and let the lines appear, on the grounds that a line which appears
 // disturbs less than one that changes. The user reported not seeing a loading
 // state at all, which is the evidence against that: the appearing line reflows
@@ -209,7 +209,7 @@ func (m Model) pendingLine(pr github.PR) string {
 // is the honest answer to "which files conflict": GitHub exposes no per-file
 // conflict list, and the only computable proxy over-reports by 3x in the median
 // case and 8x at worst against a real merge, so it fabricates rather than
-// merely omits. See docs/pr-detail.md §4.
+// merely omits. See decisions.md.
 func (m Model) mergeLine(pr github.PR, d github.Detail, loaded bool) string {
 	// Named against the PR's own base, not the repo default: a stacked PR
 	// is behind the branch it targets, and saying "behind master" there
