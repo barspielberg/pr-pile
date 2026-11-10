@@ -63,8 +63,9 @@ rules:
 ## Running
 
 At most `badge_workers` scripts run at once (default 4). Rows in higher rules
-get their badges first, then rows in board order. An answer stays on screen
-until the script answers again after its `ttl`.
+get their badges first, then rows in board order within each round. Due badges
+with fewer turns go first so retries and short TTLs cannot starve later rows.
+An answer stays on screen until the script answers again after its `ttl`.
 
 A badge runs on every PR it applies to without a keypress, including PRs opened
 by other people. What the script does with the PR is up to you: a badge that

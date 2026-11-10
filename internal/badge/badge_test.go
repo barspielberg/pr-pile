@@ -119,3 +119,46 @@ func TestExpireMakesAnsweredKeysDueAndKeepsTheirText(t *testing.T) {
 		t.Fatalf("text = %q, want the old answer kept while it reruns", e.Text)
 	}
 }
+
+func TestExpireDuringRunCoalescesAndDiscardsSupersededResult(t *testing.T) {
+	for _, runErr := range []error{nil, errors.New("old failure")} {
+		c := NewCache(1)
+		ks := keys(1)
+		c.Take(ks, t0)
+		c.Done(Result{Key: ks[0], Text: "cached"}, time.Hour, t0)
+		c.Expire(ks)
+		c.Take(ks, t0)
+		c.Expire(ks)
+		c.Expire(ks)
+		c.Done(Result{Key: ks[0], Text: "superseded", Err: runErr}, time.Hour, t0.Add(time.Second))
+		e, _ := c.Get(ks[0])
+		if e.Running || e.Text != "cached" || e.Err != nil || !e.Fetched.Equal(t0) {
+			t.Fatalf("superseded completion changed the cached answer: %+v", e)
+		}
+		if c.Busy() || len(c.Take(ks, t0.Add(time.Second))) != 1 {
+			t.Fatal("refresh did not free its slot and schedule a replacement")
+		}
+		c.Done(Result{Key: ks[0], Text: "fresh"}, time.Hour, t0.Add(2*time.Second))
+		if got := c.Take(ks, t0.Add(3*time.Second)); len(got) != 0 {
+			t.Fatalf("coalesced refresh ran more than once: %v", got)
+		}
+	}
+}
+
+func TestTakeGivesEveryDueKeyATurnBeforeRepeating(t *testing.T) {
+	for _, runErr := range []error{nil, errors.New("retry")} {
+		c := NewCache(1)
+		ks := keys(3)
+		now := t0
+		// Two rounds, with enough time per run for both TTLs and retries to
+		// expire before the backlog drains. No sleeps or subprocesses needed.
+		for _, want := range []Key{ks[0], ks[1], ks[2], ks[0], ks[1], ks[2]} {
+			got := c.Take(ks, now)
+			if len(got) != 1 || got[0] != want {
+				t.Fatalf("took %v, want %v (run error %v)", got, want, runErr)
+			}
+			now = now.Add(10 * time.Second)
+			c.Done(Result{Key: got[0], Text: "ok", Err: runErr}, time.Second, now)
+		}
+	}
+}

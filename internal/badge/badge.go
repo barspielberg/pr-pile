@@ -29,6 +29,9 @@ type Entry struct {
 	Err     error     // of the last run, nil once one succeeds
 	Due     time.Time // when to run again; zero means now
 	Running bool
+
+	turns   uint64 // dispatch rounds; ties follow the current board order
+	refresh bool   // a manual refresh superseded the running job
 }
 
 // A failure retries after its TTL or retryAfter, whichever is sooner, since a
@@ -60,27 +63,40 @@ func (c *Cache) Get(k Key) (Entry, bool) {
 	return *e, true
 }
 
-// Take returns the keys to run now, in order, up to the free worker slots,
-// and marks them running. Priority is recomputed on every call from wants
-// rather than kept in a queue, so a row that moves up the board moves up the
-// line with it.
+// Take gives due keys with the fewest turns a slot first, in current board
+// order within each round. A short TTL or retry cannot lap an unfetched row.
+// Keys that are not due do not hold up a round or waste worker slots.
 func (c *Cache) Take(wants []Key, now time.Time) []Key {
 	var out []Key
-	for _, w := range wants {
-		if c.inFlight >= c.workers {
+	for c.inFlight < c.workers {
+		var turns uint64
+		found := false
+		for _, w := range wants {
+			e := c.entries[w]
+			if e == nil {
+				e = &Entry{}
+				c.entries[w] = e
+			}
+			if !e.Running && !now.Before(e.Due) && (!found || e.turns < turns) {
+				turns, found = e.turns, true
+			}
+		}
+		if !found {
 			break
 		}
-		e := c.entries[w]
-		if e == nil {
-			e = &Entry{}
-			c.entries[w] = e
+		for _, w := range wants {
+			if c.inFlight >= c.workers {
+				break
+			}
+			e := c.entries[w]
+			if e.Running || now.Before(e.Due) || e.turns != turns {
+				continue
+			}
+			e.Running = true
+			e.turns++
+			c.inFlight++
+			out = append(out, w)
 		}
-		if e.Running || now.Before(e.Due) {
-			continue
-		}
-		e.Running = true
-		c.inFlight++
-		out = append(out, w)
 	}
 	return out
 }
@@ -97,6 +113,13 @@ func (c *Cache) Done(r Result, ttl time.Duration, now time.Time) {
 		c.entries[r.Key] = e
 	}
 	e.Running = false
+	if e.refresh {
+		// Keep the last good answer and its age. This result belongs to a
+		// run from before r; its replacement must still run with current data.
+		e.refresh = false
+		e.Due = time.Time{}
+		return
+	}
 	if r.Err != nil {
 		e.Err = r.Err
 		e.Due = now.Add(max(min(ttl, retryAfter), retryFloor))
@@ -127,12 +150,13 @@ func (c *Cache) NextDue(wants []Key) (due time.Time, ok bool) {
 // Busy reports whether every worker slot is taken.
 func (c *Cache) Busy() bool { return c.inFlight >= c.workers }
 
-// Expire makes every key due now, for a manual refresh. A key already running
-// keeps its run, and every entry keeps its text until the new answer lands.
+// Expire makes every key due now. Running keys finish to free their slots,
+// then run one replacement; repeated refreshes coalesce until it starts.
 func (c *Cache) Expire(keys []Key) {
 	for _, k := range keys {
-		if e := c.entries[k]; e != nil && !e.Running {
+		if e := c.entries[k]; e != nil {
 			e.Due = time.Time{}
+			e.refresh = e.Running
 		}
 	}
 }

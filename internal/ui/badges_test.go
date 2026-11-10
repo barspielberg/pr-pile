@@ -302,9 +302,8 @@ func TestFooterNamesABadgeFailingOnEveryRow(t *testing.T) {
 	}
 }
 
-// r reruns every badge at once rather than waiting for its TTL, and does it
-// alongside the board's refetch.
-func TestReloadRerunsBadgesBesideTheRefetch(t *testing.T) {
+// r bypasses the TTL, but waits for current PR data before launching badges.
+func TestReloadRerunsBadgesAfterTheRefetch(t *testing.T) {
 	m := badgeBoard(t, 100, false, config.Badge{Name: "jira", Run: "true"})
 	defer m.Close()
 	for _, pr := range badgePRs {
@@ -316,8 +315,16 @@ func TestReloadRerunsBadgesBesideTheRefetch(t *testing.T) {
 	}
 	for _, pr := range badgePRs {
 		e, _ := m.badges.cache.Get(badge.KeyFor("jira", pr.Repo, pr.Number))
+		if e.Running || e.Text != "old" {
+			t.Fatalf("#%d entry = %+v, want it waiting with its old text up", pr.Number, e)
+		}
+	}
+	next, _ := m.Update(resultMsg{generation: m.fetchGeneration, result: board.Result{Index: 0, PRs: badgePRs}})
+	m = next.(Model)
+	for _, pr := range badgePRs {
+		e, _ := m.badges.cache.Get(badge.KeyFor("jira", pr.Repo, pr.Number))
 		if !e.Running || e.Text != "old" {
-			t.Fatalf("#%d entry = %+v, want it rerunning with its old text up", pr.Number, e)
+			t.Fatalf("#%d entry = %+v, want it rerunning after refetch", pr.Number, e)
 		}
 	}
 }
@@ -330,5 +337,57 @@ func TestTimedRefreshLeavesBadgesToTheirTTL(t *testing.T) {
 	m = next.(Model)
 	if e, _ := m.badges.cache.Get(badge.KeyFor("jira", testRepo, 1)); e.Running {
 		t.Fatal("a timed refresh reran a badge before its TTL")
+	}
+}
+
+func TestReloadDuringBadgeRunUsesRefetchedPR(t *testing.T) {
+	for _, boardFirst := range []bool{false, true} {
+		t.Run("board first="+strconv.FormatBool(boardFirst), func(t *testing.T) {
+			m := badgeBoard(t, 100, false, config.Badge{Name: "base", Run: "echo {{.Base}}", TTL: time.Hour})
+			defer m.Close()
+			pr := badgePRs[0]
+			pr.BaseRefName = "old-base"
+			m.board = board.New(m.cfg)
+			m.board.Apply(board.Result{Index: 0, PRs: []github.PR{pr}})
+			answer(m, "base", pr, "cached", nil)
+			key := badge.KeyFor("base", pr.Repo, pr.Number)
+			before, _ := m.badges.cache.Get(key)
+			m.badges.cache.Expire([]badge.Key{key})
+			oldRun := m.dispatchBadges(time.Now())
+			m = pressKey(m, "r")
+			m = pressKey(m, "r") // one pending replacement, using the latest fetch
+			pr.BaseRefName = "new-base"
+			boardResult := resultMsg{generation: m.fetchGeneration, result: board.Result{Index: 0, PRs: []github.PR{pr}}}
+			var rerun tea.Cmd
+			if boardFirst {
+				next, _ := m.Update(boardResult)
+				m = next.(Model)
+				m, rerun = m.applyBadge(oldRun().(badgeDoneMsg))
+			} else {
+				var premature tea.Cmd
+				m, premature = m.applyBadge(oldRun().(badgeDoneMsg))
+				if premature != nil {
+					t.Fatal("reran a badge before the board refetch supplied current PR data")
+				}
+				next, cmd := m.Update(boardResult)
+				m, rerun = next.(Model), cmd
+			}
+			e, _ := m.badges.cache.Get(key)
+			if !e.Running || e.Text != "cached" || !e.Fetched.Equal(before.Fetched) {
+				t.Fatalf("old run replaced the cached answer or lost its refresh: %+v", e)
+			}
+			if rerun == nil {
+				t.Fatal("no replacement run")
+			}
+			msg, ok := rerun().(badgeDoneMsg)
+			if !ok || msg.result.Err != nil || msg.result.Text != "new-base" {
+				t.Fatalf("replacement did not use current PR data: %+v", msg)
+			}
+			m, _ = m.applyBadge(msg)
+			e, _ = m.badges.cache.Get(key)
+			if e.Running || e.Text != "new-base" || e.Due.Before(time.Now().Add(59*time.Minute)) {
+				t.Fatalf("replacement did not settle for its TTL: %+v", e)
+			}
+		})
 	}
 }

@@ -39,13 +39,17 @@ A badge is as wide as its text, cut with `…` past `max_width`.
 
 pile never waits for a badge. Scripts run in the background, at most
 `badge_workers` at a time, and the board draws whatever answers it has. Rows
-in higher rules get their badges first, then rows in board order.
+in higher rules get their badges first, then rows in board order within each
+round. Due badges with fewer turns go first, so short TTLs and retries cannot
+starve later rows.
 
 An answer is kept for the badge's `ttl` and stays on screen while the script
 runs again. A new commit or a new title does not make it run early, and nor
-does the board's timed refresh. `r` does: it reruns every badge alongside the
-board's refetch, and the old answers stay up until new ones land. A script
-that fails keeps its last answer on the row and tries again within a minute.
+does the board's timed refresh. `r` does: it reruns every badge after the
+board's refetch, using current PR data. If a badge is already running, its
+result is discarded and one replacement is queued. The old answers stay up
+until new ones land. A script that fails keeps its last answer on the row and
+tries again within a minute.
 
 A script that runs past `timeout` is killed with everything it started. So is
 every script still running when you quit.

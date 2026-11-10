@@ -23,6 +23,9 @@ type badges struct {
 	run   *badge.Runner
 	// timerSeq numbers the expiry timer, so only the newest one dispatches.
 	timerSeq uint64
+	// Manual refresh replacements must use the refetched PRs, including
+	// when an old job finishes before the board request does.
+	waitForBoard bool
 }
 
 type badgeDoneMsg struct{ result badge.Result }
@@ -91,6 +94,12 @@ func (m Model) badgeWants() []badgeWant {
 func (m Model) dispatchBadges(now time.Time) tea.Cmd {
 	if m.badges == nil {
 		return nil
+	}
+	if m.badges.waitForBoard {
+		if m.board.Loading() {
+			return nil
+		}
+		m.badges.waitForBoard = false
 	}
 	wants := m.badgeWants()
 	keys := make([]badge.Key, len(wants))
@@ -369,12 +378,11 @@ func shortDuration(d time.Duration) string {
 	return s
 }
 
-// refreshBadges is `r` for badges: every badge on the board runs again, in the
-// usual order and under the usual cap, while the board refetches beside it.
-// The old answers stay up until the new ones land.
-func (m Model) refreshBadges() tea.Cmd {
+// refreshBadges requests one new run per badge after the board refetch, so
+// even a pending replacement uses current PR data. Old answers stay visible.
+func (m Model) refreshBadges() {
 	if m.badges == nil {
-		return nil
+		return
 	}
 	wants := m.badgeWants()
 	keys := make([]badge.Key, len(wants))
@@ -382,7 +390,8 @@ func (m Model) refreshBadges() tea.Cmd {
 		keys[i] = w.key
 	}
 	m.badges.cache.Expire(keys)
-	return m.dispatchBadges(time.Now())
+	m.badges.waitForBoard = true
+	m.badges.timerSeq++
 }
 
 // badgeFailure is the footer's word on a badge that has failed on every row it
