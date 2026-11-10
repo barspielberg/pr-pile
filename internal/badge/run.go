@@ -50,7 +50,7 @@ func Run(ctx context.Context, job Job) Result {
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
 	cmd.WaitDelay = waitDelay
 
 	var stdout capped
@@ -98,4 +98,17 @@ func (c *capped) Write(p []byte) (int, error) {
 		c.buf.Write(p[:min(room, len(p))])
 	}
 	return len(p), nil
+}
+
+// killGroup kills every process in the script's group. One killpg is not
+// enough: it is not atomic against fork, so a shell woken by its child's death
+// can fork the next command before its own SIGKILL lands, and that command
+// lands outside the sweep. Repeat until the group is empty.
+func killGroup(pid int) error {
+	err := syscall.Kill(-pid, syscall.SIGKILL)
+	for i := 0; i < 20 && syscall.Kill(-pid, 0) == nil; i++ {
+		time.Sleep(5 * time.Millisecond)
+		syscall.Kill(-pid, syscall.SIGKILL)
+	}
+	return err
 }

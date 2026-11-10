@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -27,21 +29,6 @@ func TestRunReportsTheLastStderrLine(t *testing.T) {
 	r, _ := run(t, `echo noise >&2; echo "no such ticket" >&2; exit 3`, 5*time.Second)
 	if r.Err == nil || r.Err.Error() != "no such ticket" {
 		t.Fatalf("err = %v", r.Err)
-	}
-}
-
-func TestRunKillsTheWholeGroupOnTimeout(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "survived")
-	r, took := run(t, `(sleep 1; touch `+marker+`) & sleep 30`, 200*time.Millisecond)
-	if r.Err == nil || !strings.Contains(r.Err.Error(), "timed out") {
-		t.Fatalf("err = %v, want a timeout", r.Err)
-	}
-	if took > 2*time.Second {
-		t.Fatalf("took %v past a 200ms timeout", took)
-	}
-	time.Sleep(1500 * time.Millisecond)
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("a child of the timed-out script kept running")
 	}
 }
 
@@ -82,5 +69,28 @@ func TestRunCannotPromptOnTheTerminal(t *testing.T) {
 	r, _ = run(t, `echo "$GIT_TERMINAL_PROMPT$GIT_OPTIONAL_LOCKS"`, 5*time.Second)
 	if r.Text != "00" {
 		t.Fatalf("git env = %q", r.Text)
+	}
+}
+
+func TestRunKillsTheWholeGroupOnTimeout(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	r, took := run(t, `sh -c 'echo $$ > `+pidFile+`; exec sleep 30' & sleep 30`, 300*time.Millisecond)
+	if r.Err == nil || !strings.Contains(r.Err.Error(), "timed out") {
+		t.Fatalf("err = %v, want a timeout", r.Err)
+	}
+	if took > 2*time.Second {
+		t.Fatalf("took %v past a 300ms timeout", took)
+	}
+	b, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	// Orphaned, the child is reaped by init, and answers signal 0 until then.
+	for deadline := time.Now().Add(2 * time.Second); syscall.Kill(pid, 0) == nil; {
+		if time.Now().After(deadline) {
+			t.Fatalf("background child %d outlived the timed-out script", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
