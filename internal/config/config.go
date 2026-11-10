@@ -159,10 +159,10 @@ rules:
 
 # Actions run a shell command for the selected PR. Available template fields:
 # {{.Number}} {{.Repo}} {{.RepoPath}} {{.Branch}} {{.Base}} {{.URL}}
-# {{.Author}} {{.Title}}
+# {{.Author}}
 # Repo and RepoPath are the PR's own repo's name and path from repos: above.
-# GitHub string fields are already shell-quoted; use each as a standalone,
-# unquoted placeholder. Repo, RepoPath, and run remain trusted shell text.
+# Branch, Base, URL and Author are passed only when they hold no shell syntax,
+# so they are safe anywhere in the command. The PR title is not a field.
 # actions:
 #   - key: w
 #     name: worktree

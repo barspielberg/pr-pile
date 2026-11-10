@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,22 +23,21 @@ func TestActionStartsSynchronously(t *testing.T) {
 	}
 }
 
-func TestActionTemplateStringsAreShellQuoted(t *testing.T) {
-	values := []string{
-		"plain",
-		"with spaces",
-		"semi;colon",
-		"$(printf substitution)",
-		"`printf backtick`",
-		"line one\nline two",
-		`back\slash`,
-		"single'quote",
-		"",
-	}
-	for _, value := range values {
-		t.Run(strconv.Quote(value), func(t *testing.T) {
+// A checked value is inert wherever the template puts it, so the author's own
+// quotes and embeddings work and render what they say.
+func TestCheckedFieldsRenderInAnyPosition(t *testing.T) {
+	pr := github.PR{Repo: testRepo, Number: 7, HeadRefName: "feat/x_1+2", BaseRefName: "main",
+		URL: "https://github.com/acme/web/pull/7", Author: "octo-cat"}
+	for tmpl, want := range map[string]string{
+		`printf '%s' {{.Branch}}`:                           "feat/x_1+2",
+		`printf '%s' "{{.Branch}}"`:                         "feat/x_1+2",
+		`printf '%s' pr-{{.Branch}}-on-{{.Base}}`:           "pr-feat/x_1+2-on-main",
+		`printf '%s' "$(printf '%s' {{.URL}})"`:             "https://github.com/acme/web/pull/7",
+		`printf '%s' {{if .Author}}"by {{.Author}}"{{end}}`: "by octo-cat",
+	} {
+		t.Run(tmpl, func(t *testing.T) {
 			m := New(testCfg(), nil)
-			line, err := m.renderAction("printf '%s' {{.Title}}", github.PR{Repo: testRepo, Title: value})
+			line, err := m.renderAction(tmpl, pr)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -48,73 +45,93 @@ func TestActionTemplateStringsAreShellQuoted(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run %q: %v", line, err)
 			}
-			if got := string(out); got != value {
-				t.Fatalf("output = %q, want literal %q (command %q)", got, value, line)
+			if out != want {
+				t.Fatalf("output = %q, want %q (command %q)", out, want, line)
 			}
 		})
 	}
 }
 
-func TestEveryRemoteStringTemplateFieldCannotInjectShell(t *testing.T) {
-	for _, field := range []string{"Branch", "Base", "URL", "Author", "Title"} {
-		t.Run(field, func(t *testing.T) {
-			dir := t.TempDir()
-			marker := filepath.Join(dir, "injected")
-			output := filepath.Join(dir, "output")
-			value := "literal; touch " + marker
-			m := New(testCfg(), nil)
-			pr := github.PR{Repo: testRepo,
-				HeadRefName: value,
-				BaseRefName: value,
-				URL:         value,
-				Author:      value,
-				Title:       value,
-			}
-			line, err := m.renderAction("printf '%s' {{."+field+"}} > "+strconv.Quote(output), pr)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := runShellIn(t, dir, line); err != nil {
-				t.Fatalf("run %q: %v", line, err)
-			}
-			if _, err := os.Stat(marker); !os.IsNotExist(err) {
-				t.Fatalf("%s executed injected shell syntax; marker error=%v", field, err)
-			}
-			got, err := os.ReadFile(output)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.TrimSpace(string(got)) != value {
-				t.Fatalf("output = %q, want %q", got, value)
-			}
-		})
+func TestUnsafeGitHubValuesRefuseTheAction(t *testing.T) {
+	values := []string{
+		"$(touch PWNED)", "`touch PWNED`", "a;b", "a b", "a'b", `a"b`, `a\b`,
+		"a\nb", "a#b", "a*b", "-rf", "", "fé",
+	}
+	for _, field := range []string{"Branch", "Base", "URL", "Author"} {
+		for _, value := range values {
+			t.Run(field+"/"+strconv.Quote(value), func(t *testing.T) {
+				m := New(testCfg(), nil)
+				pr := github.PR{Repo: testRepo,
+					HeadRefName: value, BaseRefName: value, URL: value, Author: value}
+				line, err := m.renderAction("echo {{."+field+"}}", pr)
+				if err == nil {
+					t.Fatalf("rendered %q from %q", line, value)
+				}
+				if !strings.HasPrefix(err.Error(), "refusing ") {
+					t.Fatalf("err = %q, want the field's own refusal", err)
+				}
+			})
+		}
 	}
 }
 
-func TestRemoteTemplateFieldsRejectUnsafeShellContexts(t *testing.T) {
+// The check sits on the value, so no spelling of the field reaches it unchecked.
+// These all got past the old check, which read the template text.
+func TestEveryTemplateSpellingIsChecked(t *testing.T) {
 	for _, tmpl := range []string{
-		`printf '%s' "{{.Title}}"`,
-		`printf '%s' '{{.Title}}'`,
-		`printf '%s' prefix{{.Title}}`,
-		`printf '%s' {{.Title}}suffix`,
-		`printf '%s' $(printf '%s' {{.Title}})`,
-		`printf '%s' $[ {{.Title}} ]`,
-		"cat <<EOF\n{{.Title}}\nEOF",
-		`printf '%s' {{index . "Title"}}`,
-		`sh -c {{.Title}}`,
-		`sh -ce {{.Title}}`,
-		`sh -e -c {{.Title}}`,
-		`/bin/bash -ec {{.Title}}`,
-		`bash --noprofile -c {{.Title}}`,
-		`sh -o errexit -c {{.Title}}`,
-		`eval {{.Title}}`,
-		`"eval" {{.Title}}`,
-		`\eval {{.Title}}`,
+		`echo "{{$.Branch}}"`,
+		`{{with $p := .}}echo "{{$p.Branch}}"{{end}}`,
+		`{{"\""}} {{.Branch}} {{"\""}}`,
+		`{{define "t"}} {{.Branch}} {{end}}echo "{{template "t" .}}"`,
+		`echo {{.Branch}} {{- "x"}}`,
+		`echo {{printf "%s" .Branch}}`,
+		`echo {{call .Branch}}`,
+		`echo {{.pr.HeadRefName}}`,
 	} {
-		t.Run(strconv.Quote(tmpl), func(t *testing.T) {
+		t.Run(tmpl, func(t *testing.T) {
 			m := New(testCfg(), nil)
-			if _, err := m.renderAction(tmpl, github.PR{Repo: testRepo, Title: "remote"}); err == nil {
-				t.Fatalf("renderAction accepted unsafe remote-field context %q", tmpl)
+			pr := github.PR{Repo: testRepo, HeadRefName: "$(touch PWNED)"}
+			if line, err := m.renderAction(tmpl, pr); err == nil {
+				t.Fatalf("rendered %q", line)
+			}
+		})
+	}
+}
+
+// Printing the data whole must not reach the raw PR behind the checked methods.
+func TestTemplateDataCannotBeDumped(t *testing.T) {
+	payload := "$(touch PWNED)"
+	pr := github.PR{Repo: testRepo, Title: payload, HeadRefName: payload,
+		BaseRefName: payload, URL: payload, Author: payload}
+	for _, tmpl := range []string{
+		`echo {{.}}`, `echo {{$}}`, `echo {{print .}}`, `echo {{js .}}`,
+		`echo {{printf "%v" .}}`, `echo {{printf "%+v" $}}`, `echo {{printf "%#v" .}}`,
+	} {
+		t.Run(tmpl, func(t *testing.T) {
+			m := New(testCfg(), nil)
+			single, err := m.renderAction(tmpl, pr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			multi, err := m.renderMultiAction(tmpl, []github.PR{pr, pr})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range []string{single, multi} {
+				if strings.Contains(line, "PWNED") {
+					t.Fatalf("rendered %q, which carries the raw PR", line)
+				}
+			}
+		})
+	}
+}
+func TestTitleIsRefusedWithAWayToGetIt(t *testing.T) {
+	for _, tmpl := range []string{`echo {{.Title}}`, `echo "{{$.Title}}"`, `{{with $p := .}}{{$p.Title}}{{end}}`} {
+		t.Run(tmpl, func(t *testing.T) {
+			m := New(testCfg(), nil)
+			_, err := m.renderAction(tmpl, github.PR{Repo: testRepo, Title: "harmless"})
+			if err == nil || !strings.Contains(err.Error(), "gh pr view") {
+				t.Fatalf("err = %v, want a refusal that points at gh pr view", err)
 			}
 		})
 	}

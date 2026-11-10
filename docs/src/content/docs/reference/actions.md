@@ -32,7 +32,6 @@ reserved by the board are configuration errors.
 | `{{.Base}}` | the PR's base branch |
 | `{{.URL}}` | the PR's URL |
 | `{{.Author}}` | the author's login |
-| `{{.Title}}` | the PR title |
 
 ## Mode
 
@@ -62,14 +61,29 @@ actions:
     mode: suspend
 ```
 
-## Shell quoting and repository context
+## GitHub fields and repository context
 
-GitHub-sourced string fields (`Branch`, `Base`, `URL`, `Author`, `Title`) are
-already POSIX-shell-quoted. Use each placeholder as a standalone, unquoted
-shell word. Embedded or quoted placeholders, command substitution, heredocs,
-and explicit shell evaluators such as `sh -c` or `eval` are rejected when the
-template uses remote fields. `Repo`, `RepoPath` and the command itself are
-trusted configuration text.
+`Branch`, `Base`, `URL` and `Author` come from GitHub, so whoever opened the PR
+chooses them. pile passes each one only if it contains no shell syntax, and the
+action refuses with the offending value otherwise:
+
+| field | accepted |
+| --- | --- |
+| `Branch`, `Base` | a letter or digit, then letters, digits and `. _ / + @ , -` |
+| `URL` | `https://github.com/<owner>/<repo>/pull/<number>` |
+| `Author` | a GitHub login: letters, digits and `-` |
+
+A value that passes is safe anywhere in the command: quoted, embedded as
+`pr-{{.Branch}}`, or handed to `ssh` or `sh -c`. It is not quoted for you, and
+the full template syntax (`if`, `with`, `range`, `printf`) is available.
+`Repo`, `RepoPath` and the command itself are trusted configuration text.
+
+The PR title is not a field: it is free text, so no check could make it safe
+in a command. A script that needs it can look it up:
+
+```sh
+gh pr view {{.Number}} --repo {{.Repo}} --json title --jq .title
+```
 
 Actions run in the PR's checkout when its repo has a `path`. An action using
 `RepoPath` refuses a repo without one. On a multi-repo board, an action using
@@ -79,12 +93,12 @@ with `Repo` or `RepoPath`.
 ## Multiple selected PRs
 
 An action without `multi: true` refuses a selection containing several PRs.
-A multi action runs once using space-joined, individually quoted plural fields:
-`{{.Numbers}}`, `{{.URLs}}`, `{{.Branches}}`, `{{.Bases}}`, `{{.Authors}}`,
-`{{.Titles}}`. Mixing singular and plural fields is an error. With no selection,
-the row under the cursor is a list of one.
+A multi action runs once using space-joined plural fields, one word per PR and
+each checked like its singular form: `{{.Numbers}}`, `{{.URLs}}`,
+`{{.Branches}}`, `{{.Bases}}`, `{{.Authors}}`. Mixing singular and plural fields
+is an error. With no selection, the row under the cursor is a list of one.
 
 Numbers, branches, bases and repository paths are ambiguous across repositories,
 so a multi action using those fields refuses a selection spanning repos.
-Actions using only URLs, authors or titles can span repos. Acting on three or
-more PRs asks for confirmation first.
+Actions using only URLs or authors can span repos. Acting on three or more PRs
+asks for confirmation first.

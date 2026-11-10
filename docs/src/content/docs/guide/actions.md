@@ -37,7 +37,6 @@ author has would fail with `command not found` on anyone else's.
 | `{{.Base}}` | the PR's base branch |
 | `{{.URL}}` | the PR's URL |
 | `{{.Author}}` | the author's login |
-| `{{.Title}}` | the PR title |
 
 The rendered command runs as `sh -c "<run>"` with whatever `PATH` the board
 inherited — which is not necessarily the one an interactive shell has. Give a
@@ -65,9 +64,10 @@ configured action cannot shadow `j`, `d`, `/` or the rest. Binding an action to
 `d` or `j` is a configuration error; pick a key the [Keys](../../reference/keys/)
 table does not use. `v` and `m` are also reserved for selection and watches.
 
-Remote template fields are already shell-quoted: use them as standalone,
-unquoted words. Actions run in the PR's configured checkout. See the
-[reference](../../reference/actions/#shell-quoting-and-repository-context)
+Branch, base, URL and author values are passed only when they contain no shell
+syntax, so they are safe anywhere in the command; an odd one refuses the action.
+The PR title is not passed at all. Actions run in the PR's configured checkout.
+See the [reference](../../reference/actions/#github-fields-and-repository-context)
 for quoting restrictions and `multi: true` selection behavior.
 
 A second press of the same key while an action is still running is a no-op with
