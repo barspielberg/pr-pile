@@ -158,9 +158,9 @@ through to rule 3.
 This is a judgement call, so it is worth being able to reverse: dropping
 `draft:false` moves the split from 8/20 to 22/6. It is filtered here because a
 draft is by definition not requesting review, which is what the section name
-claims, and because §2 of DESIGN.md already settles that the review queue exists
-to be an action queue rather than a status list — the same reasoning that put
-`-review:approved` on the built-in "Needs my review" rule.
+claims, and because the review queue exists to be an action queue rather than a
+status list — the same reasoning that put `-review:approved` on the built-in
+"Needs my review" rule (see [decisions](../../design/decisions/)).
 
 ## Why authors, not `team-review-requested`
 
