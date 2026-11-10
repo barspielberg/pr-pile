@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -150,9 +153,6 @@ func actionResult(msg actionDoneMsg) string {
 }
 
 func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
-	if err := validateRemoteActionFields(tmpl); err != nil {
-		return "", err
-	}
 	if err := rejectFields(tmpl, pluralActionFields); err != nil {
 		return "", err
 	}
@@ -164,23 +164,13 @@ func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var b strings.Builder
-	err = t.Execute(&b, actionTemplateData{
-		Number: pr.Number, Repo: repo, RepoPath: repoPath,
-		Branch: shellQuote(pr.HeadRefName), Base: shellQuote(pr.BaseRefName),
-		URL: shellQuote(pr.URL), Author: shellQuote(pr.Author), Title: shellQuote(pr.Title),
-	})
-	return b.String(), err
+	return executeAction(t, actionTemplateData{Number: pr.Number, Repo: repo, RepoPath: repoPath, pr: &pr})
 }
 
 // renderMultiAction renders a `multi: true` action once for the whole
-// selection. The plural fields carry the same attacker-controlled data as the
-// singular ones, so they get the same validation and the same per-element
-// quoting.
+// selection. The plural fields carry the same GitHub data as the singular
+// ones, so every element passes the same check.
 func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
-	if err := validateRemoteActionFields(tmpl); err != nil {
-		return "", err
-	}
 	if err := rejectFields(tmpl, singularActionFields); err != nil {
 		return "", err
 	}
@@ -199,26 +189,27 @@ func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
 			}
 		}
 	}
-	data := multiActionTemplateData{Repo: repo, RepoPath: repoPath}
-	var numbers, branches, bases, urls, authors, titles []string
+	var numbers []string
 	for _, pr := range prs {
 		numbers = append(numbers, fmt.Sprint(pr.Number))
-		branches = append(branches, shellQuote(pr.HeadRefName))
-		bases = append(bases, shellQuote(pr.BaseRefName))
-		urls = append(urls, shellQuote(pr.URL))
-		authors = append(authors, shellQuote(pr.Author))
-		titles = append(titles, shellQuote(pr.Title))
 	}
-	data.Numbers = strings.Join(numbers, " ")
-	data.Branches = strings.Join(branches, " ")
-	data.Bases = strings.Join(bases, " ")
-	data.URLs = strings.Join(urls, " ")
-	data.Authors = strings.Join(authors, " ")
-	data.Titles = strings.Join(titles, " ")
+	return executeAction(t, multiActionTemplateData{
+		Numbers: strings.Join(numbers, " "), Repo: repo, RepoPath: repoPath, prs: &prs,
+	})
+}
 
+// executeAction surfaces a refused field as its own message, not wrapped in
+// the template's "executing action at <.Branch>: error calling Branch:".
+func executeAction(t *template.Template, data any) (string, error) {
 	var b strings.Builder
-	err = t.Execute(&b, data)
-	return b.String(), err
+	if err := t.Execute(&b, data); err != nil {
+		var refused fieldError
+		if errors.As(err, &refused) {
+			return "", refused
+		}
+		return "", err
+	}
+	return b.String(), nil
 }
 
 // actionRepo is the Repo and RepoPath an action sees for a PR. Both come from
@@ -236,28 +227,103 @@ func (m Model) actionRepo(tmpl string, pr github.PR) (repo, repoPath string, err
 	return r.Name, r.Path, nil
 }
 
+// The GitHub fields are methods, not fields: the template calls them however
+// it spells the access ($.Branch, a with block, a define), so the check runs on
+// the value itself instead of on the template text. Only an action that uses a
+// field can be refused by it. The raw PR sits behind a pointer because fmt
+// prints a nested pointer as an address, so {{.}} or printf "%v" cannot dump it.
 type actionTemplateData struct {
-	Number            int
-	Repo, RepoPath    string
-	Branch, Base, URL string
-	Author, Title     string
+	Number         int
+	Repo, RepoPath string
+	pr             *github.PR
+}
+
+func (d actionTemplateData) Branch() (string, error) { return checkRef("branch", d.pr.HeadRefName) }
+func (d actionTemplateData) Base() (string, error)   { return checkRef("base", d.pr.BaseRefName) }
+func (d actionTemplateData) URL() (string, error)    { return checkURL(d.pr.URL) }
+func (d actionTemplateData) Author() (string, error) { return checkLogin(d.pr.Author) }
+func (d actionTemplateData) Title() (string, error) {
+	return "", errTitleRemoved(".Title", "gh pr view {{.Number}} --repo {{.Repo}} --json title --jq .title")
 }
 
 type multiActionTemplateData struct {
-	Numbers         string
-	Repo, RepoPath  string
-	Branches, Bases string
-	URLs            string
-	Authors, Titles string
+	Numbers        string
+	Repo, RepoPath string
+	prs            *[]github.PR
 }
 
-// Every template field whose value comes from GitHub, and is therefore
-// attacker-controlled. Each must appear as a bare, standalone placeholder at
-// top-level shell context. TestRemoteFieldListCoversEveryStringField keeps this
-// list from falling behind the structs.
-var remoteActionFields = []string{
-	"Branch", "Base", "URL", "Author", "Title",
-	"Branches", "Bases", "URLs", "Authors", "Titles",
+func (d multiActionTemplateData) Branches() (string, error) {
+	return d.each(func(pr github.PR) (string, error) { return checkRef("branch", pr.HeadRefName) })
+}
+
+func (d multiActionTemplateData) Bases() (string, error) {
+	return d.each(func(pr github.PR) (string, error) { return checkRef("base", pr.BaseRefName) })
+}
+
+func (d multiActionTemplateData) URLs() (string, error) {
+	return d.each(func(pr github.PR) (string, error) { return checkURL(pr.URL) })
+}
+
+func (d multiActionTemplateData) Authors() (string, error) {
+	return d.each(func(pr github.PR) (string, error) { return checkLogin(pr.Author) })
+}
+
+func (d multiActionTemplateData) Titles() (string, error) {
+	return "", errTitleRemoved(".Titles", "gh pr view on each of {{.Numbers}}")
+}
+
+func (d multiActionTemplateData) each(field func(github.PR) (string, error)) (string, error) {
+	values := make([]string, 0, len(*d.prs))
+	for _, pr := range *d.prs {
+		v, err := field(pr)
+		if err != nil {
+			return "", err
+		}
+		values = append(values, v)
+	}
+	return strings.Join(values, " "), nil
+}
+
+// The GitHub fields are written by whoever opened the PR, and the rendered
+// line runs through sh -c. Rather than quote them, which only holds where the
+// placeholder sits outside any quotes and nothing re-parses the line, each must
+// match a pattern with no shell syntax in it. A value that passes is inert in
+// any position. The first character is never "-", so none reads as an option.
+var (
+	safeRef   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/+@,-]*$`)
+	safeLogin = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
+	safePRURL = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+/pull/[0-9]+$`)
+)
+
+type fieldError string
+
+func (e fieldError) Error() string { return string(e) }
+
+func checkRef(what, ref string) (string, error) {
+	if !safeRef.MatchString(ref) {
+		return "", fieldError(fmt.Sprintf("refusing %s name %s: only letters, digits and . _ / + @ , - are passed to actions", what, terminalText(strconv.Quote(ref))))
+	}
+	return ref, nil
+}
+
+func checkLogin(login string) (string, error) {
+	if !safeLogin.MatchString(login) {
+		return "", fieldError("refusing author " + terminalText(strconv.Quote(login)) + ": not a GitHub login")
+	}
+	return login, nil
+}
+
+func checkURL(url string) (string, error) {
+	if !safePRURL.MatchString(url) {
+		return "", fieldError("refusing URL " + terminalText(strconv.Quote(url)) + ": not a GitHub PR URL")
+	}
+	return url, nil
+}
+
+// The title is free text, so no pattern can make it safe to splice into a
+// command. A script that needs it can ask gh for it.
+func errTitleRemoved(field, instead string) error {
+	return fieldError(field + " is no longer available to actions; use " + instead)
 }
 
 // A singular template in a multi action (or the reverse) is an error rather
@@ -267,20 +333,6 @@ var remoteActionFields = []string{
 // live here and config cannot import ui.
 var singularActionFields = []string{"Number", "Branch", "Base", "URL", "Author", "Title"}
 var pluralActionFields = []string{"Numbers", "Branches", "Bases", "URLs", "Authors", "Titles"}
-
-// actionUsesToken reports whether a template action references exactly this
-// field, splitting on the characters that can delimit a field in a template
-// action so a longer field name cannot answer for a shorter one.
-func actionUsesToken(action, token string) bool {
-	for _, word := range strings.FieldsFunc(action, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '(' || r == ')' || r == '|'
-	}) {
-		if word == token {
-			return true
-		}
-	}
-	return false
-}
 
 // rejectFields fails if the template mentions any of the given fields.
 func rejectFields(tmpl string, fields []string) error {
@@ -368,141 +420,6 @@ func templateMentions(tmpl, field string) bool {
 		}
 		offset = end + 2
 	}
-}
-
-func validateRemoteActionFields(tmpl string) error {
-	for offset := 0; ; {
-		rel := strings.Index(tmpl[offset:], "{{")
-		if rel < 0 {
-			return nil
-		}
-		start := offset + rel
-		closeRel := strings.Index(tmpl[start+2:], "}}")
-		if closeRel < 0 {
-			return nil
-		}
-		end := start + 2 + closeRel
-		action := strings.TrimSpace(tmpl[start+2 : end])
-		for _, field := range remoteActionFields {
-			token := "." + field
-			// Whole-token, not substring: `.URL` is a prefix of `.URLs`, so a
-			// Contains check reports the wrong field and rejects a valid
-			// plural template outright.
-			if !actionUsesToken(action, token) {
-				continue
-			}
-			if action != token || !standaloneActionField(tmpl, start, end+2) ||
-				strings.Contains(tmpl, "<<") || usesIndirectEvaluator(tmpl) ||
-				!topLevelShellContext(tmpl[:start]) {
-				return fmt.Errorf("remote field %s must be an unquoted standalone placeholder", token)
-			}
-		}
-		offset = end + 2
-	}
-}
-
-func usesIndirectEvaluator(tmpl string) bool {
-	normalized := strings.NewReplacer("'", "", `"`, "", `\`, "").Replace(tmpl)
-	words := strings.FieldsFunc(normalized, func(r rune) bool {
-		return strings.ContainsRune(" \t\r\n;&|()", r)
-	})
-	for i, word := range words {
-		if slash := strings.LastIndexByte(word, '/'); slash >= 0 {
-			word = word[slash+1:]
-		}
-		if word == "eval" {
-			return true
-		}
-		if word != "sh" && word != "bash" && word != "dash" && word != "zsh" && word != "ksh" {
-			continue
-		}
-		for _, option := range words[i+1:] {
-			if strings.HasPrefix(option, "-") && strings.Contains(strings.TrimLeft(option, "-"), "c") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func standaloneActionField(tmpl string, start, end int) bool {
-	return (start == 0 || shellSpace(tmpl[start-1])) &&
-		(end == len(tmpl) || shellSpace(tmpl[end]))
-}
-
-func shellSpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
-}
-
-func topLevelShellContext(prefix string) bool {
-	var quote byte
-	parenDepth, braceDepth, bracketDepth := 0, 0, 0
-	for i := 0; i < len(prefix); i++ {
-		if i+1 < len(prefix) && prefix[i:i+2] == "{{" {
-			if end := strings.Index(prefix[i+2:], "}}"); end >= 0 {
-				i += end + 3
-				continue
-			}
-		}
-		c := prefix[i]
-		if c == '\\' && quote != '\'' {
-			i++
-			continue
-		}
-		switch quote {
-		case '\'':
-			if c == '\'' {
-				quote = 0
-			}
-			continue
-		case '"':
-			if c == '"' {
-				quote = 0
-			}
-			continue
-		case '`':
-			if c == '`' {
-				quote = 0
-			}
-			continue
-		}
-		switch c {
-		case '\'', '"', '`':
-			quote = c
-		case '$':
-			if i+1 < len(prefix) && prefix[i+1] == '(' {
-				parenDepth++
-				i++
-			} else if i+1 < len(prefix) && prefix[i+1] == '{' {
-				braceDepth++
-				i++
-			} else if i+1 < len(prefix) && prefix[i+1] == '[' {
-				bracketDepth++
-				i++
-			}
-		case '(':
-			if parenDepth > 0 {
-				parenDepth++
-			}
-		case ')':
-			if parenDepth > 0 {
-				parenDepth--
-			}
-		case '}':
-			if braceDepth > 0 {
-				braceDepth--
-			}
-		case ']':
-			if bracketDepth > 0 {
-				bracketDepth--
-			}
-		}
-	}
-	return quote == 0 && parenDepth == 0 && braceDepth == 0 && bracketDepth == 0
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 type tailWriter struct {

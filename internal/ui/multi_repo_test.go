@@ -172,13 +172,13 @@ func TestActionRefusesARepoNotInRepos(t *testing.T) {
 // only runs an action that does not depend on which repo it is in.
 func TestMultiActionAcrossReposRefusesRepoBoundFields(t *testing.T) {
 	m := multiRepoBoard(t)
-	prs := []github.PR{{Repo: "o/r", Number: 1, URL: "u1"}, {Repo: "o/api", Number: 1, URL: "u2"}}
+	prs := []github.PR{{Repo: "o/r", Number: 1, URL: "https://github.com/o/r/pull/1"}, {Repo: "o/api", Number: 1, URL: "https://github.com/o/api/pull/1"}}
 	for _, tmpl := range []string{"echo {{.Repo}} {{.Numbers}}", "gh pr merge {{.Numbers}}", "echo {{.Branches}}"} {
 		if _, err := m.renderMultiAction(tmpl, prs); err == nil {
 			t.Errorf("%q over two repos should refuse", tmpl)
 		}
 	}
-	if got, err := m.renderMultiAction("open {{.URLs}}", prs); err != nil || got != "open 'u1' 'u2'" {
+	if got, err := m.renderMultiAction("open {{.URLs}}", prs); err != nil || got != "open https://github.com/o/r/pull/1 https://github.com/o/api/pull/1" {
 		t.Errorf("a URL-only action should run: %q, %v", got, err)
 	}
 }

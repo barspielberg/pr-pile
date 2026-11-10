@@ -87,16 +87,14 @@ func TestMultiActionExpandsPluralFields(t *testing.T) {
 	}
 }
 
-// Each element quoted separately, proven by running it through a real shell.
-func TestMultiActionPluralFieldsAreQuotedPerElement(t *testing.T) {
+// One shell word per PR, proven by running it through a real shell.
+func TestMultiActionPluralFieldsAreOneWordPerPR(t *testing.T) {
 	m := New(testCfg(), nil)
 	prs := []github.PR{
-		{Repo: testRepo, Title: "plain"},
-		{Repo: testRepo, Title: "with spaces"},
-		{Repo: testRepo, Title: "semi;colon"},
-		{Repo: testRepo, Title: "$(printf substitution)"},
+		{Repo: testRepo, HeadRefName: "feat/one"},
+		{Repo: testRepo, HeadRefName: "dependabot/npm_and_yarn/@babel/core-7.24.0"},
 	}
-	line, err := m.renderMultiAction("printf '%s\\n' {{.Titles}}", prs)
+	line, err := m.renderMultiAction("printf '%s\\n' {{.Branches}}", prs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +103,7 @@ func TestMultiActionPluralFieldsAreQuotedPerElement(t *testing.T) {
 		t.Fatalf("run %q: %v", line, err)
 	}
 	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	want := []string{"plain", "with spaces", "semi;colon", "$(printf substitution)"}
+	want := []string{"feat/one", "dependabot/npm_and_yarn/@babel/core-7.24.0"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q, want %q (command %q)", got, want, line)
 	}
@@ -140,92 +138,61 @@ func TestPluralFieldInSingleTemplateIsAnError(t *testing.T) {
 	}
 }
 
-// The direct analogue of TestEveryRemoteStringTemplateFieldCannotInjectShell,
-// over the plural fields.
-func TestEveryRemotePluralTemplateFieldCannotInjectShell(t *testing.T) {
-	for _, field := range []string{"Branches", "Bases", "URLs", "Authors", "Titles"} {
+// The plural analogue of TestUnsafeGitHubValuesRefuseTheAction.
+func TestUnsafePluralValuesRefuseTheAction(t *testing.T) {
+	for _, field := range []string{"Branches", "Bases", "URLs", "Authors"} {
 		t.Run(field, func(t *testing.T) {
-			dir := t.TempDir()
-			marker := filepath.Join(dir, "injected")
-			value := "literal; touch " + marker
+			value := "literal; touch PWNED"
 			pr := github.PR{Repo: testRepo,
-				HeadRefName: value, BaseRefName: value, URL: value,
-				Author: value, Title: value,
-			}
+				HeadRefName: value, BaseRefName: value, URL: value, Author: value}
 			m := New(testCfg(), nil)
-			line, err := m.renderMultiAction("printf '%s' {{."+field+"}}", []github.PR{pr, pr})
-			if err != nil {
-				t.Fatalf("render: %v", err)
-			}
-			if _, err := runShellIn(t, dir, line); err != nil {
-				t.Fatalf("run %q: %v", line, err)
-			}
-			if _, err := os.Stat(marker); err == nil {
-				t.Fatalf("injection succeeded via %s (command %q)", field, line)
+			if line, err := m.renderMultiAction(`echo "{{.`+field+`}}"`, []github.PR{pr, pr}); err == nil {
+				t.Fatalf("rendered %q", line)
 			}
 		})
 	}
 }
 
-// A validator that only checked the first element would pass every other test
+// A check that only looked at the first element would pass every other test
 // in this file.
-func TestInjectionFromASecondSelectedPR(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "injected")
+func TestUnsafeValueInASecondSelectedPR(t *testing.T) {
 	m := New(testCfg(), nil)
 	prs := []github.PR{
-		{Repo: testRepo, Title: "benign"},
-		{Repo: testRepo, Title: "literal; touch " + marker},
+		{Repo: testRepo, HeadRefName: "benign"},
+		{Repo: testRepo, HeadRefName: "$(touch PWNED)"},
 	}
-	line, err := m.renderMultiAction("printf '%s' {{.Titles}}", prs)
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
-	if _, err := runShellIn(t, dir, line); err != nil {
-		t.Fatalf("run %q: %v", line, err)
-	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatalf("injection succeeded from the SECOND PR (command %q)", line)
+	if line, err := m.renderMultiAction("echo {{.Branches}}", prs); err == nil {
+		t.Fatalf("rendered %q from the second PR's branch", line)
 	}
 }
 
-// A plural placeholder has to be bare and at top-level shell context, exactly
-// as the singular ones do. Quoting it, feeding it to another shell, or burying
-// it in a substitution all defeat the per-element quoting.
-func TestPluralFieldsRejectUnsafeShellContexts(t *testing.T) {
+func TestTitlesIsRefusedWithAWayToGetIt(t *testing.T) {
 	m := New(testCfg(), nil)
-	for _, tmpl := range []string{
-		`open "{{.URLs}}"`, "open '{{.URLs}}'",
-		"eval {{.URLs}}", "sh -c {{.URLs}}", "bash -c {{.Titles}}",
-		"echo $( {{.URLs}} )", "echo `{{.URLs}}`", "cat <<EOF\n{{.URLs}}\nEOF",
-	} {
-		if _, err := m.renderMultiAction(tmpl, []github.PR{{Repo: testRepo, URL: "u"}}); err == nil {
-			t.Errorf("%q was accepted", tmpl)
-		}
+	_, err := m.renderMultiAction("echo {{.Titles}}", []github.PR{{Repo: testRepo, Title: "harmless"}})
+	if err == nil || !strings.Contains(err.Error(), "gh pr view") {
+		t.Fatalf("err = %v, want a refusal that points at gh pr view", err)
 	}
 }
 
-// The guard against someone adding a field to the template data and forgetting
-// to validate it. DESIGN-GUIDE.md section 12: an audit nothing re-checks goes stale.
-func TestRemoteFieldListCoversEveryStringField(t *testing.T) {
-	covered := map[string]bool{}
-	for _, f := range remoteActionFields {
-		covered[f] = true
-	}
+// The guard against someone adding a GitHub string to the template data as a
+// plain field, which would reach the command unchecked. DESIGN-GUIDE.md section
+// 12: an audit nothing re-checks goes stale.
+func TestTemplateDataExposesNoUncheckedString(t *testing.T) {
 	// Repo and RepoPath come from the user's own config, not from GitHub, and
-	// Number/Numbers are integer-derived.
-	local := map[string]bool{"Repo": true, "RepoPath": true, "Number": true, "Numbers": true}
-
+	// Numbers is integer-derived. GitHub strings are methods that check them.
+	trusted := map[string]bool{"Repo": true, "RepoPath": true, "Numbers": true}
 	for _, data := range []any{actionTemplateData{}, multiActionTemplateData{}} {
 		ty := reflect.TypeOf(data)
 		for i := 0; i < ty.NumField(); i++ {
 			f := ty.Field(i)
-			if f.Type.Kind() != reflect.String || local[f.Name] {
-				continue
-			}
-			if !covered[f.Name] {
-				t.Errorf("%s.%s is a remote string field but is not in remoteActionFields",
+			if f.IsExported() && f.Type.Kind() == reflect.String && !trusted[f.Name] {
+				t.Errorf("%s.%s reaches templates unchecked; make it a method that validates it",
 					ty.Name(), f.Name)
+			}
+			// fmt prints a nested pointer as an address but any other nested
+			// value in full, so {{.}} would dump it unchecked.
+			if !f.IsExported() && f.Type.Kind() != reflect.Pointer {
+				t.Errorf("%s.%s would print in {{.}}; hold it behind a pointer", ty.Name(), f.Name)
 			}
 		}
 	}
