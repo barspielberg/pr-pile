@@ -11,17 +11,14 @@ but first-match-wins removes already-claimed PRs *after* the fetch. A capped rul
 under-fills: a `limit: 20` rule whose first 8 results were claimed above shows 12
 rows, not 20.
 
-**Review progress is deferred.** Who has approved / requested changes / is still
-pending, unresolved thread counts, and "is this waiting on me or on them" — the
-main gap versus the old `pr-status.sh` board. Deferred because it is the one
-thing `gh pr list` does not give us, so it drags in an extra GraphQL query or a
-per-row lazy fetch.
+**Review follow-up is incomplete.** `d` shows reviewers who approved or
+requested changes, plus unresolved review-thread counts. Requested reviewers
+and “is this waiting on me or on them” are still missing.
 
-**Not built:** detail/preview pane; write actions (approve, comment, re-run CI,
-mark ready); a
-`glyphs = "ascii"` escape hatch (specified, cheap because widths are already
-fixed); a config key for the scroll margin (hardcoded on purpose — there is one
-user).
+**Not built:** a separate diff/description preview; built-in write actions
+(approve, comment, re-run CI, mark ready); a `glyphs = "ascii"` escape hatch
+(specified, cheap because widths are already fixed); a config key for the
+scroll margin (hardcoded on purpose — there is one user).
 
 **Spec/implementation divergences**, stated rather than smoothed over:
 
@@ -47,7 +44,9 @@ user).
 spinner in daily use; whether the board reads correctly on a light theme (the
 `muted`/`selBg` reasoning is by construction, not observation).
 
-**Untested releases:** upgrading a public Homebrew install; installing a Linux
-release and its desktop integration (`xdg-open`, clipboard); running natively on
-any architecture other than macOS Apple Silicon. CI builds and tests on Linux and
-macOS.
+**Release coverage:** the Linux v0.1.0 amd64 release has been confirmed
+natively for the board, browser opening, clipboard copying and quitting. On
+macOS Apple Silicon, the public Homebrew v0.1.0 install, `brew test`, version
+output, board, clipboard, browser opening and quitting have been confirmed.
+Linux Homebrew installation, public version-to-version upgrades, and other
+architectures remain untested. CI builds and tests on Linux and macOS.

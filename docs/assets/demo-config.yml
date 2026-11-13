@@ -1,22 +1,45 @@
-# The repo the demo recording shows. A public repo with real open PRs, so the
-# board is the real tool on real data, not a fixture. cli/cli is GitHub's own
-# CLI repo — the same audience that runs `gh` to use pile.
+# Live public PRs: cli for reviews, uv for a complete short branch chain.
 repos:
   - name: cli/cli
+  - name: astral-sh/uv
 refresh: 3m
+
+# Real PR fields/local computation, enabled only in Needs review below.
+# Explicit repo guards keep these formatting-only commands checkout-independent
+# on a multi-repo board; no git commands or PR code run.
+badges:
+  - name: base
+    run: case {{.Repo}} in cli/cli) printf 'base:%s\n' {{.Base}} ;; esac
+    color: accent
+    max_width: 14
+  - name: branch-depth
+    run: case {{.Repo}} in cli/cli) sh docs/assets/demo-branch-depth.sh {{.Branch}} ;; esac
+    side: right
+    color: muted
+    max_width: 8
 
 rules:
   - name: Needs review
-    query: review:required
+    repos: [cli]
+    query: review:required draft:false
     author: true
-    limit: 20
+    badges: [base, branch-depth]
+    limit: 3
 
-  - name: Draft
-    query: draft:true
+  - name: Approved
+    repos: [cli]
+    query: review:approved draft:false
     author: true
-    limit: 20
+    badges: []
+    limit: 2
 
-  - name: All open
-    query: draft:false
+  - name: Hash policies (draft)
+    repos: [uv]
+    # The excluded branch belongs to a different, incomplete chain. Keep the
+    # complete build-hash pair and the independent distribution-hash draft.
+    # Fetch all matches, not a truncated slice of a native stack.
+    query: draft:true author:zanieb hash in:title -head:zb/typed-required-hashes
     author: true
-    limit: 20
+    tree: true
+    badges: []
+    limit: 10

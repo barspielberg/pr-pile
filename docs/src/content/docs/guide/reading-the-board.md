@@ -42,6 +42,13 @@ Native GitHub stacks retain their order across missing rows; dashed `╎` marks
 where the stack continues outside the section. Chains inferred from branches
 only know the PRs present in that section.
 
+## Badges
+
+Configured [badges](../badges/) add short script results after the title or
+before the author column. `d` shows their full text and status. Badges yield
+space to the title and disappear below 60 columns. They are available on
+`main`; the latest public release, v0.1.0, does not include them.
+
 ## The status cluster
 
 Three glyphs, always in the same order, always at the same screen offset.

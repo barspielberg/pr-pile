@@ -3,6 +3,8 @@ title: Badges
 description: Showing a script's answer on every row — a ticket status, a deploy, a local branch.
 ---
 
+Available on `main`. The latest public release, v0.1.0, does not include badges.
+
 A badge is a short piece of text a script prints for each PR, drawn on the row
 after the title. pile cannot know your Jira status or whether you have a branch
 checked out locally, but a one-line command can. The fields are on the
