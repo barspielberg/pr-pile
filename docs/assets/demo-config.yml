@@ -1,33 +1,45 @@
-# Real, live public PRs. Keep the board short enough to read all three rules.
+# Live public PRs: cli for reviews, uv for a complete short branch chain.
 repos:
   - name: cli/cli
+  - name: astral-sh/uv
 refresh: 3m
 
-# No external status service: these scripts only format actual PR fields.
+# Real PR fields/local computation, enabled only in Needs review below.
+# Explicit repo guards keep these formatting-only commands checkout-independent
+# on a multi-repo board; no git commands or PR code run.
 badges:
   - name: base
-    run: printf 'base:%s\n' {{.Base}}
+    run: case {{.Repo}} in cli/cli) printf 'base:%s\n' {{.Base}} ;; esac
     color: accent
     max_width: 14
   - name: branch-depth
-    run: sh docs/assets/demo-branch-depth.sh {{.Branch}}
+    run: case {{.Repo}} in cli/cli) sh docs/assets/demo-branch-depth.sh {{.Branch}} ;; esac
     side: right
     color: muted
     max_width: 8
 
 rules:
   - name: Needs review
+    repos: [cli]
     query: review:required draft:false
     author: true
+    badges: [base, branch-depth]
     limit: 3
 
   - name: Approved
+    repos: [cli]
     query: review:approved draft:false
     author: true
+    badges: []
     limit: 2
 
-  - name: Draft
-    query: draft:true
+  - name: Hash policies (draft)
+    repos: [uv]
+    # The excluded branch belongs to a different, incomplete chain. Keep the
+    # complete build-hash pair and the independent distribution-hash draft.
+    # Fetch all matches, not a truncated slice of a native stack.
+    query: draft:true author:zanieb hash in:title -head:zb/typed-required-hashes
     author: true
     tree: true
-    limit: 4
+    badges: []
+    limit: 10

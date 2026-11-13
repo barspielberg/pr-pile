@@ -16,7 +16,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/public/demo-poster.png">
-    <img src="docs/public/demo.gif" alt="pile navigating rule sections, selecting and searching live cli/cli PRs, and showing details with labels, reviewers and script badges" width="840">
+    <img src="docs/public/demo.gif" alt="pile navigating rule sections, selecting and searching live cli/cli and astral-sh/uv PRs, and showing details with labels, reviewers and script badges" width="840">
   </picture>
   <br>
   <sub>One PR per line. Your rules decide what comes first. Badges shown from main (not v0.1.0).</sub>

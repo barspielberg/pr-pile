@@ -1,4 +1,4 @@
-# Real compiled app, live public cli/cli data. Run from the repository root:
+# Real compiled app, live public cli/cli and astral-sh/uv data. Run from the repository root:
 #   make build
 #   vhs docs/assets/demo.tape
 # Requires gh authentication, ttyd, ffmpeg and sandbox-capable Chromium.
@@ -27,6 +27,7 @@ Type "PILE_CONFIG=docs/assets/demo-config.yml ./pile"
 Enter
 Sleep 25s
 # Start and end at the first PR, with all three sections visible.
+# Only Needs review has badges; Hash policies has one complete two-PR chain.
 Type "j"
 Show
 Screenshot docs/public/demo-poster.png
