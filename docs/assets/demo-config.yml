@@ -1,22 +1,33 @@
-# The repo the demo recording shows. A public repo with real open PRs, so the
-# board is the real tool on real data, not a fixture. cli/cli is GitHub's own
-# CLI repo — the same audience that runs `gh` to use pile.
+# Real, live public PRs. Keep the board short enough to read all three rules.
 repos:
   - name: cli/cli
 refresh: 3m
 
+# No external status service: these scripts only format actual PR fields.
+badges:
+  - name: base
+    run: printf 'base:%s\n' {{.Base}}
+    color: accent
+    max_width: 14
+  - name: branch-depth
+    run: sh docs/assets/demo-branch-depth.sh {{.Branch}}
+    side: right
+    color: muted
+    max_width: 8
+
 rules:
   - name: Needs review
-    query: review:required
+    query: review:required draft:false
     author: true
-    limit: 20
+    limit: 3
+
+  - name: Approved
+    query: review:approved draft:false
+    author: true
+    limit: 2
 
   - name: Draft
     query: draft:true
     author: true
-    limit: 20
-
-  - name: All open
-    query: draft:false
-    author: true
-    limit: 20
+    tree: true
+    limit: 4

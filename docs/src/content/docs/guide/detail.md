@@ -8,9 +8,9 @@ description: What the d overlay shows about one PR, and what arrives on a second
 the page and `n`/`N` step matches. `esc`, `q` or `d` closes it after clearing
 any live search. `?` opens help and `ctrl+c` quits.
 
-The overlay is two blocks. The checks block is the top and names what is
-failing or running; the state block below it says what is true about the PR
-itself.
+The overlay starts with checks, then PR state. When present, native GitHub
+stack membership and configured badges follow in their own blocks. Empty
+blocks are omitted; long pages scroll.
 
 ## Checks
 
@@ -45,6 +45,15 @@ Lines with nothing to say are not drawn. Long pages scroll rather than dropping
 failures or state lines. A PR behind its base shows whether the repository
 requires an update before merging, rather than treating every behind count as
 a blocker. A native GitHub stack is identified in the state block.
+
+## Stack and badges
+
+For a native GitHub stack, the stack block shows its number, size and base,
+then lists its PRs when the detail request arrives, marking the current PR.
+Configured [badges](../badges/) show their full text, answer age, running state
+and last error here, including information that cannot fit on a board row.
+Badges are available on `main`; the latest public release, v0.1.0, does not
+include them.
 
 ## What arrives late
 

@@ -3,6 +3,8 @@ title: Badges
 description: The fields of a badge, its template variables, and how it runs.
 ---
 
+Available on `main`. The latest public release, v0.1.0, does not include badges.
+
 A badge is a shell command whose output is drawn on a row, after the title. It
 takes the same template fields as an [action](../actions/), runs in the
 background, and its answer is kept for a while, so a slow script makes a badge

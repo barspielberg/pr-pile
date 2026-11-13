@@ -16,10 +16,10 @@
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/public/demo-poster.png">
-    <img src="docs/public/demo.gif" alt="pile navigating open cli/cli pull requests and searching the board, with checks and review state on each row" width="840">
+    <img src="docs/public/demo.gif" alt="pile navigating rule sections, selecting and searching live cli/cli PRs, and showing details with labels, reviewers and script badges" width="840">
   </picture>
   <br>
-  <sub>One PR per line. Your rules decide what comes first.</sub>
+  <sub>One PR per line. Your rules decide what comes first. Badges shown from main (not v0.1.0).</sub>
 </p>
 
 ## A board that follows your priorities
@@ -148,7 +148,8 @@ Queries use GitHub search syntax. pile adds the repositories and
 
 [Rules and ordering](https://barspielberg.github.io/pr-pile/guide/rules/) ·
 [Team boards](https://barspielberg.github.io/pr-pile/guide/team-board/) ·
-[Custom actions](https://barspielberg.github.io/pr-pile/guide/actions/)
+[Custom actions](https://barspielberg.github.io/pr-pile/guide/actions/) ·
+[Badges](https://barspielberg.github.io/pr-pile/guide/badges/) (on `main`; not in v0.1.0)
 
 ## Go further
 
