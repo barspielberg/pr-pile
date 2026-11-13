@@ -54,7 +54,7 @@ func (m Model) detailOverlay() string {
 // what a short pane shows before any scrolling.
 func (m Model) overlayBody(pr github.PR) []string {
 	out := append([]string(nil), m.checkLines(pr)...)
-	for _, block := range [][]string{m.stateLines(pr), m.stackLines(pr)} {
+	for _, block := range [][]string{m.stateLines(pr), m.stackLines(pr), m.badgeLines(pr)} {
 		if len(block) > 0 {
 			out = append(out, "")
 			out = append(out, block...)

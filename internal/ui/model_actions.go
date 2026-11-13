@@ -1,18 +1,15 @@
 package ui
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/barspielberg/pr-pile/internal/github"
+	"github.com/barspielberg/pr-pile/internal/shelltmpl"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -153,63 +150,35 @@ func actionResult(msg actionDoneMsg) string {
 }
 
 func (m Model) renderAction(tmpl string, pr github.PR) (string, error) {
-	if err := rejectFields(tmpl, pluralActionFields); err != nil {
-		return "", err
-	}
-	t, err := template.New("action").Parse(tmpl)
-	if err != nil {
+	if err := shelltmpl.Check(tmpl, false); err != nil {
 		return "", err
 	}
 	repo, repoPath, err := m.actionRepo(tmpl, pr)
 	if err != nil {
 		return "", err
 	}
-	return executeAction(t, actionTemplateData{Number: pr.Number, Repo: repo, RepoPath: repoPath, pr: &pr})
+	return shelltmpl.Render(tmpl, false, shelltmpl.NewData(pr, repo, repoPath))
 }
 
 // renderMultiAction renders a `multi: true` action once for the whole
 // selection. The plural fields carry the same GitHub data as the singular
 // ones, so every element passes the same check.
 func (m Model) renderMultiAction(tmpl string, prs []github.PR) (string, error) {
-	if err := rejectFields(tmpl, singularActionFields); err != nil {
-		return "", err
-	}
-	t, err := template.New("action").Parse(tmpl)
-	if err != nil {
+	if err := shelltmpl.Check(tmpl, true); err != nil {
 		return "", err
 	}
 	repo, repoPath, err := m.actionRepo(tmpl, prs[0])
 	if err != nil {
 		return "", err
 	}
-	if templateMentionsAny(tmpl, repoBoundFields) {
+	if shelltmpl.MentionsAny(tmpl, shelltmpl.RepoBoundFields) {
 		for _, pr := range prs[1:] {
 			if !strings.EqualFold(pr.Repo, repo) {
 				return "", fmt.Errorf("the selection spans repos, and this action works in one")
 			}
 		}
 	}
-	var numbers []string
-	for _, pr := range prs {
-		numbers = append(numbers, fmt.Sprint(pr.Number))
-	}
-	return executeAction(t, multiActionTemplateData{
-		Numbers: strings.Join(numbers, " "), Repo: repo, RepoPath: repoPath, prs: &prs,
-	})
-}
-
-// executeAction surfaces a refused field as its own message, not wrapped in
-// the template's "executing action at <.Branch>: error calling Branch:".
-func executeAction(t *template.Template, data any) (string, error) {
-	var b strings.Builder
-	if err := t.Execute(&b, data); err != nil {
-		var refused fieldError
-		if errors.As(err, &refused) {
-			return "", refused
-		}
-		return "", err
-	}
-	return b.String(), nil
+	return shelltmpl.Render(tmpl, true, shelltmpl.NewMultiData(prs, repo, repoPath))
 }
 
 // actionRepo is the Repo and RepoPath an action sees for a PR. Both come from
@@ -221,143 +190,10 @@ func (m Model) actionRepo(tmpl string, pr github.PR) (repo, repoPath string, err
 	if !ok {
 		return "", "", fmt.Errorf("%s is not in repos", terminalText(pr.Repo))
 	}
-	if r.Path == "" && templateMentions(tmpl, "RepoPath") {
+	if r.Path == "" && shelltmpl.Mentions(tmpl, "RepoPath") {
 		return "", "", fmt.Errorf(".RepoPath needs a path for %s in repos", r.Tag())
 	}
 	return r.Name, r.Path, nil
-}
-
-// The GitHub fields are methods, not fields: the template calls them however
-// it spells the access ($.Branch, a with block, a define), so the check runs on
-// the value itself instead of on the template text. Only an action that uses a
-// field can be refused by it. The raw PR sits behind a pointer because fmt
-// prints a nested pointer as an address, so {{.}} or printf "%v" cannot dump it.
-type actionTemplateData struct {
-	Number         int
-	Repo, RepoPath string
-	pr             *github.PR
-}
-
-func (d actionTemplateData) Branch() (string, error) { return checkRef("branch", d.pr.HeadRefName) }
-func (d actionTemplateData) Base() (string, error)   { return checkRef("base", d.pr.BaseRefName) }
-func (d actionTemplateData) URL() (string, error)    { return checkURL(d.pr.URL) }
-func (d actionTemplateData) Author() (string, error) { return checkLogin(d.pr.Author) }
-func (d actionTemplateData) Title() (string, error) {
-	return "", errTitleRemoved(".Title", "gh pr view {{.Number}} --repo {{.Repo}} --json title --jq .title")
-}
-
-type multiActionTemplateData struct {
-	Numbers        string
-	Repo, RepoPath string
-	prs            *[]github.PR
-}
-
-func (d multiActionTemplateData) Branches() (string, error) {
-	return d.each(func(pr github.PR) (string, error) { return checkRef("branch", pr.HeadRefName) })
-}
-
-func (d multiActionTemplateData) Bases() (string, error) {
-	return d.each(func(pr github.PR) (string, error) { return checkRef("base", pr.BaseRefName) })
-}
-
-func (d multiActionTemplateData) URLs() (string, error) {
-	return d.each(func(pr github.PR) (string, error) { return checkURL(pr.URL) })
-}
-
-func (d multiActionTemplateData) Authors() (string, error) {
-	return d.each(func(pr github.PR) (string, error) { return checkLogin(pr.Author) })
-}
-
-func (d multiActionTemplateData) Titles() (string, error) {
-	return "", errTitleRemoved(".Titles", "gh pr view on each of {{.Numbers}}")
-}
-
-func (d multiActionTemplateData) each(field func(github.PR) (string, error)) (string, error) {
-	values := make([]string, 0, len(*d.prs))
-	for _, pr := range *d.prs {
-		v, err := field(pr)
-		if err != nil {
-			return "", err
-		}
-		values = append(values, v)
-	}
-	return strings.Join(values, " "), nil
-}
-
-// The GitHub fields are written by whoever opened the PR, and the rendered
-// line runs through sh -c. Rather than quote them, which only holds where the
-// placeholder sits outside any quotes and nothing re-parses the line, each must
-// match a pattern with no shell syntax in it. A value that passes is inert in
-// any position. The first character is never "-", so none reads as an option.
-var (
-	safeRef   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/+@,-]*$`)
-	safeLogin = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
-	safePRURL = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+/pull/[0-9]+$`)
-)
-
-type fieldError string
-
-func (e fieldError) Error() string { return string(e) }
-
-func checkRef(what, ref string) (string, error) {
-	if !safeRef.MatchString(ref) {
-		return "", fieldError(fmt.Sprintf("refusing %s name %s: only letters, digits and . _ / + @ , - are passed to actions", what, terminalText(strconv.Quote(ref))))
-	}
-	return ref, nil
-}
-
-func checkLogin(login string) (string, error) {
-	if !safeLogin.MatchString(login) {
-		return "", fieldError("refusing author " + terminalText(strconv.Quote(login)) + ": not a GitHub login")
-	}
-	return login, nil
-}
-
-func checkURL(url string) (string, error) {
-	if !safePRURL.MatchString(url) {
-		return "", fieldError("refusing URL " + terminalText(strconv.Quote(url)) + ": not a GitHub PR URL")
-	}
-	return url, nil
-}
-
-// The title is free text, so no pattern can make it safe to splice into a
-// command. A script that needs it can ask gh for it.
-func errTitleRemoved(field, instead string) error {
-	return fieldError(field + " is no longer available to actions; use " + instead)
-}
-
-// A singular template in a multi action (or the reverse) is an error rather
-// than an empty expansion: `{{.URL}}` in a multi action would render nothing at
-// all, and an action that silently does the wrong thing is worse than one that
-// refuses. Checked when the action runs, not at startup -- these validators
-// live here and config cannot import ui.
-var singularActionFields = []string{"Number", "Branch", "Base", "URL", "Author", "Title"}
-var pluralActionFields = []string{"Numbers", "Branches", "Bases", "URLs", "Authors", "Titles"}
-
-// rejectFields fails if the template mentions any of the given fields.
-func rejectFields(tmpl string, fields []string) error {
-	for _, field := range fields {
-		if templateMentions(tmpl, field) {
-			return fmt.Errorf("field %s does not belong in this action", "."+field)
-		}
-	}
-	return nil
-}
-
-// templateMentions reports whether a template uses a given field, matching the
-// whole name so .URL does not answer for .URLs.
-// repoBoundFields only mean something inside one repo: #12 or a branch name
-// names a different PR, or nothing, in another. URLs, authors and titles do not
-// depend on where the command runs.
-var repoBoundFields = []string{"Repo", "RepoPath", "Number", "Numbers", "Branch", "Branches", "Base", "Bases"}
-
-func templateMentionsAny(tmpl string, fields []string) bool {
-	for _, f := range fields {
-		if templateMentions(tmpl, f) {
-			return true
-		}
-	}
-	return false
 }
 
 // actionDir is where an action runs: the PR's checkout when its repo has a
@@ -378,8 +214,8 @@ func (m Model) actionDir(tmpl string, prs []github.PR) (string, error) {
 	if r.Path != "" {
 		return expandHome(r.Path), nil
 	}
-	if m.multiRepo() && templateMentionsAny(tmpl, repoBoundFields) &&
-		!templateMentions(tmpl, "Repo") && !templateMentions(tmpl, "RepoPath") {
+	if m.multiRepo() && shelltmpl.MentionsAny(tmpl, shelltmpl.RepoBoundFields) &&
+		!shelltmpl.Mentions(tmpl, "Repo") && !shelltmpl.Mentions(tmpl, "RepoPath") {
 		return "", fmt.Errorf("set a path for %s in repos, so this runs in its checkout", r.Tag())
 	}
 	return "", nil
@@ -397,29 +233,6 @@ func expandHome(path string) string {
 		return path
 	}
 	return filepath.Join(home, rest)
-}
-
-func templateMentions(tmpl, field string) bool {
-	for offset := 0; ; {
-		rel := strings.Index(tmpl[offset:], "{{")
-		if rel < 0 {
-			return false
-		}
-		start := offset + rel
-		closeRel := strings.Index(tmpl[start+2:], "}}")
-		if closeRel < 0 {
-			return false
-		}
-		end := start + 2 + closeRel
-		for _, token := range strings.FieldsFunc(tmpl[start+2:end], func(r rune) bool {
-			return r == ' ' || r == '\t' || r == '(' || r == ')' || r == '|'
-		}) {
-			if token == "."+field {
-				return true
-			}
-		}
-		offset = end + 2
-	}
 }
 
 type tailWriter struct {

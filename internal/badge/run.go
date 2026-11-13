@@ -1,0 +1,179 @@
+package badge
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// Job is one script run for one badge on one PR.
+type Job struct {
+	Key     Key
+	Line    string // rendered, ready for sh -c
+	Dir     string
+	Timeout time.Duration
+}
+
+type Result struct {
+	Key  Key
+	Text string
+	Err  error
+}
+
+// outputCap is far more than a badge can draw. Past it the script's output is
+// read and thrown away rather than left unread, which would block it, or cut
+// off, which would kill it with SIGPIPE before it exits.
+const outputCap = 4096
+
+// waitDelay bounds how long Run waits for the script's output to close after
+// it exits or is killed. A background child that inherited stdout would
+// otherwise hold Run open past the timeout for as long as it lives.
+const waitDelay = 500 * time.Millisecond
+
+// Run runs one job to completion. It never touches the terminal: the script
+// gets its own session, so ssh, git or gh cannot prompt on /dev/tty over the
+// board, and a timeout or a cancelled ctx kills the whole process group, not
+// only sh.
+func Run(ctx context.Context, job Job) Result { return runJob(ctx, job, nil) }
+
+func runJob(ctx context.Context, job Job, groups *Runner) Result {
+	ctx, cancel := context.WithTimeout(ctx, job.Timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", job.Line)
+	cmd.Dir = job.Dir
+	// GIT_OPTIONAL_LOCKS=0 keeps a git status badge off index.lock, where a
+	// run across many rows would make the user's own commit fail.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
+	cmd.WaitDelay = waitDelay
+
+	var stdout capped
+	stdout.limit = outputCap
+	var stderr capped
+	stderr.limit = outputCap
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+
+	err := cmd.Start()
+	if err == nil {
+		if groups != nil && !groups.track(cmd.Process.Pid) {
+			killGroup(cmd.Process.Pid)
+		}
+		err = cmd.Wait()
+		// Wait (including WaitDelay) only reaps the shell and closes pipes.
+		// Its ordinary background children still belong to this job, even
+		// when they redirected both outputs. Kill them before forgetting the
+		// group, while preserving the shell's successful answer below.
+		killGroup(cmd.Process.Pid)
+		if groups != nil {
+			groups.untrack(cmd.Process.Pid)
+		}
+	}
+	// WaitDelay reports an error even for a script that answered and exited 0
+	// while a child it left behind still held stdout. The answer stands.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
+	}
+	switch {
+	case ctx.Err() == context.DeadlineExceeded:
+		return Result{Key: job.Key, Err: errors.New("timed out after " + job.Timeout.String())}
+	case ctx.Err() != nil:
+		return Result{Key: job.Key, Err: ctx.Err()}
+	case err != nil:
+		if line := lastLine(stderr.buf.String()); line != "" {
+			return Result{Key: job.Key, Err: errors.New(Clean([]byte(line)))}
+		}
+		return Result{Key: job.Key, Err: err}
+	}
+	return Result{Key: job.Key, Text: Clean(stdout.buf.Bytes())}
+}
+
+func lastLine(s string) string {
+	s = strings.TrimRight(s, "\r\n")
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		return s[i+1:]
+	}
+	return s
+}
+
+// capped keeps the first limit bytes and accepts the rest unread.
+type capped struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func (c *capped) Write(p []byte) (int, error) {
+	if room := c.limit - c.buf.Len(); room > 0 {
+		c.buf.Write(p[:min(room, len(p))])
+	}
+	return len(p), nil
+}
+
+// killGroup kills every process in the script's group. One killpg is not
+// enough: it is not atomic against fork, so a shell woken by its child's death
+// can fork the next command before its own SIGKILL lands, and that command
+// lands outside the sweep. Repeat until the group is empty.
+func killGroup(pid int) error {
+	err := syscall.Kill(-pid, syscall.SIGKILL)
+	for i := 0; i < 20 && syscall.Kill(-pid, 0) == nil; i++ {
+		time.Sleep(5 * time.Millisecond)
+		syscall.Kill(-pid, syscall.SIGKILL)
+	}
+	return err
+}
+
+// Runner runs jobs and can stop them all at once. Cancelling a context is not
+// enough on the way out: exec kills on its own goroutine, and pile can exit
+// before that runs, leaving every script in its own session to finish alone.
+type Runner struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	mu      sync.Mutex
+	groups  map[int]bool
+	stopped bool
+}
+
+func NewRunner() *Runner {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Runner{ctx: ctx, cancel: cancel, groups: map[int]bool{}}
+}
+
+func (r *Runner) Run(job Job) Result { return runJob(r.ctx, job, r) }
+
+// Stop kills every running script's group before it returns.
+func (r *Runner) Stop() {
+	r.cancel()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stopped = true
+	for pid := range r.groups {
+		killGroup(pid)
+	}
+}
+
+// track reports false once Stop has run, so a script that started as pile
+// was quitting is killed rather than missed.
+func (r *Runner) track(pid int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stopped {
+		return false
+	}
+	r.groups[pid] = true
+	return true
+}
+
+func (r *Runner) untrack(pid int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.groups, pid)
+}

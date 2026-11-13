@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/barspielberg/pr-pile/internal/shelltmpl"
 	"gopkg.in/yaml.v3"
 )
 
@@ -30,6 +32,18 @@ type Rule struct {
 	// Repos narrows the rule to these repos, by label. Empty means every
 	// declared repo.
 	Repos []string `yaml:"repos"`
+	// Badges names the badges this rule's rows show. Left out, a rule shows
+	// every badge; `badges: []` shows none, for a rule whose PRs are not
+	// worth a script run each.
+	Badges *[]string `yaml:"badges"`
+}
+
+// ShowsBadge reports whether the rule's rows draw the named badge.
+func (r Rule) ShowsBadge(name string) bool {
+	if r.Badges == nil {
+		return true
+	}
+	return slices.Contains(*r.Badges, name)
 }
 
 // Repo is one repo the board reads. Every repo is declared here rather than
@@ -67,12 +81,64 @@ type Action struct {
 	Multi bool `yaml:"multi"`
 }
 
+// Badge is a shell command whose output is drawn on every row it applies to,
+// after the title. It runs off the UI goroutine and its answer is cached for
+// TTL, so a slow script costs a late badge, never a slow board.
+type Badge struct {
+	Name string `yaml:"name"`
+	// Run takes the action template fields. The output's first line is the
+	// badge; empty output draws nothing.
+	Run string `yaml:"run"`
+	// Color is one of the board's own tokens, so a badge follows the theme
+	// and NO_COLOR like everything else.
+	Color string `yaml:"color"`
+	// Side is left, right after the title, or right, just before the author.
+	Side     string        `yaml:"side"`
+	MaxWidth int           `yaml:"max_width"`
+	TTL      time.Duration `yaml:"ttl"`
+	Timeout  time.Duration `yaml:"timeout"`
+}
+
+// WithDefaults fills every field left out of the config.
+func (b Badge) WithDefaults() Badge {
+	if b.Color == "" {
+		b.Color = "muted"
+	}
+	if b.Side == "" {
+		b.Side = "left"
+	}
+	if b.MaxWidth == 0 {
+		b.MaxWidth = 20
+	}
+	if b.TTL == 0 {
+		b.TTL = 5 * time.Minute
+	}
+	if b.Timeout == 0 {
+		b.Timeout = 10 * time.Second
+	}
+	return b
+}
+
+var badgeColors = map[string]bool{"fg": true, "muted": true, "ok": true, "attention": true, "error": true, "accent": true}
+
 type Config struct {
 	Repos   []Repo        `yaml:"repos"`
 	Refresh time.Duration `yaml:"refresh"`
 	Rules   []Rule        `yaml:"rules"`
 	Actions []Action      `yaml:"actions"`
-	Watch   Watch         `yaml:"watch"`
+	Badges  []Badge       `yaml:"badges"`
+	// BadgeWorkers caps how many badge scripts run at once. Zero means the
+	// default, so a config written before badges needs no new key.
+	BadgeWorkers int   `yaml:"badge_workers"`
+	Watch        Watch `yaml:"watch"`
+}
+
+// Workers is BadgeWorkers with the default filled in.
+func (c Config) Workers() int {
+	if c.BadgeWorkers == 0 {
+		return 4
+	}
+	return c.BadgeWorkers
 }
 
 // Watch configures how `m` announces changes. It has no interval of its own:
@@ -172,6 +238,20 @@ rules:
 #     name: review
 #     run: tuicr pr {{.Number}}
 #     mode: suspend     # hand over the terminal; default is background
+
+# Badges show a script's answer on each row, after the title: a ticket's
+# status, a deploy, a dirty worktree. run takes the action fields above and
+# runs in the background; its first line of output is the badge. A rule can
+# list the badges it shows with badges: [jira], or none with badges: [].
+# badges:
+#   - name: jira
+#     run: jira-status {{.Branch}}
+#     color: accent     # fg, muted (default), ok, attention, error, accent
+#     side: left        # left (default) after the title, or right
+#     max_width: 12     # default 20
+#     ttl: 10m          # how long an answer is kept; default 5m
+#     timeout: 5s       # default 10s
+# badge_workers: 4      # badge scripts that run at once
 `
 
 // Path follows the XDG convention rather than os.UserConfigDir, which on macOS
@@ -312,6 +392,16 @@ func (c Config) Validate() error {
 				return fmt.Errorf("rule %q: no repo is labelled %q", r.Name, tag)
 			}
 		}
+		if r.Badges != nil {
+			for _, name := range *r.Badges {
+				if !slices.ContainsFunc(c.Badges, func(b Badge) bool { return b.Name == name }) {
+					return fmt.Errorf("rule %q: no badge is named %q", r.Name, name)
+				}
+			}
+		}
+	}
+	if err := c.validateBadges(); err != nil {
+		return err
 	}
 	seen := make(map[string]bool, len(c.Actions))
 	for i, a := range c.Actions {
@@ -358,6 +448,46 @@ var reservedActionKeys = map[string]bool{
 	"j": true, "down": true, "k": true, "up": true, "l": true, "right": true,
 	"h": true, "left": true, "g": true, "home": true, "G": true, "end": true,
 	"ctrl+d": true, "ctrl+u": true, "pgdown": true, "pgup": true,
+}
+
+// validateBadges refuses at startup what would otherwise fail on every row at
+// every TTL. A GitHub value a badge refuses can only be known per PR.
+func (c Config) validateBadges() error {
+	if c.BadgeWorkers < 0 {
+		return fmt.Errorf("badge_workers must be at least 1")
+	}
+	seen := make(map[string]bool, len(c.Badges))
+	for i, b := range c.Badges {
+		if strings.TrimSpace(b.Name) == "" {
+			return fmt.Errorf("badge %d: name is required", i+1)
+		}
+		if seen[b.Name] {
+			return fmt.Errorf("badge %q is defined twice", b.Name)
+		}
+		seen[b.Name] = true
+		if strings.TrimSpace(b.Run) == "" {
+			return fmt.Errorf("badge %q: run is required", b.Name)
+		}
+		if err := shelltmpl.Check(b.Run, false); err != nil {
+			return fmt.Errorf("badge %q: %w", b.Name, err)
+		}
+		if shelltmpl.Mentions(b.Run, "Title") {
+			return fmt.Errorf("badge %q: .Title is not available; use gh pr view {{.Number}} --repo {{.Repo}} --json title --jq .title", b.Name)
+		}
+		if b.Color != "" && !badgeColors[b.Color] {
+			return fmt.Errorf("badge %q: color must be fg, muted, ok, attention, error or accent", b.Name)
+		}
+		if b.Side != "" && b.Side != "left" && b.Side != "right" {
+			return fmt.Errorf("badge %q: side must be left or right", b.Name)
+		}
+		if b.MaxWidth < 0 {
+			return fmt.Errorf("badge %q: max_width must be at least 1", b.Name)
+		}
+		if b.TTL < 0 || b.Timeout < 0 {
+			return fmt.Errorf("badge %q: ttl and timeout cannot be negative", b.Name)
+		}
+	}
+	return nil
 }
 
 func (c Config) validateRepos() error {

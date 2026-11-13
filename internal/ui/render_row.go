@@ -107,7 +107,18 @@ func (m Model) renderRow(r board.Row, selected, showAuthor bool) string {
 	}
 	b.WriteString(paint(blockerStyle).Render(blocker))
 	b.WriteString(paint(fgStyle).Render(" "))
-	b.WriteString(m.renderTitle(r, titleStyle, paint, tw, cellHits(spans, cells.title)))
+	l := m.layoutTitleCell(r, tw, showAuthor)
+	b.WriteString(m.renderTitle(r, titleStyle, paint, l.titleW, cellHits(spans, cells.title)))
+	for i, bd := range l.badges() {
+		if i == len(l.left) {
+			b.WriteString(paint(fgStyle).Render(strings.Repeat(" ", l.gap)))
+		}
+		b.WriteString(paint(fgStyle).Render(" "))
+		b.WriteString(hitRuns(bd.text, cellHits(spans, cells.badges[i]), bd.style, paint))
+	}
+	if len(l.right) == 0 && l.gap > 0 {
+		b.WriteString(paint(fgStyle).Render(strings.Repeat(" ", l.gap)))
+	}
 	if t == tierFull {
 		if showAuthor {
 			b.WriteString(paint(fgStyle).Render(" "))

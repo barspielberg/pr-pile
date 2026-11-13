@@ -54,12 +54,13 @@ export default defineConfig({
               label: 'Actions',
               items: ['guide/actions', 'guide/actions/worktree', 'guide/actions/review-tui'],
             },
+            'guide/badges',
             'guide/team-board',
           ],
         },
         {
           label: 'Reference',
-          items: ['reference/config', 'reference/rules', 'reference/actions', 'reference/keys', 'reference/cli'],
+          items: ['reference/config', 'reference/rules', 'reference/actions', 'reference/badges', 'reference/keys', 'reference/cli'],
         },
         {
           label: 'Design',

@@ -123,6 +123,12 @@ func (m Model) footer(spin string) string {
 		// The query outlives the prompt, so the legend has to say what the two
 		// keys that only work now actually do.
 		left = "  j/k move · l/h section · enter open · d detail · y copy · n/N next match · esc clear"
+	default:
+		// In place of the key hints only, so anything the user just did
+		// still owns the line.
+		if failing := m.badgeFailure(); failing != "" {
+			left = "  " + failing
+		}
 	}
 	if m.status != "" {
 		left = "  " + m.status

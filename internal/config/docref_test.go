@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-// TestReferencePagesDocumentEveryKey: every `yaml:` tag on Config, Rule and Action must appear as a `code` span on its reference
+// TestReferencePagesDocumentEveryKey: every `yaml:` tag on Config, Rule,
+// Action and Badge must appear as a `code` span on its reference
 // page. A renamed or added key then fails here instead of drifting out of the
 // docs. The tags are read off the structs with reflection, so the test cannot
 // fall out of step with config.go.
@@ -24,6 +25,7 @@ func TestReferencePagesDocumentEveryKey(t *testing.T) {
 		{"Watch", reflect.TypeOf(Watch{}), "reference/config.md"},
 		{"Rule", reflect.TypeOf(Rule{}), "reference/rules.md"},
 		{"Action", reflect.TypeOf(Action{}), "reference/actions.md"},
+		{"Badge", reflect.TypeOf(Badge{}), "reference/badges.md"},
 	}
 	for _, tc := range cases {
 		body, err := os.ReadFile(filepath.Join(root, "docs", "src", "content", "docs", tc.page))

@@ -15,6 +15,8 @@ for the fields of those lists.
 | `refresh` | duration | `3m` | Refetch interval; `0` disables automatic refresh. |
 | `rules` | list | four starter rules | Ordered sections with first-match-wins bucketing. |
 | `actions` | list | empty | Shell commands bound to keys. |
+| `badges` | list | empty | Shell commands whose output is drawn on each row. See [Badges](../badges/). |
+| `badge_workers` | int | `4` | How many badge scripts run at once. |
 | `watch` | object | terminal notifications | How watched PR changes are announced. |
 
 ## Repositories

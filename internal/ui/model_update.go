@@ -42,12 +42,22 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.board.Apply(msg.result)
 		m.reconcileDetailIdentity()
+		badges := m.dispatchBadges(time.Now())
 		if !m.board.Loading() {
 			m.fetching = false
 			m.clampCursor()
-			return m, m.refreshTick()
+			return m, tea.Batch(m.refreshTick(), badges)
 		}
-		return m, nil
+		return m, badges
+
+	case badgeDoneMsg:
+		return m.applyBadge(msg)
+
+	case badgeTimerMsg:
+		if m.badges == nil || msg.seq != m.badges.timerSeq {
+			return m, nil
+		}
+		return m, m.dispatchBadges(time.Now())
 
 	case tickMsg:
 		if msg.seq != m.refreshSeq {

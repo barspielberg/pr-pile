@@ -17,6 +17,7 @@ import (
 // indexes by rune.
 type searchCells struct {
 	repo, number, title, author [2]int
+	badges                      [][2]int // in draw order
 }
 
 // searchText is exactly what the row draws, in draw order: the repo label when
@@ -52,7 +53,18 @@ func (m Model) searchText(r board.Row, showAuthor bool) (string, searchCells) {
 	}
 	cells.number = add(pad("#"+fmt.Sprint(r.PR.Number), numberWidth))
 	add(" ")
-	cells.title = add(pad(clip(r.PR.Title, tw), tw))
+	l := m.layoutTitleCell(r, tw, showAuthor)
+	cells.title = add(pad(clip(r.PR.Title, l.titleW), l.titleW))
+	for i, bd := range l.badges() {
+		if i == len(l.left) {
+			add(strings.Repeat(" ", l.gap))
+		}
+		add(" ")
+		cells.badges = append(cells.badges, add(bd.text))
+	}
+	if len(l.right) == 0 && l.gap > 0 {
+		add(strings.Repeat(" ", l.gap))
+	}
 	if m.showsAuthor(showAuthor) {
 		add(" ")
 		cells.author = add(padLeft(initials(r.PR.Author), authorWidth))
